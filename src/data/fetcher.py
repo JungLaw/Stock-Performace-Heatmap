@@ -1,10 +1,17 @@
+"""
+Stock Data Fetcher - Enhanced from original main.py
+
+Handles fetching historical and real-time stock data from yfinance
+and populating the SQLite database.
+"""
+
 import sqlite3
 import pandas as pd
 import yfinance as yf
 from datetime import date
 
 # --- Configuration for Initial Data Population ---
-DB_FILE = "stock_data.db"
+DB_FILE = "../../data/stock_data.db"
 TABLE_NAME = "daily_prices"
 TICKERS_TO_POPULATE = ["NVDA", "META", "MSFT", "IYK", "IYC", "MCHI", "EWJ","AMZN", "AAPL", "GOOGL", "SPY", "QQQ", "IYE", "IYF"]
 START_DATE = "2025-01-01"     # "2024-01-01"

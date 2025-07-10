@@ -1,7 +1,14 @@
+"""
+Database Utilities - Enhanced from original utils_database.py
+
+Utility functions for interacting with the SQLite database
+containing historical stock data.
+"""
+
 import sqlite3
 import pandas as pd
 
-DB_FILE = "stock_data.db"
+DB_FILE = "../../data/stock_data.db"
 TABLE_NAME = "daily_prices"
 
 # Add this temporary code to see your current table structure
