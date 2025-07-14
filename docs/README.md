@@ -3,7 +3,7 @@
 ## Planning Documents
 - `planning/PLANNING.md` - High-level project strategy and architecture
 - `planning/TASKS.md` - Detailed task breakdown and development roadmap
-- `planning/PRD_v1.0_original.md` - draft product requirements
+- `planning/PRD_v1.0_original.md` - Draft product requirements
 - `planning/PRD_v2.0_revised.md` - Enhanced product requirements
 - `planning/PRD.md` - Finalized product requirements document
 - `planning/EVOLUTION_PLAN.md` - Migration strategy from stock-screener

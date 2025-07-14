@@ -1,8 +1,8 @@
 # Stock Performance Heatmap Dashboard - Tasks
 
-## 🎯 PROJECT STATUS: CORE MVP COMPLETED 🎉
+## 🏆 PROJECT STATUS: CORE MVP DELIVERED + CRITICAL GAPS IDENTIFIED
 
-**Major Milestone Achieved**: Functional Finviz-style heatmap dashboard
+**Major Achievement**: Functional Finviz-style heatmap dashboard completed (July 2025)
 
 ### ✅ COMPLETED CORE FEATURES:
 - **Infrastructure**: Complete modular project structure
@@ -11,8 +11,13 @@
 - **Interactive UI**: Full Streamlit dashboard with controls and data tables
 - **Asset Groups**: Country ETFs (52), Sector ETFs (30), Custom tickers
 - **Real-time Data**: yfinance integration with error handling
+- **Documentation**: README, planning docs, test suite
 
-### 🚀 READY TO RUN:
+### 🚨 CRITICAL ISSUES TO RESOLVE:
+1. **Database Integration Gap**: PerformanceCalculator bypasses 19K+ cached records
+2. **Limited Ticker Management**: Basic text input instead of flexible multi-level selection
+
+### 🚀 READY TO RUN (Current MVP):
 ```bash
 cd C:\Users\lawre\Projects\stock-heatmap-dashboard
 streamlit run streamlit_app.py
@@ -20,10 +25,127 @@ streamlit run streamlit_app.py
 
 ---
 
-## Critical Path Tasks (Week 1-2) - COMPLETED
+## IMMEDIATE PRIORITY TASKS (Next Session)
 
-### 🚀 Project Setup & Environment
-**Priority: P0 (Blocking)**
+### 🎯 TASK A: Fix Database Integration (CRITICAL PRIORITY)
+**Problem**: PerformanceCalculator calls yfinance directly, ignoring 19K+ cached historical records
+**Impact**: Unnecessary API calls, slow performance, rate limit risk
+**Files**: `src/calculations/performance.py`
+**Solution**: Implement database-first lookup pattern
+**Expected Improvement**: 89% API call reduction for cached tickers
+
+#### Implementation Pattern Agreed:
+```python
+def get_historical_price(ticker, date):
+    1. Check database for ticker + date
+    2. If found: return cached price (no API call)
+    3. If missing: fetch from yfinance
+    4. Auto-save fetched data to database
+    5. Return price
+```
+
+### 🎯 TASK B: Enhanced Ticker Management UI (HIGH PRIORITY)
+**Problem**: Basic text area input limits user flexibility
+**Files**: `streamlit_app.py` (sidebar controls section)
+**Solution**: Three-level ticker management system
+
+#### Three-Level UI Architecture Agreed:
+1. **Level 1**: Checkbox selection from predefined ETF lists (Country/Sector)
+2. **Level 2**: Add new tickers to permanent predefined lists (persistent across sessions)
+3. **Level 3**: Session-only custom tickers (temporary analysis)
+
+---
+
+## DETAILED TASK BREAKDOWN
+
+### Priority A Tasks - Database Integration
+
+#### Task A.1: Database-First Historical Price Lookup ✅ COMPLETED
+**File**: `src/calculations/performance.py`
+**Problem**: Current `get_historical_price()` calls yfinance directly, bypassing database
+**Solution Implemented**:
+- [x] Add SQLite connection and query methods
+- [x] Implement database-first lookup in `get_historical_price()`
+- [x] Add auto-save for newly fetched historical data
+- [x] Preserve current yfinance fallback for missing data
+- [x] Test with existing 14 tickers to verify database usage
+- [x] Add comprehensive logging for database vs API usage
+
+#### Task A.2: Current Price Strategy Optimization ✅ COMPLETED
+**File**: `src/calculations/performance.py`
+**Current**: Always calls yfinance for current prices (correct approach)
+**Enhancement Implemented**: Added session-level current price caching (15 minutes)
+- [x] Keep current yfinance approach as primary
+- [x] Add optional session-level current price cache
+- [x] Implement cache expiration logic
+
+#### Task A.3: Database Growth Strategy ✅ COMPLETED
+**Files**: `src/calculations/performance.py`, `src/data/database.py`
+**Goal**: Expand database coverage as new tickers are analyzed
+**Implementation**: Auto-save mechanism for historical data
+- [x] Auto-save historical data for new tickers (like BABA)
+- [x] Do NOT save current prices immediately
+- [x] Add mechanism to save daily closes "next day" (complete volume data)
+- [x] Test database growth with new ticker requests
+
+### Priority B Tasks - Enhanced Ticker Management UI
+
+#### Task B.1: Multi-Level Sidebar Architecture
+**File**: `streamlit_app.py` (sidebar controls section)
+**Current**: Basic text area for custom tickers
+**Target**: Three-level ticker management system
+
+**Level 1 - Predefined List Selection**:
+- [ ] Implement collapsible checkbox interface for Country ETFs (52)
+- [ ] Implement collapsible checkbox interface for Sector ETFs (30)
+- [ ] Add "Select All" / "Deselect All" functionality
+- [ ] Add search/filter within predefined lists
+
+**Level 2 - Permanent List Expansion**:
+- [ ] Add "Add new ticker to Country ETFs" input + button
+- [ ] Add "Add new ticker to Sector ETFs" input + button
+- [ ] Implement ticker validation before adding
+- [ ] Auto-select newly added tickers for current analysis
+- [ ] Save additions to `src/config/assets.py` or session state
+
+**Level 3 - Session Custom Tickers**:
+- [ ] Implement tag-style removable ticker list
+- [ ] Add individual ticker add/remove functionality
+- [ ] Keep separate from permanent predefined lists
+- [ ] Session-only persistence (not saved permanently)
+
+#### Task B.2: UI Layout and UX Polish
+**File**: `streamlit_app.py`
+**Focus**: Clean, intuitive three-level interface
+- [ ] Organize sidebar with clear visual separation
+- [ ] Add help text explaining each level
+- [ ] Implement collapsible sections to prevent overwhelming
+- [ ] Add ticker count displays and validation feedback
+- [ ] Test with maximum ticker loads (52 Country ETFs)
+
+### Priority C Tasks - Code Quality and Testing
+
+#### Task C.1: Database Integration Testing
+**File**: `test_dashboard.py`
+**Goal**: Validate database-first approach works correctly
+- [ ] Test historical price lookup from database
+- [ ] Test yfinance fallback for missing data
+- [ ] Test auto-save functionality for new historical data
+- [ ] Verify no regression in current price fetching
+- [ ] Performance test: compare API call counts before/after
+
+#### Task C.2: Enhanced UI Testing
+**File**: `test_dashboard.py` or manual testing
+**Goal**: Validate three-level ticker management
+- [ ] Test predefined list selection (Country/Sector ETFs)
+- [ ] Test permanent list expansion functionality
+- [ ] Test session custom ticker management
+- [ ] Test with maximum ticker counts
+- [ ] Validate ticker persistence across sessions
+
+---
+
+## COMPLETED TASKS (PRESERVED FOR REFERENCE)
 
 #### Task 1.1: Development Environment Setup ✅ COMPLETED
 - [x] Create new project directory structure

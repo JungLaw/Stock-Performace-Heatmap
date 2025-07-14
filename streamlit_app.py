@@ -19,7 +19,7 @@ src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import our modules
-from calculations.performance import PerformanceCalculator
+from calculations.performance import DatabaseIntegratedPerformanceCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import ASSET_GROUPS
 
@@ -30,7 +30,7 @@ def initialize_session_state():
     if 'last_update' not in st.session_state:
         st.session_state.last_update = None
     if 'calculator' not in st.session_state:
-        st.session_state.calculator = PerformanceCalculator()
+        st.session_state.calculator = DatabaseIntegratedPerformanceCalculator()
     if 'heatmap_generator' not in st.session_state:
         st.session_state.heatmap_generator = FinvizHeatmapGenerator()
 
@@ -143,36 +143,39 @@ def create_header():
                 )
 
 def fetch_performance_data(tickers, period):
-    """Fetch performance data with progress tracking"""
+    """Fetch performance data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching data for {len(tickers)} tickers..."):
         # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         calculator = st.session_state.calculator
-        performance_data = []
         
-        for i, ticker in enumerate(tickers):
-            status_text.text(f"Processing {ticker}... ({i+1}/{len(tickers)})")
+        # Use the group calculation method for better efficiency
+        status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
+        
+        try:
+            performance_data = calculator.calculate_performance_for_group(tickers, period)
             
-            try:
-                data = calculator.calculate_performance_for_ticker(ticker, period)
-                performance_data.append(data)
-            except Exception as e:
-                st.warning(f"Error processing {ticker}: {str(e)}")
-                # Add error entry
-                performance_data.append({
-                    'ticker': ticker,
-                    'current_price': None,
-                    'historical_price': None,
-                    'percentage_change': 0.0,
-                    'absolute_change': 0.0,
-                    'period': period,
-                    'error': True
-                })
+            # Show database usage statistics
+            summary = calculator.get_performance_summary(performance_data)
             
-            # Update progress
-            progress_bar.progress((i + 1) / len(tickers))
+            progress_bar.progress(1.0)
+            status_text.empty()
+            
+            # Display efficiency information
+            if summary['database_usage'] > 0:
+                st.success(
+                    f"✅ Data fetched successfully! "
+                    f"Database cache used for {summary['database_usage']}/{summary['valid_count']} tickers "
+                    f"({summary['database_usage']/summary['valid_count']*100:.0f}% cache hit rate)"
+                )
+            else:
+                st.info("ℹ️ Data fetched from yfinance (no database cache available)")
+            
+        except Exception as e:
+            st.error(f"Error fetching performance data: {str(e)}")
+            performance_data = []
         
         # Clear progress indicators
         progress_bar.empty()
