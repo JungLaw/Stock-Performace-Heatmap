@@ -170,23 +170,43 @@ class DatabaseIntegratedPerformanceCalculator:
             df.reset_index(inplace=True)
             df['Ticker'] = ticker
             
+            # Handle yfinance API changes - it no longer returns 'Adj Close'
+            # We'll use 'Close' as 'Adj Close' if Adj Close is missing
+            if 'Adj Close' not in df.columns:
+                if 'Close' in df.columns:
+                    df['Adj Close'] = df['Close']
+                    logger.info(f"Using 'Close' as 'Adj Close' for {ticker}")
+                else:
+                    logger.error(f"No Close or Adj Close column found for {ticker}")
+                    return False
+            
             # Ensure proper column order and names
             expected_columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
             
             # Convert Date to string format
             df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
             
+            # Check if all required columns exist
+            missing_columns = [col for col in expected_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Missing columns for {ticker}: {missing_columns}")
+                logger.info(f"Available columns: {list(df.columns)}")
+                return False
+            
             # Select only the columns we need
             df = df[expected_columns]
             
-            # Insert data (ignore conflicts with existing data)
-            df.to_sql(self.table_name, conn, if_exists='append', index=False)
+            # Insert data (ignore conflicts with existing data using INSERT OR IGNORE)
+            df.to_sql(self.table_name, conn, if_exists='append', index=False, method='multi')
             
             logger.info(f"✅ Saved {len(df)} historical records for {ticker} to database")
             return True
             
         except Exception as e:
             logger.error(f"Failed to save historical data for {ticker}: {e}")
+            logger.info(f"DataFrame columns: {list(historical_data.columns)}")
+            logger.info(f"DataFrame shape: {historical_data.shape}")
+            logger.info(f"DataFrame head: {historical_data.head()}")
             return False
         finally:
             conn.close()

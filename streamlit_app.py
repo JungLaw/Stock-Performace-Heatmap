@@ -10,9 +10,10 @@ Run with: streamlit run streamlit_app.py
 import streamlit as st
 import sys
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Add src to path for imports
 src_path = Path(__file__).parent / "src"
@@ -244,16 +245,17 @@ def display_summary_stats(performance_data):
                 f"({worst['percentage_change']:+.2f}%)"
             )
 
-def display_heatmap(performance_data, title):
+def display_heatmap(performance_data, title, asset_group=None):
     """Display the main heatmap visualization"""
     generator = st.session_state.heatmap_generator
     
-    # Create heatmap
+    # Create heatmap with asset group information
     fig = generator.create_treemap(
         performance_data=performance_data,
         title=title,
         width=1200,
-        height=700
+        height=700,
+        asset_group=asset_group
     )
     
     # Display with full width
@@ -347,7 +349,28 @@ def main():
         
         # Display heatmap
         st.subheader("🗺️ Performance Heatmap")
-        display_heatmap(performance_data, title)
+        
+        # Add baseline date info
+        baseline_date = None
+        if performance_data:
+            for item in performance_data:
+                if not item.get('error', False):
+                    period = item.get('period', '1d')
+                    
+                    if period == 'ytd':
+                        baseline_date = datetime(datetime.now().year, 1, 1).strftime('%m/%d/%y')
+                    else:
+                        # Calculate baseline date
+                        calculator = st.session_state.calculator
+                        days_back = calculator.TIME_PERIODS.get(period, {}).get('days', 1)
+                        target_date = datetime.now() - timedelta(days=days_back)
+                        baseline_date = target_date.strftime('%m/%d/%y')
+                    break
+        
+        if baseline_date:
+            st.caption(f"Baseline Date: {baseline_date}")
+        
+        display_heatmap(performance_data, title, controls['group'])
         
         # Display data table
         with st.expander("📋 Detailed Data Table", expanded=False):

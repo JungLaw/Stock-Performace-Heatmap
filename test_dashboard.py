@@ -12,7 +12,7 @@ sys.path.insert(0, str(src_path))
 def test_imports():
     """Test that all modules import correctly"""
     try:
-        from calculations.performance import PerformanceCalculator
+        from calculations.performance import DatabaseIntegratedPerformanceCalculator
         from visualization.heatmap import FinvizHeatmapGenerator
         from config.assets import ASSET_GROUPS
         print("✅ All imports successful")
@@ -68,7 +68,7 @@ def test_performance_calculation():
         return False
 
 def test_heatmap_generation():
-    """Test heatmap generation with mock data"""
+    """Test heatmap generation with mock data including display names"""
     try:
         from visualization.heatmap import FinvizHeatmapGenerator
         
@@ -77,7 +77,7 @@ def test_heatmap_generation():
         # Create mock performance data
         mock_data = [
             {
-                'ticker': 'AAPL',
+                'ticker': 'EWT',
                 'current_price': 150.0,
                 'historical_price': 145.0,
                 'percentage_change': 3.45,
@@ -87,7 +87,7 @@ def test_heatmap_generation():
                 'error': False
             },
             {
-                'ticker': 'GOOGL',
+                'ticker': 'EWJ',
                 'current_price': 2500.0,
                 'historical_price': 2520.0,
                 'percentage_change': -0.79,
@@ -99,14 +99,47 @@ def test_heatmap_generation():
         ]
         
         print("🔄 Testing heatmap generation...")
-        fig = generator.create_treemap(mock_data, title="Test Heatmap")
         
-        if fig:
-            print("✅ Heatmap generation successful")
-            return True
+        # Test with country asset group (should show display names)
+        print("\n🌏 Testing with Country ETFs (display names):")
+        fig_country = generator.create_treemap(
+            mock_data, 
+            title="Test Country Heatmap",
+            asset_group="country"
+        )
+        
+        if fig_country:
+            print("✅ Country heatmap generation successful")
+            print("   - Should display 'Taiwan' and 'Japan' instead of tickers")
         else:
-            print("❌ Heatmap generation failed")
-            return False
+            print("❌ Country heatmap generation failed")
+        
+        # Test with custom asset group (should show tickers)
+        print("\n💼 Testing with Custom tickers (ticker display):")
+        mock_custom_data = [{
+            'ticker': 'AAPL',
+            'current_price': 180.0,
+            'historical_price': 175.0,
+            'percentage_change': 2.86,
+            'absolute_change': 5.0,
+            'period': '1d',
+            'period_label': '1 Day',
+            'error': False
+        }]
+        
+        fig_custom = generator.create_treemap(
+            mock_custom_data,
+            title="Test Custom Heatmap", 
+            asset_group="custom"
+        )
+        
+        if fig_custom:
+            print("✅ Custom heatmap generation successful")
+            print("   - Should display 'AAPL' ticker as-is")
+        else:
+            print("❌ Custom heatmap generation failed")
+            
+        return True
             
     except Exception as e:
         print(f"❌ Heatmap generation error: {e}")

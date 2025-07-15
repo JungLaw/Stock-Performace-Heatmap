@@ -59,28 +59,34 @@ class FinvizHeatmapGenerator:
         return self.FINVIZ_COLORS['neutral']
     
     def prepare_treemap_data(self, performance_data: List[Dict], 
-                           sizing_method: str = 'equal') -> pd.DataFrame:
+                           sizing_method: str = 'equal',
+                           asset_group: str = None) -> pd.DataFrame:
         """
         Prepare data for treemap visualization
         
         Args:
             performance_data: List of performance dictionaries from PerformanceCalculator
             sizing_method: 'equal' for uniform sizes, 'market_cap' for proportional (future)
+            asset_group: Asset group name to determine display names ('country', 'sector', 'custom')
             
         Returns:
             DataFrame ready for Plotly treemap
         """
+        # Import here to avoid circular imports
+        from config.assets import get_display_name_for_ticker, should_use_display_names
+        
         # Filter out error cases
         valid_data = [p for p in performance_data if not p.get('error', False)]
         
         if not valid_data:
             # Return empty DataFrame with expected structure
             return pd.DataFrame(columns=[
-                'ticker', 'percentage_change', 'current_price', 'historical_price',
+                'ticker', 'display_name', 'percentage_change', 'current_price', 'historical_price',
                 'absolute_change', 'color', 'size', 'label', 'hover_text'
             ])
         
         df_data = []
+        use_display_names = should_use_display_names(asset_group) if asset_group else False
         
         for item in valid_data:
             ticker = item['ticker']
@@ -89,23 +95,30 @@ class FinvizHeatmapGenerator:
             historical_price = item['historical_price']
             absolute_change = item['absolute_change']
             
+            # Get display name based on asset group
+            if use_display_names:
+                display_name = get_display_name_for_ticker(ticker, asset_group)
+            else:
+                display_name = ticker
+            
             # Color mapping
             color = self.get_performance_color(pct_change)
             
             # Size calculation (equal for now, market cap sizing later)
             size = self.default_size
             
-            # Create display label (ticker + percentage)
+            # Create display label (display name + percentage)
             if pct_change >= 0:
-                label = f"{ticker}<br>+{pct_change:.2f}%"
+                label = f"{display_name}<br>+{pct_change:.2f}%"
             else:
-                label = f"{ticker}<br>{pct_change:.2f}%"
+                label = f"{display_name}<br>{pct_change:.2f}%"
             
-            # Rich hover text
-            hover_text = self._create_hover_text(item)
+            # Rich hover text (always show ticker in hover)
+            hover_text = self._create_hover_text(item, display_name)
             
             df_data.append({
                 'ticker': ticker,
+                'display_name': display_name,
                 'percentage_change': pct_change,
                 'current_price': current_price,
                 'historical_price': historical_price,
@@ -119,7 +132,7 @@ class FinvizHeatmapGenerator:
         
         return pd.DataFrame(df_data)
     
-    def _create_hover_text(self, performance_item: Dict) -> str:
+    def _create_hover_text(self, performance_item: Dict, display_name: str = None) -> str:
         """Create rich hover tooltip text"""
         ticker = performance_item['ticker']
         pct_change = performance_item['percentage_change']
@@ -128,13 +141,25 @@ class FinvizHeatmapGenerator:
         absolute_change = performance_item['absolute_change']
         period_label = performance_item.get('period_label', 'N/A')
         
+        # Use display name if provided, otherwise use ticker
+        title = display_name if display_name else ticker
+        
         # Format prices and changes
         price_format = f"${current_price:.2f}" if current_price else "N/A"
         hist_price_format = f"${historical_price:.2f}" if historical_price else "N/A"
         abs_change_format = f"${absolute_change:+.2f}" if absolute_change else "N/A"
         pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
         
-        hover_text = f"""<b>{ticker}</b><br>
+        # Always show ticker in hover, even if display name is used
+        if display_name and display_name != ticker:
+            hover_text = f"""<b>{title}</b><br>
+<i>Ticker: {ticker}</i><br>
+Current: {price_format}<br>
+{period_label}: {hist_price_format}<br>
+Change: {abs_change_format} ({pct_format})<br>
+<extra></extra>"""
+        else:
+            hover_text = f"""<b>{title}</b><br>
 Current: {price_format}<br>
 {period_label}: {hist_price_format}<br>
 Change: {abs_change_format} ({pct_format})<br>
@@ -146,7 +171,8 @@ Change: {abs_change_format} ({pct_format})<br>
                       title: str = "Stock Performance Heatmap",
                       sizing_method: str = 'equal',
                       width: int = 1200,
-                      height: int = 800) -> go.Figure:
+                      height: int = 800,
+                      asset_group: str = None) -> go.Figure:
         """
         Create Finviz-style treemap visualization
         
@@ -156,12 +182,13 @@ Change: {abs_change_format} ({pct_format})<br>
             sizing_method: Tile sizing method ('equal' or 'market_cap')
             width: Chart width in pixels
             height: Chart height in pixels
+            asset_group: Asset group name for display name handling
             
         Returns:
             Plotly Figure object
         """
         # Prepare data
-        df = self.prepare_treemap_data(performance_data, sizing_method)
+        df = self.prepare_treemap_data(performance_data, sizing_method, asset_group)
         
         if df.empty:
             # Create empty chart with message
@@ -302,7 +329,8 @@ Change: {abs_change_format} ({pct_format})<br>
 def create_heatmap(performance_data: List[Dict], 
                   title: str = "Stock Performance Heatmap",
                   width: int = 1200, 
-                  height: int = 800) -> go.Figure:
+                  height: int = 800,
+                  asset_group: str = None) -> go.Figure:
     """
     Quick function to create a heatmap visualization
     
@@ -311,12 +339,13 @@ def create_heatmap(performance_data: List[Dict],
         title: Chart title
         width: Chart width
         height: Chart height
+        asset_group: Asset group for display name handling
         
     Returns:
         Plotly Figure object
     """
     generator = FinvizHeatmapGenerator()
-    return generator.create_treemap(performance_data, title, width=width, height=height)
+    return generator.create_treemap(performance_data, title, width=width, height=height, asset_group=asset_group)
 
 
 def get_color_legend() -> Dict[str, str]:
