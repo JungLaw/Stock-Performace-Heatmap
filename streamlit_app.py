@@ -1,7 +1,7 @@
 """
 Stock Performance Heatmap Dashboard - Main Application
 
-A Finviz-style interactive heatmap for visualizing stock and ETF performance
+An interactive heatmap for visualizing stock and ETF performance
 across different time periods and asset groups.
 
 Run with: streamlit run streamlit_app.py
@@ -34,6 +34,24 @@ def initialize_session_state():
         st.session_state.calculator = DatabaseIntegratedPerformanceCalculator()
     if 'heatmap_generator' not in st.session_state:
         st.session_state.heatmap_generator = FinvizHeatmapGenerator()
+    
+    # Three-level ticker management session state variables
+    if 'selected_country_etfs' not in st.session_state:
+        st.session_state.selected_country_etfs = []
+    if 'selected_sector_etfs' not in st.session_state:
+        st.session_state.selected_sector_etfs = []
+    if 'session_custom_tickers' not in st.session_state:
+        st.session_state.session_custom_tickers = []
+    if 'permanent_country_additions' not in st.session_state:
+        st.session_state.permanent_country_additions = []
+    if 'permanent_sector_additions' not in st.session_state:
+        st.session_state.permanent_sector_additions = []
+    
+    # Database and performance settings
+    if 'save_custom_to_database' not in st.session_state:
+        st.session_state.save_custom_to_database = True
+    if 'custom_ticker_limit' not in st.session_state:
+        st.session_state.custom_ticker_limit = 10
 
 def create_sidebar_controls():
     """Create sidebar controls for user interaction"""
