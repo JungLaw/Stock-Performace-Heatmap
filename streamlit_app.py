@@ -53,6 +53,287 @@ def initialize_session_state():
     if 'custom_ticker_limit' not in st.session_state:
         st.session_state.custom_ticker_limit = 10
 
+def create_level1_predefined_selection():
+    """Level 1: Predefined ticker selection with checkboxes"""
+    from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
+    
+    st.sidebar.subheader("📋 Level 1: Predefined Assets")
+    
+    # Country ETFs Section
+    with st.sidebar.expander("🌍 Country ETFs (52 available)", expanded=False):
+        # Select All/Deselect All for Country ETFs
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Select All Countries", key="select_all_countries"):
+                st.session_state.selected_country_etfs = get_tickers_only(COUNTRY_ETFS)
+        with col2:
+            if st.button("Deselect All Countries", key="deselect_all_countries"):
+                st.session_state.selected_country_etfs = []
+        
+        # Search filter for countries
+        country_search = st.text_input(
+            "Search countries:",
+            key="country_search",
+            placeholder="Type to filter..."
+        )
+        
+        # Filter country ETFs based on search
+        filtered_countries = COUNTRY_ETFS
+        if country_search:
+            filtered_countries = [
+                (ticker, name) for ticker, name in COUNTRY_ETFS
+                if country_search.lower() in name.lower() or country_search.lower() in ticker.lower()
+            ]
+        
+        # Create checkboxes for country ETFs
+        for ticker, display_name in filtered_countries:
+            is_selected = ticker in st.session_state.selected_country_etfs
+            if st.checkbox(
+                f"{display_name} ({ticker})",
+                value=is_selected,
+                key=f"country_{ticker}"
+            ):
+                if ticker not in st.session_state.selected_country_etfs:
+                    st.session_state.selected_country_etfs.append(ticker)
+            else:
+                if ticker in st.session_state.selected_country_etfs:
+                    st.session_state.selected_country_etfs.remove(ticker)
+        
+        # Show selection count
+        st.caption(f"Selected: {len(st.session_state.selected_country_etfs)} countries")
+    
+    # Sector ETFs Section
+    with st.sidebar.expander("🏭 Sector ETFs (30 available)", expanded=False):
+        # Select All/Deselect All for Sector ETFs
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Select All Sectors", key="select_all_sectors"):
+                st.session_state.selected_sector_etfs = get_tickers_only(SECTOR_ETFS)
+        with col2:
+            if st.button("Deselect All Sectors", key="deselect_all_sectors"):
+                st.session_state.selected_sector_etfs = []
+        
+        # Search filter for sectors
+        sector_search = st.text_input(
+            "Search sectors:",
+            key="sector_search",
+            placeholder="Type to filter..."
+        )
+        
+        # Filter sector ETFs based on search
+        filtered_sectors = SECTOR_ETFS
+        if sector_search:
+            filtered_sectors = [
+                (ticker, name) for ticker, name in SECTOR_ETFS
+                if sector_search.lower() in name.lower() or sector_search.lower() in ticker.lower()
+            ]
+        
+        # Create checkboxes for sector ETFs
+        for ticker, display_name in filtered_sectors:
+            is_selected = ticker in st.session_state.selected_sector_etfs
+            if st.checkbox(
+                f"{display_name} ({ticker})",
+                value=is_selected,
+                key=f"sector_{ticker}"
+            ):
+                if ticker not in st.session_state.selected_sector_etfs:
+                    st.session_state.selected_sector_etfs.append(ticker)
+            else:
+                if ticker in st.session_state.selected_sector_etfs:
+                    st.session_state.selected_sector_etfs.remove(ticker)
+        
+        # Show selection count
+        st.caption(f"Selected: {len(st.session_state.selected_sector_etfs)} sectors")
+
+def create_level2_permanent_expansion():
+    """Level 2: Add new tickers to permanent predefined lists"""
+    st.sidebar.subheader("➕ Level 2: Expand Permanent Lists")
+    
+    # Add to Country ETFs
+    with st.sidebar.expander("🌍 Add New Country ETF", expanded=False):
+        new_country_ticker = st.text_input(
+            "Country ETF Ticker:",
+            key="new_country_ticker",
+            placeholder="e.g., EWK"
+        ).upper().strip()
+        
+        new_country_name = st.text_input(
+            "Display Name:",
+            key="new_country_name",
+            placeholder="e.g., Belgium"
+        ).strip()
+        
+        if st.button("Add Country ETF", key="add_country_etf"):
+            if new_country_ticker and new_country_name:
+                # Check if already exists
+                existing_tickers = [item[0] for item in st.session_state.permanent_country_additions]
+                if new_country_ticker not in existing_tickers:
+                    st.session_state.permanent_country_additions.append((new_country_ticker, new_country_name))
+                    # Auto-select the newly added ticker
+                    if new_country_ticker not in st.session_state.selected_country_etfs:
+                        st.session_state.selected_country_etfs.append(new_country_ticker)
+                    st.success(f"✅ Added {new_country_name} ({new_country_ticker}) to country ETFs")
+                else:
+                    st.warning(f"⚠️ {new_country_ticker} already exists in your additions")
+            else:
+                st.error("❌ Please enter both ticker and display name")
+        
+        # Show current permanent additions
+        if st.session_state.permanent_country_additions:
+            st.caption("Your additions:")
+            for ticker, name in st.session_state.permanent_country_additions:
+                st.caption(f"• {name} ({ticker})")
+    
+    # Add to Sector ETFs
+    with st.sidebar.expander("🏭 Add New Sector ETF", expanded=False):
+        new_sector_ticker = st.text_input(
+            "Sector ETF Ticker:",
+            key="new_sector_ticker",
+            placeholder="e.g., JETS"
+        ).upper().strip()
+        
+        new_sector_name = st.text_input(
+            "Display Name:",
+            key="new_sector_name",
+            placeholder="e.g., Airlines"
+        ).strip()
+        
+        if st.button("Add Sector ETF", key="add_sector_etf"):
+            if new_sector_ticker and new_sector_name:
+                # Check if already exists
+                existing_tickers = [item[0] for item in st.session_state.permanent_sector_additions]
+                if new_sector_ticker not in existing_tickers:
+                    st.session_state.permanent_sector_additions.append((new_sector_ticker, new_sector_name))
+                    # Auto-select the newly added ticker
+                    if new_sector_ticker not in st.session_state.selected_sector_etfs:
+                        st.session_state.selected_sector_etfs.append(new_sector_ticker)
+                    st.success(f"✅ Added {new_sector_name} ({new_sector_ticker}) to sector ETFs")
+                else:
+                    st.warning(f"⚠️ {new_sector_ticker} already exists in your additions")
+            else:
+                st.error("❌ Please enter both ticker and display name")
+        
+        # Show current permanent additions
+        if st.session_state.permanent_sector_additions:
+            st.caption("Your additions:")
+            for ticker, name in st.session_state.permanent_sector_additions:
+                st.caption(f"• {name} ({ticker})")
+
+def create_level3_session_custom():
+    """Level 3: Session-only custom tickers with configurable limit"""
+    st.sidebar.subheader("🎯 Level 3: Session Custom Tickers")
+    
+    # Configurable ticker limit
+    st.session_state.custom_ticker_limit = st.sidebar.slider(
+        "Max custom tickers:",
+        min_value=5,
+        max_value=50,
+        value=st.session_state.custom_ticker_limit,
+        help="Higher limits may slow analysis"
+    )
+    
+    # Performance warning
+    if st.session_state.custom_ticker_limit > 20:
+        st.sidebar.warning("⚠️ Large ticker counts may slow analysis")
+    
+    # Add individual ticker
+    col1, col2 = st.sidebar.columns([3, 1])
+    with col1:
+        new_ticker = st.text_input(
+            "Add ticker:",
+            key="new_custom_ticker",
+            placeholder="e.g., TSLA"
+        ).upper().strip()
+    with col2:
+        if st.button("Add", key="add_custom_ticker"):
+            if new_ticker:
+                current_count = len(st.session_state.session_custom_tickers)
+                if current_count < st.session_state.custom_ticker_limit:
+                    if new_ticker not in st.session_state.session_custom_tickers:
+                        st.session_state.session_custom_tickers.append(new_ticker)
+                        st.success(f"✅ Added {new_ticker}")
+                    else:
+                        st.warning(f"⚠️ {new_ticker} already in list")
+                else:
+                    st.error(f"❌ Limit reached ({st.session_state.custom_ticker_limit} tickers)")
+            else:
+                st.error("❌ Enter a ticker symbol")
+    
+    # Bulk add feature
+    with st.sidebar.expander("📝 Bulk Add Tickers", expanded=False):
+        bulk_input = st.text_area(
+            "Enter tickers (comma or line separated):",
+            key="bulk_custom_input",
+            placeholder="AAPL, MSFT, GOOGL\nor one per line",
+            height=100
+        )
+        
+        if st.button("Add Bulk Tickers", key="add_bulk_custom"):
+            if bulk_input.strip():
+                # Parse input
+                bulk_tickers = []
+                for line in bulk_input.replace(',', '\n').split('\n'):
+                    ticker = line.strip().upper()
+                    if ticker and ticker not in bulk_tickers:
+                        bulk_tickers.append(ticker)
+                
+                # Add tickers respecting limit
+                added_count = 0
+                current_count = len(st.session_state.session_custom_tickers)
+                
+                for ticker in bulk_tickers:
+                    if current_count + added_count < st.session_state.custom_ticker_limit:
+                        if ticker not in st.session_state.session_custom_tickers:
+                            st.session_state.session_custom_tickers.append(ticker)
+                            added_count += 1
+                    else:
+                        break
+                
+                if added_count > 0:
+                    st.success(f"✅ Added {added_count} tickers")
+                if added_count < len(bulk_tickers):
+                    remaining = len(bulk_tickers) - added_count
+                    st.warning(f"⚠️ {remaining} tickers skipped (limit reached)")
+    
+    # Display current custom tickers with remove functionality
+    if st.session_state.session_custom_tickers:
+        st.sidebar.write("**Current custom tickers:**")
+        
+        # Show count
+        count = len(st.session_state.session_custom_tickers)
+        limit = st.session_state.custom_ticker_limit
+        st.sidebar.caption(f"Selected: {count}/{limit} tickers")
+        
+        # Tag-style display with remove buttons
+        tickers_to_remove = []
+        for i, ticker in enumerate(st.session_state.session_custom_tickers):
+            col1, col2 = st.sidebar.columns([3, 1])
+            with col1:
+                st.write(f"🏷️ {ticker}")
+            with col2:
+                if st.button("❌", key=f"remove_custom_{i}", help=f"Remove {ticker}"):
+                    tickers_to_remove.append(ticker)
+        
+        # Remove tickers (done after iteration to avoid modification during iteration)
+        for ticker in tickers_to_remove:
+            st.session_state.session_custom_tickers.remove(ticker)
+            st.success(f"✅ Removed {ticker}")
+            st.rerun()
+        
+        # Clear all button
+        if st.sidebar.button("🗑️ Clear All Custom", key="clear_all_custom"):
+            st.session_state.session_custom_tickers = []
+            st.success("✅ Cleared all custom tickers")
+            st.rerun()
+    
+    # Database save toggle
+    st.sidebar.markdown("---")
+    st.session_state.save_custom_to_database = st.sidebar.checkbox(
+        "💾 Save custom tickers to database",
+        value=st.session_state.save_custom_to_database,
+        help="When checked, custom ticker data will be permanently cached for faster future access"
+    )
+
 def create_sidebar_controls():
     """Create sidebar controls for user interaction"""
     st.sidebar.title("⚙️ Dashboard Controls")
