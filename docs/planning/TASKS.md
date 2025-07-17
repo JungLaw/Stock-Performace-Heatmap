@@ -1,10 +1,10 @@
 # Stock Performance Heatmap Dashboard - Tasks
 
-## 🏆 PROJECT STATUS: PRODUCTION READY MVP DELIVERED (July 2025)
+## 🏆 PROJECT STATUS: ENHANCED UI + CRITICAL FIX NEEDED (July 2025)
 
-**MAJOR ACHIEVEMENT**: Successfully completed all core MVP phases with professional-grade implementation exceeding initial requirements.
+**MAJOR ACHIEVEMENT**: Successfully completed all core MVP phases PLUS enhanced three-level ticker management system. **CRITICAL ISSUE**: Database integrity issue discovered requiring immediate fix.
 
-### ✅ ALL CORE PHASES COMPLETE:
+### ✅ ALL CORE PHASES + ENHANCEMENT COMPLETE:
 
 #### ✅ PHASE 1: Core Foundation - DELIVERED
 - **✅ Infrastructure**: Complete modular project structure with src/ organization
@@ -30,6 +30,13 @@
 - **✅ Data Source Management**: yfinance integration with transparency
 - **✅ File Organization**: Clean project structure with utility scripts
 
+#### ✅ PHASE 5: Three-Level Ticker Management System - DELIVERED
+- **✅ Level 1 - Predefined Selection**: Country ETFs (52) + Sector ETFs (30) with checkboxes, search, bulk operations
+- **✅ Level 2 - Permanent Expansion**: Add new tickers to permanent lists with validation and auto-select
+- **✅ Level 3 - Session Custom**: Tag-style ticker management with configurable limits (5-50) and database toggle
+- **✅ Smart Aggregation**: Combines all levels, removes duplicates, shows breakdown and preview
+- **✅ Enhanced Integration**: Complete replacement of basic text input with professional three-level system
+
 ### 🚀 PRODUCTION READY (Current State):
 ```bash
 cd C:\Users\lawre\Projects\stock-heatmap-dashboard
@@ -37,54 +44,120 @@ streamlit run streamlit_app.py
 ```
 
 **Working Features**:
-- ✅ Interactive dashboard handles all asset groups (52 Country, 30 Sector, Custom)
-- ✅ Professional Finviz-style heatmaps with display names
+- ✅ Interactive dashboard with three-level ticker management system
+- ✅ Professional Finviz-style heatmaps with display names  
 - ✅ Database-optimized performance (<3 second load times)
 - ✅ Real-time cache monitoring and progress tracking
 - ✅ Comprehensive error handling and graceful degradation
+- ✅ Smart ticker aggregation with breakdown display
 
 ---
 
-## 🎯 NEXT PHASE PRIORITY: ENHANCED TICKER MANAGEMENT UI
+## 🚨 CRITICAL PRIORITY: DATABASE INTEGRITY FIX
 
-**Current State**: Basic text input for custom tickers (functional but limited)
-**Target**: Professional three-level ticker management system
-**Priority**: High (main remaining MVP enhancement for optimal user experience)
+**ISSUE DISCOVERED**: Database incorrectly saving today's incomplete data instead of session-only caching
+**EVIDENCE**: 7/17/2025 data found permanently saved in database for analyzed tickers
+**IMPACT**: Compromises database integrity with preliminary prices subjecto after-hours changes
 
-### 🎯 TASK A: Enhanced Ticker Management UI Implementation
-**Files**: `streamlit_app.py` (sidebar controls section)
-**Goal**: Replace basic text input with comprehensive three-level selection system
-**Expected Impact**: Significantly improved user experience and ticker management flexibility
+### 🚨 TASK A: Fix Database Save Logic (CRITICAL - IMMEDIATE)
+**Status**: ❌ NOT STARTED  
+**Priority**: 🚨 CRITICAL (HIGHEST PRIORITY)  
+**Files**: `src/calculations/performance.py` (`_save_historical_data_to_db()` method)  
+**Blocks**: All testing and further development until database integrity ensured
 
-#### Three-Level UI Architecture (Ready for Implementation):
+**Root Cause**: 
+```python
+# In get_historical_price() method:
+if self.db_available:
+    self._save_historical_data_to_db(ticker, hist_data)  # ❌ Saves today's data!
+```
 
-**Level 1 - Predefined List Selection** (🎯 HIGH PRIORITY):
-- [ ] Implement collapsible checkbox interface for Country ETFs (52 options)
-- [ ] Implement collapsible checkbox interface for Sector ETFs (30 options)  
-- [ ] Add "Select All" / "Deselect All" functionality for each group
-- [ ] Add search/filter within predefined lists for large collections
-- [ ] Visual count indicators ("3 of 52 selected")
+**Required Fix**: Modify `_save_historical_data_to_db()` to exclude today's date from permanent saves
 
-**Level 2 - Permanent List Expansion** (🎯 MEDIUM PRIORITY):
-- [ ] "Add new ticker to Country ETFs" input + validation + save button
-- [ ] "Add new ticker to Sector ETFs" input + validation + save button
+**Correct Behavior**:
+- ✅ **Historical data (previous days)**: Save to database permanently (final, settled prices)
+- ✅ **Today's data**: Session cache only (15-minute cache in `current_price_cache`)
+
+**Acceptance Criteria**:
+- [ ] Today's date excluded from database saves
+- [ ] Previous days' data still saved to database correctly  
+- [ ] Today's data only in session cache (`current_price_cache`)
+- [ ] Test with new ticker to verify no today's data in database
+- [ ] Verify historical data auto-save still works for cache building
+
+**Implementation Steps**:
+1. [ ] Add date filtering logic in `_save_historical_data_to_db()`
+2. [ ] Exclude records where date = today's date
+3. [ ] Ensure today's data goes to session cache only
+4. [ ] Test with new ticker (should not save today's data)
+5. [ ] Verify database integrity with `inspect_database.py`
+
+---
+
+## 📝 NEXT PHASE: VERIFICATION & TESTING (AFTER DATABASE FIX)
+
+**Current State**: Three-level ticker management system implemented and integrated  
+**Target**: Comprehensive testing and validation of all functionality  
+**Priority**: High (must wait for database fix completion)
+
+### 📝 TASK B: Comprehensive System Testing (HIGH PRIORITY - AFTER DATABASE FIX)
+**Status**: ❌ WAITING FOR DATABASE FIX  
+**Dependencies**: Database integrity fix must be completed first  
+**Files**: Complete system testing via `streamlit run streamlit_app.py`  
+**Goal**: Validate three-level system and all existing functionality
+
+#### Basic Functionality Testing:
+- [ ] **Launch Test**: `streamlit run streamlit_app.py` works without errors
+- [ ] **UI Display**: Three-level ticker management appears in sidebar
+- [ ] **Import Check**: No Python errors or missing dependencies
+- [ ] **Core Features**: Heatmap generation and display working
+
+#### Level-by-Level UI Testing:
+**Level 1 - Predefined Selection**:
+- [ ] Country ETFs expandable section functions correctly
+- [ ] Sector ETFs expandable section functions correctly  
+- [ ] Search filters work for both Country and Sector ETFs
+- [ ] Select All/Deselect All buttons work for both groups
+- [ ] Checkboxes properly update session state
+- [ ] Selection counts display accurately
+
+**Level 2 - Permanent Expansion**:
+- [ ] Can add new Country ETFs with ticker + display name
+- [ ] Can add new Sector ETFs with ticker + display name
+- [ ] Validation requires both ticker and display name
 - [ ] Auto-select newly added tickers for immediate analysis
-- [ ] Persistence across sessions (save to `assets.py` or session state)
-- [ ] Ticker symbol validation before adding to permanent lists
+- [ ] Prevents duplicate tickers in permanent lists
+- [ ] Shows current permanent additions list
 
-**Level 3 - Session Custom Tickers** (🎯 MEDIUM PRIORITY):
-- [ ] Tag-style removable ticker interface (chip/pill UI)
-- [ ] Individual add/remove with instant visual feedback
-- [ ] Session-only persistence (separate from permanent lists)
-- [ ] Support for bulk add (paste multiple symbols)
-- [ ] Clear visual distinction from permanent lists
+**Level 3 - Session Custom**:
+- [ ] Individual ticker add/remove functionality works
+- [ ] Bulk add functionality works (comma/line separated)
+- [ ] Configurable limit slider functions (5-50 range)
+- [ ] Database save toggle works correctly
+- [ ] Tag-style display with individual remove buttons
+- [ ] Clear all custom tickers functionality
+- [ ] Performance warning displays for >20 ticker limit
 
-#### Implementation Priorities:
-- **UI Layout**: Clean sidebar organization with clear visual hierarchy
-- **User Guidance**: Help text and tooltips explaining each level
-- **Performance**: Efficient handling of large ticker lists (52+ items)
-- **Validation**: Real-time ticker symbol validation and error feedback
-- **State Management**: Proper session state handling for different ticker types
+#### Integration & Performance Testing:
+- [ ] **Ticker Aggregation**: Final ticker list combines all three levels correctly
+- [ ] **Duplicate Handling**: Same ticker from multiple levels handled properly
+- [ ] **Summary Display**: Shows accurate breakdown and preview of selected tickers
+- [ ] **Database Integration**: Database optimization still works (with fix applied)
+- [ ] **Display Names**: Country/Sector ETFs show proper display names in heatmap
+- [ ] **Time Period Selection**: All periods (1D-1Y, YTD) function correctly
+- [ ] **Refresh Functionality**: Data refresh button works as expected
+
+#### Edge Case Testing:
+- [ ] **No Selection**: Default tickers (SPY, QQQ, VTI) appear when nothing selected
+- [ ] **Large Selection**: System handles selections near configured limits
+- [ ] **Mixed Selection**: Combining Country + Sector + Custom tickers works
+- [ ] **Asset Group Logic**: Proper asset group determination for display names
+
+#### Database Integrity Verification (Post-Fix):
+- [ ] **No Today's Data**: Verify no current date data in database after analysis
+- [ ] **Historical Data**: Previous days' data still auto-saves correctly
+- [ ] **Session Cache**: Today's data only in 15-minute session cache
+- [ ] **Cache Hit Rates**: Database optimization percentages still accurate
 
 ### 🔄 TASK B: Volume Analysis Implementation (READY FOR NEXT PHASE)
 **Current State**: Infrastructure complete in `src/calculations/volume.py`
