@@ -335,55 +335,84 @@ def create_level3_session_custom():
     )
 
 def create_sidebar_controls():
-    """Create sidebar controls for user interaction"""
+    """Create sidebar controls for user interaction with three-level ticker management"""
     st.sidebar.title("⚙️ Dashboard Controls")
     
-    # Asset Group Selection
-    st.sidebar.subheader("Asset Group")
-    asset_group_options = {
-        "Custom Tickers": "custom",
-        "Country ETFs": "country", 
-        "Sector ETFs": "sector"
-    }
+    # Three-level ticker management UI
+    create_level1_predefined_selection()
+    create_level2_permanent_expansion()
+    create_level3_session_custom()
     
-    selected_group_name = st.sidebar.selectbox(
-        "Choose asset group:",
-        options=list(asset_group_options.keys()),
-        index=0
-    )
-    selected_group = asset_group_options[selected_group_name]
+    # Aggregate all selected tickers from three levels
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Analysis Configuration")
     
-    # Get tickers for selected group
-    group_config = ASSET_GROUPS[selected_group]
-    default_tickers = group_config["tickers"]
+    # Combine tickers from all levels
+    all_selected_tickers = []
     
-    # Custom ticker input if custom group selected
-    if selected_group == "custom":
-        st.sidebar.subheader("Custom Tickers")
-        ticker_input = st.sidebar.text_area(
-            "Enter tickers (one per line or comma-separated):",
-            value="\\n".join(default_tickers[:5]),  # Show first 5 as default
-            height=150,
-            help="Enter stock tickers separated by commas or new lines"
-        )
+    # Add selected country ETFs
+    all_selected_tickers.extend(st.session_state.selected_country_etfs)
+    
+    # Add selected sector ETFs
+    all_selected_tickers.extend(st.session_state.selected_sector_etfs)
+    
+    # Add session custom tickers
+    all_selected_tickers.extend(st.session_state.session_custom_tickers)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    final_tickers = []
+    for ticker in all_selected_tickers:
+        if ticker not in seen:
+            seen.add(ticker)
+            final_tickers.append(ticker)
+    
+    # Display current selection summary
+    if final_tickers:
+        st.sidebar.success(f"✅ Total selected: {len(final_tickers)} tickers")
         
-        # Parse ticker input
-        if ticker_input.strip():
-            # Split by both newlines and commas, then clean
-            tickers = []
-            for line in ticker_input.replace(',', '\\n').split('\\n'):
-                line = line.strip().upper()
-                if line:
-                    tickers.append(line)
-            selected_tickers = tickers[:10]  # Limit to 10 for performance
-        else:
-            selected_tickers = default_tickers[:5]
+        # Show breakdown by category
+        country_count = len([t for t in final_tickers if t in st.session_state.selected_country_etfs])
+        sector_count = len([t for t in final_tickers if t in st.session_state.selected_sector_etfs])
+        custom_count = len([t for t in final_tickers if t in st.session_state.session_custom_tickers])
+        
+        breakdown_parts = []
+        if country_count > 0:
+            breakdown_parts.append(f"{country_count} countries")
+        if sector_count > 0:
+            breakdown_parts.append(f"{sector_count} sectors")
+        if custom_count > 0:
+            breakdown_parts.append(f"{custom_count} custom")
+        
+        if breakdown_parts:
+            st.sidebar.caption(f"Breakdown: {', '.join(breakdown_parts)}")
+        
+        # Show first few tickers as preview
+        preview_tickers = final_tickers[:5]
+        preview_text = ", ".join(preview_tickers)
+        if len(final_tickers) > 5:
+            preview_text += f" +{len(final_tickers) - 5} more"
+        st.sidebar.caption(f"Preview: {preview_text}")
     else:
-        selected_tickers = default_tickers
-        st.sidebar.info(f"Using {len(selected_tickers)} {group_config['name'].lower()}")
+        st.sidebar.warning("⚠️ No tickers selected")
+        # Provide fallback to prevent empty analysis
+        final_tickers = ['SPY', 'QQQ', 'VTI']  # Default tickers
+        st.sidebar.info("Using default tickers for demonstration")
     
-    # Time Period Selection
-    st.sidebar.subheader("Time Period")
+    # Determine asset group for display name logic
+    # Priority: if mostly countries -> country, if mostly sectors -> sector, else -> custom
+    asset_group = "custom"  # default
+    country_count = len([t for t in final_tickers if t in st.session_state.selected_country_etfs])
+    sector_count = len([t for t in final_tickers if t in st.session_state.selected_sector_etfs])
+    custom_count = len(st.session_state.session_custom_tickers)
+    
+    if country_count > sector_count and country_count > custom_count:
+        asset_group = "country"
+    elif sector_count > country_count and sector_count > custom_count:
+        asset_group = "sector"
+    
+    # Time Period Selection (preserved from original)
+    st.sidebar.subheader("⏰ Time Period")
     period_options = {
         "1 Day": "1d",
         "1 Week": "1w", 
@@ -401,21 +430,29 @@ def create_sidebar_controls():
     )
     selected_period = period_options[selected_period_name]
     
-    # Refresh button
-    st.sidebar.subheader("Data Refresh")
+    # Refresh button (preserved from original)
+    st.sidebar.subheader("🔄 Data Refresh")
     refresh_button = st.sidebar.button(
         "🔄 Refresh Data",
         help="Fetch latest market data",
         use_container_width=True
     )
     
+    # Return data structure compatible with existing main app logic
     return {
-        'group': selected_group,
-        'group_name': selected_group_name,
-        'tickers': selected_tickers,
+        'group': asset_group,
+        'group_name': f"Mixed Selection ({len(final_tickers)} tickers)" if asset_group == "custom" else f"{asset_group.title()} ETFs",
+        'tickers': final_tickers,
         'period': selected_period,
         'period_name': selected_period_name,
-        'refresh': refresh_button
+        'refresh': refresh_button,
+        # Additional data for enhanced functionality
+        'database_save': st.session_state.save_custom_to_database,
+        'ticker_breakdown': {
+            'country': country_count,
+            'sector': sector_count,
+            'custom': custom_count
+        }
     }
 
 def create_header():
