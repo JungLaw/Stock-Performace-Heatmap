@@ -146,6 +146,32 @@ class DatabaseIntegratedPerformanceCalculator:
         finally:
             conn.close()
     
+    def _record_exists_in_db(self, ticker: str, date: str) -> bool:
+        """
+        Check if a specific (ticker, date) record already exists in database
+        
+        Args:
+            ticker: Stock ticker symbol
+            date: Date in 'YYYY-MM-DD' format
+            
+        Returns:
+            True if record exists, False otherwise
+        """
+        conn = self._get_database_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT 1 FROM {self.table_name} WHERE Ticker = ? AND Date = ?", (ticker, date))
+            result = cursor.fetchone()
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error checking if record exists for {ticker} on {date}: {e}")
+            return False
+        finally:
+            conn.close()
+    
     def _save_historical_data_to_db(self, ticker: str, historical_data: pd.DataFrame) -> bool:
         """
         Save fetched historical data to database
@@ -158,13 +184,23 @@ class DatabaseIntegratedPerformanceCalculator:
             True if saved successfully, False otherwise
         """
         if not self.db_available:
+            logger.info(f"🚫 Database not available - skipping save for {ticker}")
             return False
         
         conn = self._get_database_connection()
         if not conn:
+            logger.error(f"❌ Failed to get database connection for {ticker}")
             return False
         
         try:
+            # DIAGNOSTIC: Log what data we received from API
+            logger.info(f"🔍 DIAGNOSTIC: Processing {ticker} data from API:")
+            logger.info(f"   📊 Original data shape: {historical_data.shape}")
+            if not historical_data.empty:
+                date_range = f"{historical_data.index[0].date()} to {historical_data.index[-1].date()}"
+                logger.info(f"   📅 Date range: {date_range}")
+                logger.info(f"   📋 Dates included: {[d.strftime('%Y-%m-%d') for d in historical_data.index]}")
+            
             # Prepare data for database insertion
             df = historical_data.copy()
             df.reset_index(inplace=True)
@@ -186,6 +222,33 @@ class DatabaseIntegratedPerformanceCalculator:
             # Convert Date to string format
             df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
             
+            # CRITICAL FIX: Exclude today's date from permanent database saves
+            # Today's data is incomplete/preliminary and should only be session-cached
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            original_count = len(df)
+            
+            # DIAGNOSTIC: Log filtering details
+            logger.info(f"🛡️ DIAGNOSTIC: Filtering out today's incomplete data:")
+            logger.info(f"   📅 Today's date: {today_str}")
+            logger.info(f"   📊 Records before filtering: {original_count}")
+            
+            df = df[df['Date'] != today_str]  # Filter out today's data
+            filtered_count = len(df)
+            
+            logger.info(f"   📊 Records after filtering: {filtered_count}")
+            if original_count > filtered_count:
+                removed_count = original_count - filtered_count
+                logger.info(f"🛡️ Filtered out {removed_count} today's records for {ticker} (preliminary data not saved to DB)")
+            else:
+                logger.info(f"✅ No today's records to filter for {ticker}")
+            
+            # DIAGNOSTIC: Show what dates we're actually saving
+            if filtered_count > 0:
+                dates_to_save = df['Date'].tolist()
+                logger.info(f"💾 DIAGNOSTIC: Will save {filtered_count} records with dates: {dates_to_save}")
+            else:
+                logger.warning(f"⚠️ No historical data left to save for {ticker} after filtering")
+            
             # Check if all required columns exist
             missing_columns = [col for col in expected_columns if col not in df.columns]
             if missing_columns:
@@ -196,10 +259,43 @@ class DatabaseIntegratedPerformanceCalculator:
             # Select only the columns we need
             df = df[expected_columns]
             
-            # Insert data (ignore conflicts with existing data using INSERT OR IGNORE)
-            df.to_sql(self.table_name, conn, if_exists='append', index=False, method='multi')
-            
-            logger.info(f"✅ Saved {len(df)} historical records for {ticker} to database")
+            # DIAGNOSTIC: Log final save attempt
+            if len(df) > 0:
+                logger.info(f"💾 DIAGNOSTIC: Checking which of {len(df)} records need to be saved for {ticker}")
+                
+                # Check each record individually and only insert new ones
+                new_records = []
+                skipped_count = 0
+                
+                for index, row in df.iterrows():
+                    date_str = row['Date']
+                    if not self._record_exists_in_db(ticker, date_str):
+                        new_records.append(row)
+                        logger.info(f"  ✅ Will save new record: {ticker} {date_str}")
+                    else:
+                        skipped_count += 1
+                        logger.info(f"  ⏭️ Skipping existing record: {ticker} {date_str}")
+                
+                if new_records:
+                    # Convert new records back to DataFrame for insertion
+                    new_df = pd.DataFrame(new_records)
+                    
+                    logger.info(f"💾 DIAGNOSTIC: Inserting {len(new_df)} new records for {ticker} (skipped {skipped_count} existing)")
+                    
+                    # Insert only the new records
+                    new_df.to_sql(self.table_name, conn, if_exists='append', index=False, method='multi')
+                    
+                    logger.info(f"✅ SUCCESS: Saved {len(new_df)} new historical records for {ticker} to database")
+                else:
+                    logger.info(f"ℹ️ No new records to save for {ticker} - all {skipped_count} records already exist")
+                
+                # DIAGNOSTIC: Verify total count after save
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT COUNT(*) FROM {self.table_name} WHERE Ticker = ?", (ticker,))
+                total_records = cursor.fetchone()[0]
+                logger.info(f"📊 DIAGNOSTIC: {ticker} now has {total_records} total records in database")
+            else:
+                logger.warning(f"⚠️ No data to save for {ticker} - skipping database insert")
             return True
             
         except Exception as e:
@@ -247,17 +343,8 @@ class DatabaseIntegratedPerformanceCalculator:
             logger.info(f"📊 Using cached price for {ticker}: ${db_price:.2f}")
             return db_price
         
-        # If exact date not found, try closest date
-        closest_result = self._find_closest_date_in_db(ticker, target_date)
-        if closest_result:
-            closest_date, closest_price = closest_result
-            # Check if the closest date is within reasonable range (within 7 days)
-            closest_dt = datetime.strptime(closest_date, '%Y-%m-%d')
-            days_diff = abs((target_date - closest_dt).days)
-            
-            if days_diff <= 7:  # Use cached data if within 7 days
-                logger.info(f"📊 Using closest cached price for {ticker} ({days_diff} days difference): ${closest_price:.2f}")
-                return closest_price
+        # FIXED: No longer use closest date fallback - always fetch exact dates
+        # If exact date not found in database, fetch from API (don't use approximations)
         
         # Step 2: Not found in database, fetch from yfinance
         logger.info(f"📡 Fetching {ticker} from yfinance (not in database)")
