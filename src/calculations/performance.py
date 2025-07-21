@@ -172,17 +172,22 @@ class DatabaseIntegratedPerformanceCalculator:
         finally:
             conn.close()
     
-    def _save_historical_data_to_db(self, ticker: str, historical_data: pd.DataFrame) -> bool:
+    def _save_historical_data_to_db(self, ticker: str, historical_data: pd.DataFrame, save_to_db: bool = True) -> bool:
         """
         Save fetched historical data to database
         
         Args:
             ticker: Stock ticker symbol
             historical_data: DataFrame with historical OHLCV data
+            save_to_db: Whether to actually save to database (default: True for backward compatibility)
             
         Returns:
             True if saved successfully, False otherwise
         """
+        # Early return if save_to_db is False
+        if not save_to_db:
+            logger.info(f"🚫 Database save disabled for {ticker} - skipping save")
+            return False
         if not self.db_available:
             logger.info(f"🚫 Database not available - skipping save for {ticker}")
             return False
@@ -307,7 +312,7 @@ class DatabaseIntegratedPerformanceCalculator:
         finally:
             conn.close()
     
-    def get_historical_price(self, ticker: str, period: str) -> Optional[float]:
+    def get_historical_price(self, ticker: str, period: str, save_to_db: bool = True) -> Optional[float]:
         """
         Get historical price using database-first approach
         
@@ -364,7 +369,7 @@ class DatabaseIntegratedPerformanceCalculator:
             
             # Step 3: Auto-save fetched data to database
             if self.db_available:
-                self._save_historical_data_to_db(ticker, hist_data)
+                self._save_historical_data_to_db(ticker, hist_data, save_to_db=save_to_db)
             
             # Step 4: Find the closest date in fetched data
             hist_data.index = pd.to_datetime(hist_data.index).date
@@ -459,7 +464,7 @@ class DatabaseIntegratedPerformanceCalculator:
             
         return ((current_price - historical_price) / historical_price) * 100
     
-    def calculate_performance_for_ticker(self, ticker: str, period: str) -> Dict:
+    def calculate_performance_for_ticker(self, ticker: str, period: str, save_to_db: bool = True) -> Dict:
         """
         Calculate complete performance data for a single ticker using database-first approach
         
@@ -474,7 +479,7 @@ class DatabaseIntegratedPerformanceCalculator:
         
         # Get current and historical prices using database-first approach
         current_price = self.get_current_price(ticker)
-        historical_price = self.get_historical_price(ticker, period)
+        historical_price = self.get_historical_price(ticker, period, save_to_db=save_to_db)
         
         if current_price is None or historical_price is None:
             return {

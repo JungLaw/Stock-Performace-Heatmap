@@ -22,7 +22,7 @@ sys.path.insert(0, str(src_path))
 # Import our modules
 from calculations.performance import DatabaseIntegratedPerformanceCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
-from config.assets import ASSET_GROUPS
+from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -236,64 +236,42 @@ def create_level3_session_custom():
     if st.session_state.custom_ticker_limit > 20:
         st.sidebar.warning("⚠️ Large ticker counts may slow analysis")
     
-    # Add individual ticker
-    col1, col2 = st.sidebar.columns([3, 1])
-    with col1:
-        new_ticker = st.text_input(
-            "Add ticker:",
-            key="new_custom_ticker",
-            placeholder="e.g., TSLA"
-        ).upper().strip()
-    with col2:
-        if st.button("Add", key="add_custom_ticker"):
-            if new_ticker:
-                current_count = len(st.session_state.session_custom_tickers)
-                if current_count < st.session_state.custom_ticker_limit:
-                    if new_ticker not in st.session_state.session_custom_tickers:
-                        st.session_state.session_custom_tickers.append(new_ticker)
-                        st.success(f"✅ Added {new_ticker}")
-                    else:
-                        st.warning(f"⚠️ {new_ticker} already in list")
-                else:
-                    st.error(f"❌ Limit reached ({st.session_state.custom_ticker_limit} tickers)")
-            else:
-                st.error("❌ Enter a ticker symbol")
+    # Add ticker(s) - unified input for single or multiple
+    ticker_input = st.sidebar.text_area(
+        "Add Ticker(s):",
+        key="custom_ticker_input",
+        placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
+        height=80
+    )
     
-    # Bulk add feature
-    with st.sidebar.expander("📝 Bulk Add Tickers", expanded=False):
-        bulk_input = st.text_area(
-            "Enter tickers (comma or line separated):",
-            key="bulk_custom_input",
-            placeholder="AAPL, MSFT, GOOGL\nor one per line",
-            height=100
-        )
-        
-        if st.button("Add Bulk Tickers", key="add_bulk_custom"):
-            if bulk_input.strip():
-                # Parse input
-                bulk_tickers = []
-                for line in bulk_input.replace(',', '\n').split('\n'):
-                    ticker = line.strip().upper()
-                    if ticker and ticker not in bulk_tickers:
-                        bulk_tickers.append(ticker)
-                
-                # Add tickers respecting limit
-                added_count = 0
-                current_count = len(st.session_state.session_custom_tickers)
-                
-                for ticker in bulk_tickers:
-                    if current_count + added_count < st.session_state.custom_ticker_limit:
-                        if ticker not in st.session_state.session_custom_tickers:
-                            st.session_state.session_custom_tickers.append(ticker)
-                            added_count += 1
-                    else:
-                        break
-                
-                if added_count > 0:
-                    st.success(f"✅ Added {added_count} tickers")
-                if added_count < len(bulk_tickers):
-                    remaining = len(bulk_tickers) - added_count
-                    st.warning(f"⚠️ {remaining} tickers skipped (limit reached)")
+    if st.sidebar.button("Add Ticker(s)", key="add_custom_tickers"):
+        if ticker_input.strip():
+            # Parse input (reuse bulk parsing logic)
+            parsed_tickers = []
+            for line in ticker_input.replace(',', '\n').split('\n'):
+                ticker = line.strip().upper()
+                if ticker and ticker not in parsed_tickers:
+                    parsed_tickers.append(ticker)
+            
+            # Add tickers respecting limit
+            added_count = 0
+            current_count = len(st.session_state.session_custom_tickers)
+            
+            for ticker in parsed_tickers:
+                if current_count + added_count < st.session_state.custom_ticker_limit:
+                    if ticker not in st.session_state.session_custom_tickers:
+                        st.session_state.session_custom_tickers.append(ticker)
+                        added_count += 1
+                else:
+                    break
+            
+            if added_count > 0:
+                st.success(f"✅ Added {added_count} ticker{'s' if added_count != 1 else ''}")
+            if added_count < len(parsed_tickers):
+                remaining = len(parsed_tickers) - added_count
+                st.warning(f"⚠️ {remaining} ticker{'s' if remaining != 1 else ''} skipped (limit reached)")
+        else:
+            st.error("❌ Enter at least one ticker symbol")
     
     # Display current custom tickers with remove functionality
     if st.session_state.session_custom_tickers:
@@ -347,57 +325,55 @@ def create_sidebar_controls():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Analysis Configuration")
     
-    # Combine tickers from all levels
-    all_selected_tickers = []
+    # Start with defaults and add selections
+    final_tickers = list(CUSTOM_DEFAULT)  # Always start with configured defaults
     
     # Add selected country ETFs
-    all_selected_tickers.extend(st.session_state.selected_country_etfs)
+    final_tickers.extend(st.session_state.selected_country_etfs)
     
     # Add selected sector ETFs
-    all_selected_tickers.extend(st.session_state.selected_sector_etfs)
+    final_tickers.extend(st.session_state.selected_sector_etfs)
     
     # Add session custom tickers
-    all_selected_tickers.extend(st.session_state.session_custom_tickers)
+    final_tickers.extend(st.session_state.session_custom_tickers)
     
     # Remove duplicates while preserving order
     seen = set()
-    final_tickers = []
-    for ticker in all_selected_tickers:
+    deduplicated_tickers = []
+    for ticker in final_tickers:
         if ticker not in seen:
             seen.add(ticker)
-            final_tickers.append(ticker)
+            deduplicated_tickers.append(ticker)
+    
+    final_tickers = deduplicated_tickers
     
     # Display current selection summary
-    if final_tickers:
-        st.sidebar.success(f"✅ Total selected: {len(final_tickers)} tickers")
-        
-        # Show breakdown by category
-        country_count = len([t for t in final_tickers if t in st.session_state.selected_country_etfs])
-        sector_count = len([t for t in final_tickers if t in st.session_state.selected_sector_etfs])
-        custom_count = len([t for t in final_tickers if t in st.session_state.session_custom_tickers])
-        
-        breakdown_parts = []
-        if country_count > 0:
-            breakdown_parts.append(f"{country_count} countries")
-        if sector_count > 0:
-            breakdown_parts.append(f"{sector_count} sectors")
-        if custom_count > 0:
-            breakdown_parts.append(f"{custom_count} custom")
-        
-        if breakdown_parts:
-            st.sidebar.caption(f"Breakdown: {', '.join(breakdown_parts)}")
-        
-        # Show first few tickers as preview
-        preview_tickers = final_tickers[:5]
-        preview_text = ", ".join(preview_tickers)
-        if len(final_tickers) > 5:
-            preview_text += f" +{len(final_tickers) - 5} more"
-        st.sidebar.caption(f"Preview: {preview_text}")
-    else:
-        st.sidebar.warning("⚠️ No tickers selected")
-        # Provide fallback to prevent empty analysis
-        final_tickers = ['SPY', 'QQQ', 'VTI']  # Default tickers
-        st.sidebar.info("Using default tickers for demonstration")
+    st.sidebar.success(f"✅ Total selected: {len(final_tickers)} tickers")
+    
+    # Show breakdown by category
+    country_count = len([t for t in final_tickers if t in st.session_state.selected_country_etfs])
+    sector_count = len([t for t in final_tickers if t in st.session_state.selected_sector_etfs])
+    custom_count = len([t for t in final_tickers if t in st.session_state.session_custom_tickers])
+    defaults_count = len(CUSTOM_DEFAULT)
+    
+    breakdown_parts = []
+    breakdown_parts.append(f"{defaults_count} defaults")
+    if country_count > 0:
+        breakdown_parts.append(f"{country_count} countries")
+    if sector_count > 0:
+        breakdown_parts.append(f"{sector_count} sectors")
+    if custom_count > 0:
+        breakdown_parts.append(f"{custom_count} custom")
+    
+    if breakdown_parts:
+        st.sidebar.caption(f"Breakdown: {', '.join(breakdown_parts)}")
+    
+    # Show first few tickers as preview
+    preview_tickers = final_tickers[:5]
+    preview_text = ", ".join(preview_tickers)
+    if len(final_tickers) > 5:
+        preview_text += f" +{len(final_tickers) - 5} more"
+    st.sidebar.caption(f"Preview: {preview_text}")
     
     # Determine asset group for display name logic
     # Priority: if mostly countries -> country, if mostly sectors -> sector, else -> custom

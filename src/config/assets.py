@@ -41,6 +41,7 @@ COUNTRY_ETFS = [
     ('TUR', 'Turkey'),
     ('RSX', 'Russia'),
     ('QQQ', 'Nasdaq 100'),
+    ('ONEQ', 'Nasdaq'),
     ('SPY', 'S&P 500'),
     ('IWM', 'Russell 2000'),
     ('DIA', 'Dow Jones'),
@@ -94,7 +95,7 @@ SECTOR_ETFS = [
 ]
 
 # Default custom tickers (remain as tickers only)
-CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'QQQ']
+CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'ONEQ']
 
 # Helper functions to work with ticker/name pairs
 def get_tickers_only(ticker_list):

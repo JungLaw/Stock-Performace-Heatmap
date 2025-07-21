@@ -1,5 +1,6 @@
 """
 Test for fixing exact date calculation logic across all time periods
+AND database toggle functionality
 Location: tests/test_performance_fix.py
 """
 
@@ -277,3 +278,160 @@ if __name__ == "__main__":
         print(f"💥 CLOSEST DATE TEST ERROR: {e}")
     finally:
         test2.teardown_method()
+
+
+class TestDatabaseToggleFunctionality:
+    """Test that the save_to_db parameter controls database saving behavior"""
+    
+    def setup_method(self):
+        """Set up test database and calculator for each test"""
+        # Create temporary database for testing
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        
+        # Create calculator with test database
+        self.calculator = DatabaseIntegratedPerformanceCalculator(db_file=self.temp_db.name)
+        
+        # Create empty table
+        conn = sqlite3.connect(self.temp_db.name)
+        conn.execute('''
+            CREATE TABLE daily_prices (
+                Ticker TEXT,
+                Date TEXT,
+                Open REAL,
+                High REAL,
+                Low REAL,
+                Close REAL,
+                "Adj Close" REAL,
+                Volume INTEGER
+            )
+        ''')
+        conn.close()
+    
+    def teardown_method(self):
+        """Clean up after each test"""
+        os.unlink(self.temp_db.name)
+    
+    def _count_records_in_db(self, ticker: str) -> int:
+        """Helper to count records for a ticker in database"""
+        conn = sqlite3.connect(self.temp_db.name)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE Ticker = ?", (ticker,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    
+    def _create_mock_api_data(self) -> pd.DataFrame:
+        """Helper to create mock yfinance data in the format the save method expects"""
+        # Create datetime index (what yfinance returns)
+        dates = pd.to_datetime(['2025-07-15', '2025-07-16', '2025-07-17'])
+        
+        df = pd.DataFrame({
+            'Open': [100.0, 101.0, 102.0],
+            'High': [105.0, 106.0, 107.0], 
+            'Low': [95.0, 96.0, 97.0],
+            'Close': [103.0, 104.0, 105.0],
+            'Volume': [1000000, 1100000, 1200000]
+        }, index=dates)
+        
+        # Ensure index has correct name (yfinance sets this)
+        df.index.name = 'Date'
+        return df
+    
+    def test_save_to_db_true_saves_data(self):
+        """
+        FAILING TEST: When save_to_db=True, data should be saved to database
+        
+        This test will FAIL initially because _save_historical_data_to_db
+        doesn't accept save_to_db parameter yet.
+        """
+        ticker = "TSLA"
+        mock_data = self._create_mock_api_data()
+        
+        # Verify database is empty initially
+        initial_count = self._count_records_in_db(ticker)
+        assert initial_count == 0, "Database should be empty initially"
+        
+        # Call save method with save_to_db=True (THIS WILL FAIL - method doesn't accept parameter)
+        result = self.calculator._save_historical_data_to_db(ticker, mock_data, save_to_db=True)
+        
+        # Should return True (successful save)
+        assert result == True, "Save operation should return True when save_to_db=True"
+        
+        # Should have saved records to database
+        final_count = self._count_records_in_db(ticker)
+        assert final_count > 0, "Database should contain saved records when save_to_db=True"
+        assert final_count == 3, "Should have saved 3 records from mock data"
+    
+    def test_save_to_db_false_does_not_save_data(self):
+        """
+        FAILING TEST: When save_to_db=False, data should NOT be saved to database
+        
+        This test will FAIL initially because _save_historical_data_to_db
+        doesn't accept save_to_db parameter yet.
+        """
+        ticker = "DAL"
+        mock_data = self._create_mock_api_data()
+        
+        # Verify database is empty initially
+        initial_count = self._count_records_in_db(ticker)
+        assert initial_count == 0, "Database should be empty initially"
+        
+        # Call save method with save_to_db=False (THIS WILL FAIL - method doesn't accept parameter)
+        result = self.calculator._save_historical_data_to_db(ticker, mock_data, save_to_db=False)
+        
+        # Should return False (indicating no save operation)
+        assert result == False, "Save operation should return False when save_to_db=False"
+        
+        # Should NOT have saved any records to database
+        final_count = self._count_records_in_db(ticker)
+        assert final_count == 0, "Database should remain empty when save_to_db=False"
+    
+    def test_save_to_db_default_behavior_unchanged(self):
+        """
+        FAILING TEST: Default behavior (no save_to_db parameter) should save data
+        
+        This ensures backward compatibility - existing code should still work.
+        """
+        ticker = "VST"
+        mock_data = self._create_mock_api_data()
+        
+        # Verify database is empty initially
+        initial_count = self._count_records_in_db(ticker)
+        assert initial_count == 0, "Database should be empty initially"
+        
+        # Call save method without save_to_db parameter (existing behavior)
+        result = self.calculator._save_historical_data_to_db(ticker, mock_data)
+        
+        # Should return True (successful save)
+        assert result == True, "Save operation should return True by default"
+        
+        # Should have saved records to database (default behavior)
+        final_count = self._count_records_in_db(ticker)
+        assert final_count > 0, "Database should contain saved records by default"
+        assert final_count == 3, "Should have saved 3 records from mock data"
+    
+    @pytest.mark.parametrize("save_setting", [True, False])
+    def test_save_toggle_parameter_respected(self, save_setting):
+        """
+        FAILING TEST: Parametrized test to verify both True and False work correctly
+        
+        This will FAIL initially because the parameter doesn't exist yet.
+        """
+        ticker = f"TEST_{save_setting}"
+        mock_data = self._create_mock_api_data()
+        
+        # Call with parametrized save setting
+        result = self.calculator._save_historical_data_to_db(ticker, mock_data, save_to_db=save_setting)
+        
+        # Check database count
+        final_count = self._count_records_in_db(ticker)
+        
+        if save_setting:
+            # When True, should save
+            assert result == True, f"Should return True when save_to_db={save_setting}"
+            assert final_count > 0, f"Should save data when save_to_db={save_setting}"
+        else:
+            # When False, should not save
+            assert result == False, f"Should return False when save_to_db={save_setting}"
+            assert final_count == 0, f"Should not save data when save_to_db={save_setting}"
