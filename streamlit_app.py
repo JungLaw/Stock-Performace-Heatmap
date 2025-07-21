@@ -455,7 +455,7 @@ def create_header():
                     unsafe_allow_html=True
                 )
 
-def fetch_performance_data(tickers, period):
+def fetch_performance_data(tickers, period, save_to_db: bool = True):
     """Fetch performance data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching data for {len(tickers)} tickers..."):
         # Create progress bar
@@ -468,7 +468,7 @@ def fetch_performance_data(tickers, period):
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            performance_data = calculator.calculate_performance_for_group(tickers, period)
+            performance_data = calculator.calculate_performance_for_group(tickers, period, save_to_db=save_to_db)
             
             # Show database usage statistics
             summary = calculator.get_performance_summary(performance_data)
@@ -638,7 +638,8 @@ def main():
         # Fetch performance data
         performance_data = fetch_performance_data(
             controls['tickers'], 
-            controls['period']
+            controls['period'],
+            save_to_db=controls['database_save']
         )
         
         # Store in session state

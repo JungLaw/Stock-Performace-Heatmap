@@ -515,7 +515,7 @@ class DatabaseIntegratedPerformanceCalculator:
         logger.info(f"✅ {ticker}: ${current_price:.2f} vs ${historical_price:.2f} = {percentage_change:+.2f}%")
         return result
     
-    def calculate_performance_for_group(self, tickers: List[str], period: str) -> List[Dict]:
+    def calculate_performance_for_group(self, tickers: List[str], period: str, save_to_db: bool = True) -> List[Dict]:
         """
         Calculate performance data for a group of tickers using database-first approach
         
@@ -531,7 +531,7 @@ class DatabaseIntegratedPerformanceCalculator:
         
         for i, ticker in enumerate(tickers, 1):
             logger.info(f"📊 Processing {ticker} ({i}/{len(tickers)})...")
-            performance_data = self.calculate_performance_for_ticker(ticker, period)
+            performance_data = self.calculate_performance_for_ticker(ticker, period, save_to_db=save_to_db)
             results.append(performance_data)
         
         # Log summary of data sources used
