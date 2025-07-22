@@ -53,6 +53,10 @@ def initialize_session_state():
     if 'custom_ticker_limit' not in st.session_state:
         st.session_state.custom_ticker_limit = 10
 
+    if 'selected_bucket' not in st.session_state:
+        st.session_state.selected_bucket = 'custom'  # Default to custom bucket
+
+
 def create_level1_predefined_selection():
     """Level 1: Predefined ticker selection with checkboxes"""
     from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
@@ -315,7 +319,32 @@ def create_level3_session_custom():
 def create_sidebar_controls():
     """Create sidebar controls for user interaction with three-level ticker management"""
     st.sidebar.title("⚙️ Dashboard Controls")
-    
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Select Analysis Bucket")
+
+    st.session_state.selected_bucket = st.sidebar.radio(
+        "Choose your analysis focus:",
+        options=['country', 'sector', 'custom'],
+        format_func=lambda x: {
+            'country': '🌍 Country ETFs',
+            'sector': '🏭 Sector ETFs', 
+            'custom': '🎯 Custom Stocks'
+        }[x],
+        index=['country', 'sector', 'custom'].index(st.session_state.selected_bucket),
+        key='bucket_selection'
+    )
+
+    # Show current selection
+    bucket_names = {
+        'country': 'Country ETFs',
+        'sector': 'Sector ETFs',
+        'custom': 'Custom Stocks'
+    }
+    st.sidebar.info(f"Currently analyzing: **{bucket_names[st.session_state.selected_bucket]}**")
+
+    st.sidebar.markdown("---")
+
     # Three-level ticker management UI
     create_level1_predefined_selection()
     create_level2_permanent_expansion()
@@ -325,17 +354,21 @@ def create_sidebar_controls():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Analysis Configuration")
     
-    # Start with defaults and add selections
-    final_tickers = list(CUSTOM_DEFAULT)  # Always start with configured defaults
-    
-    # Add selected country ETFs
-    final_tickers.extend(st.session_state.selected_country_etfs)
-    
-    # Add selected sector ETFs
-    final_tickers.extend(st.session_state.selected_sector_etfs)
-    
-    # Add session custom tickers
-    final_tickers.extend(st.session_state.session_custom_tickers)
+    # Bucket-aware ticker aggregation 
+    if st.session_state.selected_bucket == 'country':
+        # Country bucket: Only country ETFs (import needed at top of function)
+        from config.assets import COUNTRY_ETFS, get_tickers_only
+        final_tickers = get_tickers_only(COUNTRY_ETFS)
+        
+    elif st.session_state.selected_bucket == 'sector':
+        # Sector bucket: Only sector ETFs (import needed at top of function)
+        from config.assets import SECTOR_ETFS, get_tickers_only
+        final_tickers = get_tickers_only(SECTOR_ETFS)
+        
+    else:  # custom bucket
+        # Custom bucket: Start with defaults and add user additions
+        final_tickers = list(CUSTOM_DEFAULT)
+        final_tickers.extend(st.session_state.session_custom_tickers)
     
     # Remove duplicates while preserving order
     seen = set()
@@ -377,7 +410,18 @@ def create_sidebar_controls():
     
     # Determine asset group for display name logic
     # Priority: if mostly countries -> country, if mostly sectors -> sector, else -> custom
-    asset_group = "custom"  # default
+    # Use bucket selection for asset group and title (MODIFIED)
+    asset_group = st.session_state.selected_bucket
+
+    # Create appropriate group name based on selected bucket
+    bucket_titles = {
+        'country': f"Country ETFs ({len(final_tickers)} tickers)",
+        'sector': f"Sector ETFs ({len(final_tickers)} tickers)", 
+        'custom': f"Custom Stocks ({len(final_tickers)} tickers)"
+    }
+
+    group_name = bucket_titles[st.session_state.selected_bucket]
+    
     country_count = len([t for t in final_tickers if t in st.session_state.selected_country_etfs])
     sector_count = len([t for t in final_tickers if t in st.session_state.selected_sector_etfs])
     custom_count = len(st.session_state.session_custom_tickers)
@@ -417,7 +461,7 @@ def create_sidebar_controls():
     # Return data structure compatible with existing main app logic
     return {
         'group': asset_group,
-        'group_name': f"Mixed Selection ({len(final_tickers)} tickers)" if asset_group == "custom" else f"{asset_group.title()} ETFs",
+        'group_name': group_name, #f"Mixed Selection ({len(final_tickers)} tickers)" if asset_group == "custom" else f"{asset_group.title()} ETFs",
         'tickers': final_tickers,
         'period': selected_period,
         'period_name': selected_period_name,
