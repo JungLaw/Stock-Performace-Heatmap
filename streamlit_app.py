@@ -359,6 +359,9 @@ def create_sidebar_controls():
     # Import needed functions
     from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
     
+    # Initialize bucket_save_to_db variable
+    bucket_save_to_db = True  # Default value
+    
     if st.session_state.selected_bucket == 'country':
         # Initialize visible tickers if empty
         all_country_tickers = get_tickers_only(COUNTRY_ETFS)
@@ -366,7 +369,7 @@ def create_sidebar_controls():
             st.session_state.country_visible_tickers = all_country_tickers.copy()
         
         # Country ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Country ETFs", expanded=True):
+        with st.sidebar.expander("📋 Show/Hide Country ETFs", expanded=False):
             for ticker, display_name in COUNTRY_ETFS:
                 is_visible = ticker in st.session_state.country_visible_tickers
                 if st.checkbox(
@@ -396,7 +399,8 @@ def create_sidebar_controls():
                 placeholder="e.g., Belgium"
             ).strip()
             
-            save_to_db = st.checkbox(
+            # FIXED: Capture the bucket-specific toggle value
+            bucket_save_to_db = st.checkbox(
                 "💾 Save to database",
                 value=True,
                 key="save_country_to_db",
@@ -420,7 +424,7 @@ def create_sidebar_controls():
             st.session_state.sector_visible_tickers = all_sector_tickers.copy()
         
         # Sector ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Sector ETFs", expanded=True):
+        with st.sidebar.expander("📋 Show/Hide Sector ETFs", expanded=False):
             for ticker, display_name in SECTOR_ETFS:
                 is_visible = ticker in st.session_state.sector_visible_tickers
                 if st.checkbox(
@@ -450,7 +454,8 @@ def create_sidebar_controls():
                 placeholder="e.g., Airlines"
             ).strip()
             
-            save_to_db = st.checkbox(
+            # FIXED: Capture the bucket-specific toggle value
+            bucket_save_to_db = st.checkbox(
                 "💾 Save to database",
                 value=True,
                 key="save_sector_to_db",
@@ -498,7 +503,8 @@ def create_sidebar_controls():
                 height=80
             )
             
-            save_to_db = st.checkbox(
+            # FIXED: Capture the bucket-specific toggle value
+            bucket_save_to_db = st.checkbox(
                 "💾 Save to database",
                 value=st.session_state.save_custom_to_database,
                 key="save_custom_to_db_step4",
@@ -598,7 +604,7 @@ def create_sidebar_controls():
         use_container_width=True
     )
     
-    # Return data structure
+    # FIXED: Return the actual bucket-specific database toggle value
     return {
         'group': asset_group,
         'group_name': group_name,
@@ -606,9 +612,8 @@ def create_sidebar_controls():
         'period': selected_period,
         'period_name': selected_period_name,
         'refresh': refresh_button,
-        'database_save': st.session_state.save_custom_to_database
+        'database_save': bucket_save_to_db  # ← NOW USES BUCKET-SPECIFIC TOGGLE
     }
-
 
 
 def create_header():
