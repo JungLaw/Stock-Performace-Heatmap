@@ -188,6 +188,44 @@ save_custom_to_database: True  # Works for all buckets now
 
 ---
 
+## 🔧 MINOR UI IMPROVEMENTS & MAINTENANCE (Low Priority)
+See: [IMPROVEMENT BACKLOG (Future Sessions)](#📝-improvement-backlog-future-sessions) for new additions
+
+### UI Polish Items (Non-Urgent)
+**Status**: ❌ NOT STARTED  
+**Priority**: LOW (cosmetic improvements)  
+**Description**: Small UI enhancements for better user experience
+
+- ✅ **Font Size**: Increase font size to 20 for displayed ticker/names for better readability (14 for hover)
+- ✅ **Sector ETF Display**: Fix Sector ETFs showing ticker instead of display name
+- [ ] **Font Color**: Change font color (current too hard to read)
+- [ ] **Button Label**: Rename "Refresh Data" → "Run Report" for clarity
+- [ ] **Custom Time Period**: Add user-defined time period input option
+- [ ] **Relative Color Coding**: Color code heatmap according to group's low-high % change (relative within group)
+
+### Database Maintenance Items
+**Status**: ❌ NOT STARTED  
+**Priority**: LOW (data cleanup)  
+**Description**: Database cleanup and data quality improvements
+
+- [ ] **Remove Invalid Tickers**: Delete data for 'VST', 'DAL', 'TSLA' from database
+- [ ] **Data Validation**: Review and clean any other problematic ticker data
+- [ ] **Incorrect Calculation**: Incorrectly using weekend day when when calculating 1D % chg on Sunday and Monday (0% change) 
+
+## 🤔 FUTURE CONSIDERATIONS (Evaluation Phase)
+
+### Potential Advanced Features (End-of-Project Consideration)
+**Status**: 🤔 EVALUATION  
+**Priority**: LOWEST (nice-to-have)  
+**Description**: Advanced features to consider if time permits
+
+- [ ] **Database Manager UI**: Possible interface to add/remove/replace ticker data
+  - Sub-tasks: Design UI, implement CRUD operations, add data validation
+  - Complexity: HIGH (file system operations, data integrity)
+  - Value: MEDIUM (convenience vs manual database management)
+
+
+---
 ## 🔄 FUTURE ENHANCEMENT OPPORTUNITIES
 
 ### **Phase 8: Volume Analysis Implementation (Ready)**
@@ -277,4 +315,11 @@ stock-heatmap-dashboard/
 
 ---
 
+## 📝 IMPROVEMENT BACKLOG (Future Sessions)
+
+See: [MINOR UI IMPROVEMENTS & MAINTENANCE (Low Priority)](#🔧-minor-ui-improvements--maintenance-low-priority) for all open items
+
+
+
+---
 **This task breakdown reflects the current 100% complete state with all core functionality working and verified through user testing.**
