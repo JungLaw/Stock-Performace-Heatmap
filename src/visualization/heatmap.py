@@ -218,7 +218,7 @@ Change: {abs_change_format} ({pct_format})<br>
             textinfo="text",
             textfont=dict(
                 family="Arial, sans-serif",
-                size=12,
+                size=18,
                 color="white"
             ),
             textposition="middle center",
@@ -238,7 +238,7 @@ Change: {abs_change_format} ({pct_format})<br>
             hoverlabel=dict(
                 bgcolor="rgba(0,0,0,0.8)",
                 bordercolor="white",
-                font=dict(color="white", size=12)
+                font=dict(color="white", size=14)
             ),
             
             # Layout and sizing
