@@ -861,14 +861,10 @@ def main():
                 if not item.get('error', False):
                     period = item.get('period', '1d')
                     
-                    if period == 'ytd':
-                        baseline_date = datetime(datetime.now().year, 1, 1).strftime('%m/%d/%y')
-                    else:
-                        # Calculate baseline date
-                        calculator = st.session_state.calculator
-                        days_back = calculator.TIME_PERIODS.get(period, {}).get('days', 1)
-                        target_date = datetime.now() - timedelta(days=days_back)
-                        baseline_date = target_date.strftime('%m/%d/%y')
+                    # FIXED: Use proper trading day calculation for baseline date
+                    from src.calculations.performance import get_baseline_date_for_display
+                    baseline_date_str = get_baseline_date_for_display(period)
+                    baseline_date = datetime.strptime(baseline_date_str, '%Y-%m-%d').strftime('%m/%d/%y')
                     break
         
         if baseline_date:
