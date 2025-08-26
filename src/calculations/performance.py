@@ -220,7 +220,7 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
         '1w': 5,      # ~1 week = 5 trading days  
         '1m': 22,     # ~1 month = 22 trading days
         '3m': 65,     # ~3 months = 65 trading days
-        '6m': 130     # ~6 months = 130 trading days
+        '6m': 125     # ~6 months = 130 trading days
     }
     
     trading_days_back = trading_days_map.get(period, 1)
@@ -704,7 +704,7 @@ class DatabaseIntegratedPerformanceCalculator:
                 'percentage_change': 0.0,
                 'absolute_change': 0.0,
                 'period': period,
-                'period_label': self.TIME_PERIODS.get(period, {}).get('label', period),
+                'period_label': get_enhanced_period_label(period),
                 'error': True,
                 'data_source': 'error'
             }
@@ -722,7 +722,7 @@ class DatabaseIntegratedPerformanceCalculator:
             'percentage_change': percentage_change,
             'absolute_change': absolute_change,
             'period': period,
-            'period_label': self.TIME_PERIODS.get(period, {}).get('label', period),
+            'period_label': get_enhanced_period_label(period),
             'error': False,
             'data_source': data_source
         }
@@ -807,6 +807,86 @@ class DatabaseIntegratedPerformanceCalculator:
             'database_usage': db_usage,
             'api_efficiency': f"{db_usage}/{len(valid_data)} from cache"
         }
+
+
+def get_enhanced_period_label(period: str) -> str:
+    """
+    Get enhanced period label with baseline date for specific periods
+    
+    Args:
+        period: Time period key ('1d', '1w', '1m', etc.)
+        
+    Returns:
+        Enhanced label with baseline date for specified periods, standard label for others
+    """
+    # Standard labels for periods that don't need baseline dates
+    standard_labels = {
+        '1d': '1 Day',
+        'ytd': 'YTD'
+    }
+    
+    # Return standard label for 1D and YTD
+    if period in standard_labels:
+        return standard_labels[period]
+    
+    # Enhanced labels with baseline dates for 1W, 1M, 3M, 6M, 1Y
+    enhanced_periods = {
+        '1w': '1W',
+        '1m': '1M', 
+        '3m': '3M',
+        '6m': '6M',
+        '1y': '1Y'
+    }
+    
+    if period in enhanced_periods:
+        baseline_date = get_baseline_date_for_display(period)
+        # Convert to MM/DD/YY format
+        baseline_dt = datetime.strptime(baseline_date, '%Y-%m-%d')
+        baseline_formatted = baseline_dt.strftime('%m/%d/%y')
+        return f"{enhanced_periods[period]} ({baseline_formatted})"
+    
+    # Fallback for unknown periods
+    return period.upper()
+
+
+def get_enhanced_period_label(period: str) -> str:
+    """
+    Get enhanced period label with baseline date for specific periods
+    
+    Args:
+        period: Time period key ('1d', '1w', '1m', etc.)
+        
+    Returns:
+        Enhanced label with baseline date for specified periods, standard label for others
+    """
+    # Standard labels for periods that don't need baseline dates
+    standard_labels = {
+        '1d': '1 Day',
+        'ytd': 'YTD'
+    }
+    
+    # Return standard label for 1D and YTD
+    if period in standard_labels:
+        return standard_labels[period]
+    
+    # Enhanced labels with baseline dates for 1W, 1M, 3M, 6M, 1Y
+    enhanced_periods = {
+        '1w': '1W',
+        '1m': '1M', 
+        '3m': '3M',
+        '6m': '6M',
+        '1y': '1Y'
+    }
+    
+    if period in enhanced_periods:
+        baseline_date = get_baseline_date_for_display(period)
+        # Convert to MM/DD/YY format
+        baseline_dt = datetime.strptime(baseline_date, '%Y-%m-%d')
+        baseline_formatted = baseline_dt.strftime('%m/%d/%y')
+        return f"{enhanced_periods[period]} ({baseline_formatted})"
+    
+    # Fallback for unknown periods
+    return period.upper()
 
 
 def get_baseline_date_for_display(period: str) -> str:
