@@ -12,6 +12,7 @@ wheels/
 
 # folders
 _references/
+.vscode/
 
 # Previous versions of documentation
 docs/planning/PLANNING_071725.md
