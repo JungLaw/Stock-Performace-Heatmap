@@ -10,14 +10,231 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 import logging
+import calendar
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def get_us_market_holidays(year: int) -> List[datetime]:
+    """
+    Get all US stock market holidays for a given year
+    
+    Args:
+        year: Year to get holidays for
+        
+    Returns:
+        List of datetime objects representing market holidays
+    """
+    holidays = []
+    
+    # New Year's Day - January 1st (or observed Monday if weekend)
+    new_years = date(year, 1, 1)
+    if new_years.weekday() == 5:  # Saturday
+        holidays.append(datetime.combine(date(year, 1, 3), datetime.min.time()))  # Monday
+    elif new_years.weekday() == 6:  # Sunday  
+        holidays.append(datetime.combine(date(year, 1, 2), datetime.min.time()))  # Monday
+    else:
+        holidays.append(datetime.combine(new_years, datetime.min.time()))
+    
+    # Martin Luther King Jr. Day - Third Monday in January
+    jan_1 = date(year, 1, 1)
+    first_monday = jan_1 + timedelta(days=(7 - jan_1.weekday()) % 7)
+    if first_monday.day <= 1:  # If Jan 1 is Monday, get next Monday
+        first_monday += timedelta(days=7)
+    mlk_day = first_monday + timedelta(days=14)  # Third Monday
+    holidays.append(datetime.combine(mlk_day, datetime.min.time()))
+    
+    # Presidents Day - Third Monday in February
+    feb_1 = date(year, 2, 1)
+    first_monday_feb = feb_1 + timedelta(days=(7 - feb_1.weekday()) % 7)
+    if first_monday_feb.day <= 1:
+        first_monday_feb += timedelta(days=7)
+    presidents_day = first_monday_feb + timedelta(days=14)
+    holidays.append(datetime.combine(presidents_day, datetime.min.time()))
+    
+    # Good Friday - Friday before Easter (complex calculation)
+    # Using a simplified approximation for most years
+    # This could be enhanced with proper Easter calculation
+    easter_approximations = {
+        2023: date(2023, 4, 7),
+        2024: date(2024, 3, 29), 
+        2025: date(2025, 4, 18),
+        2026: date(2026, 4, 3),
+        2027: date(2027, 3, 26),
+        2028: date(2028, 4, 14),
+        2029: date(2029, 3, 30),
+        2030: date(2030, 4, 19)
+    }
+    if year in easter_approximations:
+        holidays.append(datetime.combine(easter_approximations[year], datetime.min.time()))
+    
+    # Memorial Day - Last Monday in May
+    may_31 = date(year, 5, 31)
+    memorial_day = may_31
+    while memorial_day.weekday() != 0:  # Find last Monday
+        memorial_day -= timedelta(days=1)
+    holidays.append(datetime.combine(memorial_day, datetime.min.time()))
+    
+    # Juneteenth - June 19th (or observed if weekend) - federal holiday since 2021
+    if year >= 2021:
+        juneteenth = date(year, 6, 19)
+        if juneteenth.weekday() == 5:  # Saturday
+            holidays.append(datetime.combine(date(year, 6, 18), datetime.min.time()))  # Friday
+        elif juneteenth.weekday() == 6:  # Sunday
+            holidays.append(datetime.combine(date(year, 6, 20), datetime.min.time()))  # Monday
+        else:
+            holidays.append(datetime.combine(juneteenth, datetime.min.time()))
+    
+    # Independence Day - July 4th (or observed if weekend)
+    july_4 = date(year, 7, 4)
+    if july_4.weekday() == 5:  # Saturday
+        holidays.append(datetime.combine(date(year, 7, 3), datetime.min.time()))  # Friday
+    elif july_4.weekday() == 6:  # Sunday
+        holidays.append(datetime.combine(date(year, 7, 5), datetime.min.time()))  # Monday
+    else:
+        holidays.append(datetime.combine(july_4, datetime.min.time()))
+    
+    # Labor Day - First Monday in September
+    sep_1 = date(year, 9, 1)
+    first_monday_sep = sep_1 + timedelta(days=(7 - sep_1.weekday()) % 7)
+    if first_monday_sep.day <= 1:
+        first_monday_sep += timedelta(days=7)
+    holidays.append(datetime.combine(first_monday_sep, datetime.min.time()))
+    
+    # Thanksgiving Day - Fourth Thursday in November
+    nov_1 = date(year, 11, 1)
+    first_thursday = nov_1 + timedelta(days=(3 - nov_1.weekday()) % 7)
+    if first_thursday.day <= 1:
+        first_thursday += timedelta(days=7)
+    thanksgiving = first_thursday + timedelta(days=21)  # Fourth Thursday
+    holidays.append(datetime.combine(thanksgiving, datetime.min.time()))
+    
+    # Christmas Day - December 25th (or observed if weekend)
+    christmas = date(year, 12, 25)
+    if christmas.weekday() == 5:  # Saturday
+        holidays.append(datetime.combine(date(year, 12, 24), datetime.min.time()))  # Friday
+    elif christmas.weekday() == 6:  # Sunday
+        holidays.append(datetime.combine(date(year, 12, 26), datetime.min.time()))  # Monday
+    else:
+        holidays.append(datetime.combine(christmas, datetime.min.time()))
+    
+    return sorted(holidays)
+
+
+def is_us_trading_day(check_date: datetime) -> bool:
+    """
+    Check if a given date is a US stock market trading day
+    
+    Args:
+        check_date: Date to check
+        
+    Returns:
+        True if it's a trading day, False if weekend or holiday
+    """
+    # Check if weekend
+    if check_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+    
+    # Check if holiday
+    year_holidays = get_us_market_holidays(check_date.year)
+    check_date_only = datetime.combine(check_date.date(), datetime.min.time())
+    
+    return check_date_only not in year_holidays
+
+
+def get_last_n_trading_days(from_date: datetime, n: int) -> List[datetime]:
+    """
+    Get the last N trading days before (and including) a given date
+    
+    Args:
+        from_date: Starting date to count backwards from
+        n: Number of trading days to return
+        
+    Returns:
+        List of datetime objects representing the last N trading days
+    """
+    trading_days = []
+    current_date = from_date
+    
+    # Count backwards until we have N trading days
+    while len(trading_days) < n:
+        if is_us_trading_day(current_date):
+            trading_days.insert(0, current_date)  # Insert at beginning to maintain order
+        current_date -= timedelta(days=1)
+    
+    return trading_days
+
+
+def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
+    """
+    Get the target trading day for a given period using proper trading day math
+    
+    Args:
+        period: Time period key ('1d', '1w', '1m', etc.)
+        from_date: Date to calculate from (defaults to now)
+        
+    Returns:
+        Target datetime for the historical comparison
+    """
+    if from_date is None:
+        from_date = datetime.now()
+    
+    # Handle YTD specially
+    if period == 'ytd':
+        return datetime(from_date.year, 1, 1)
+    
+    # Handle 1Y specially - use exact calendar year then find last trading day
+    if period == '1y':
+        try:
+            # Go back exactly 1 year (same month/day)
+            calendar_year_back = from_date.replace(year=from_date.year - 1)
+            
+            # Find the last trading day on or before the calendar date
+            target_date = calendar_year_back
+            while not is_us_trading_day(target_date):
+                target_date -= timedelta(days=1)
+            
+            logger.info(f"🗓️ Using last trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')} (calendar: {calendar_year_back.strftime('%Y-%m-%d')})")
+            return target_date
+        except ValueError:
+            # Handle leap year edge case (Feb 29)
+            calendar_year_back = from_date.replace(year=from_date.year - 1, month=2, day=28)
+            
+            # Find the last trading day on or before the leap year adjusted date
+            target_date = calendar_year_back
+            while not is_us_trading_day(target_date):
+                target_date -= timedelta(days=1)
+                
+            logger.info(f"🗓️ Leap year adjustment + trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')}")
+            return target_date
+    
+    # Map shorter periods to approximate trading days
+    trading_days_map = {
+        '1d': 1,      # 1 trading day back
+        '1w': 5,      # ~1 week = 5 trading days  
+        '1m': 22,     # ~1 month = 22 trading days
+        '3m': 65,     # ~3 months = 65 trading days
+        '6m': 130     # ~6 months = 130 trading days
+    }
+    
+    trading_days_back = trading_days_map.get(period, 1)
+    
+    # Get the Nth trading day back
+    trading_days = get_last_n_trading_days(from_date, trading_days_back + 1)  # +1 because we want the day before the last N days
+    
+    if len(trading_days) >= 2:
+        return trading_days[0]  # Return the oldest trading day (target for comparison)
+    else:
+        # Fallback to simple date math if trading day calculation fails
+        logger.warning(f"Trading day calculation failed for {period}, falling back to calendar math")
+        days_back = {'1d': 1, '1w': 7, '1m': 30, '3m': 90, '6m': 180}.get(period, 1)
+        return from_date - timedelta(days=days_back)
 
 
 class DatabaseIntegratedPerformanceCalculator:
@@ -314,28 +531,26 @@ class DatabaseIntegratedPerformanceCalculator:
     
     def get_historical_price(self, ticker: str, period: str, save_to_db: bool = True) -> Optional[float]:
         """
-        Get historical price using database-first approach
+        Get historical price using database-first approach with proper trading day logic
         
         Implementation of agreed pattern:
-        1. Check database for ticker + date
-        2. If found: return cached price (no API call)
-        3. If missing: fetch from yfinance
-        4. Auto-save fetched data to database
-        5. Return price
+        1. Calculate proper trading day target date (FIXED: no more calendar math)
+        2. Check database for ticker + date
+        3. If found: return cached price (no API call)
+        4. If missing: fetch from yfinance
+        5. Auto-save fetched data to database
+        6. Return price
         
         Args:
             ticker: Stock ticker symbol
             period: Time period key ('1d', '1w', '1m', etc.)
+            save_to_db: Whether to save fetched data to database
             
         Returns:
             Historical price as float, or None if not available
         """
-        # Calculate target date
-        if period == 'ytd':
-            target_date = datetime(datetime.now().year, 1, 1)
-        else:
-            days_back = self.TIME_PERIODS[period]['days']
-            target_date = datetime.now() - timedelta(days=days_back)
+        # FIXED: Calculate target date using proper trading day logic
+        target_date = get_trading_day_target(period, datetime.now())
         
         # Step 1: Check database first
         logger.info(f"🔍 Looking for {ticker} historical price for {period} (target: {target_date.strftime('%Y-%m-%d')})")
@@ -592,6 +807,20 @@ class DatabaseIntegratedPerformanceCalculator:
             'database_usage': db_usage,
             'api_efficiency': f"{db_usage}/{len(valid_data)} from cache"
         }
+
+
+def get_baseline_date_for_display(period: str) -> str:
+    """
+    Get the baseline date for UI display purposes
+    
+    Args:
+        period: Time period key ('1d', '1w', '1m', etc.)
+        
+    Returns:
+        Formatted date string for display (e.g., "2025-08-22")
+    """
+    target_date = get_trading_day_target(period, datetime.now())
+    return target_date.strftime('%Y-%m-%d')
 
 
 # Factory function and convenience functions for backward compatibility
