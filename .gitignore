@@ -13,13 +13,14 @@ wheels/
 # folders
 _references/
 .vscode/
+notebooks/
 
 # Previous versions of documentation
 docs/planning/PLANNING_071725.md
 docs/planning/TASKS_071725.md
 docs/planning/PRD_v1.0_original.md
 docs/planning/PRD_v2.0_revised.md
-
+.kiro/settings/mcp.json
 
 # Guidelines/Rules/Continuation Reports
 GEMINI.md
