@@ -42,20 +42,26 @@ def get_us_market_holidays(year: int) -> List[datetime]:
     else:
         holidays.append(datetime.combine(new_years, datetime.min.time()))
     
-    # Martin Luther King Jr. Day - Third Monday in January
+    # Martin Luther King Jr. Day - Third Monday in January (FIXED)
     jan_1 = date(year, 1, 1)
-    first_monday = jan_1 + timedelta(days=(7 - jan_1.weekday()) % 7)
-    if first_monday.day <= 1:  # If Jan 1 is Monday, get next Monday
-        first_monday += timedelta(days=7)
+    # Find first Monday of January
+    days_to_monday = (7 - jan_1.weekday()) % 7
+    if days_to_monday == 0 and jan_1.weekday() == 0:  # Jan 1 is Monday
+        first_monday = jan_1
+    else:
+        first_monday = jan_1 + timedelta(days=days_to_monday)
     mlk_day = first_monday + timedelta(days=14)  # Third Monday
     holidays.append(datetime.combine(mlk_day, datetime.min.time()))
     
-    # Presidents Day - Third Monday in February
+    # Presidents Day - Third Monday in February (FIXED)
     feb_1 = date(year, 2, 1)
-    first_monday_feb = feb_1 + timedelta(days=(7 - feb_1.weekday()) % 7)
-    if first_monday_feb.day <= 1:
-        first_monday_feb += timedelta(days=7)
-    presidents_day = first_monday_feb + timedelta(days=14)
+    # Find first Monday of February
+    days_to_monday = (7 - feb_1.weekday()) % 7
+    if days_to_monday == 0 and feb_1.weekday() == 0:  # Feb 1 is Monday
+        first_monday_feb = feb_1
+    else:
+        first_monday_feb = feb_1 + timedelta(days=days_to_monday)
+    presidents_day = first_monday_feb + timedelta(days=14)  # Third Monday
     holidays.append(datetime.combine(presidents_day, datetime.min.time()))
     
     # Good Friday - Friday before Easter (complex calculation)
@@ -100,11 +106,14 @@ def get_us_market_holidays(year: int) -> List[datetime]:
     else:
         holidays.append(datetime.combine(july_4, datetime.min.time()))
     
-    # Labor Day - First Monday in September
+    # Labor Day - First Monday in September (FIXED)
     sep_1 = date(year, 9, 1)
-    first_monday_sep = sep_1 + timedelta(days=(7 - sep_1.weekday()) % 7)
-    if first_monday_sep.day <= 1:
-        first_monday_sep += timedelta(days=7)
+    # Find first Monday of September
+    days_to_monday = (7 - sep_1.weekday()) % 7
+    if days_to_monday == 0 and sep_1.weekday() == 0:  # Sept 1 is Monday
+        first_monday_sep = sep_1  # Sept 1 IS the first Monday
+    else:
+        first_monday_sep = sep_1 + timedelta(days=days_to_monday)
     holidays.append(datetime.combine(first_monday_sep, datetime.min.time()))
     
     # Thanksgiving Day - Fourth Thursday in November
@@ -127,6 +136,20 @@ def get_us_market_holidays(year: int) -> List[datetime]:
     return sorted(holidays)
 
 
+def get_baseline_date_for_display(period: str) -> str:
+    """
+    Get the baseline date for UI display purposes
+    
+    Args:
+        period: Time period key ('1d', '1w', '1m', etc.)
+        
+    Returns:
+        Formatted date string for display (e.g., "2025-08-22")
+    """
+    target_date = get_trading_day_target(period, datetime.now())
+    return target_date.strftime('%Y-%m-%d')
+
+
 def is_us_trading_day(check_date: datetime) -> bool:
     """
     Check if a given date is a US stock market trading day
@@ -146,6 +169,37 @@ def is_us_trading_day(check_date: datetime) -> bool:
     check_date_only = datetime.combine(check_date.date(), datetime.min.time())
     
     return check_date_only not in year_holidays
+
+
+def get_last_completed_trading_day(from_date: datetime = None) -> datetime:
+    """
+    Get the last COMPLETED trading day (for snapshot when today is holiday/weekend)
+    
+    This is different from "most recent trading day" - it ensures we get a completed
+    trading session, not the current day even if it's a trading day.
+    
+    Args:
+        from_date: Date to calculate from (defaults to now)
+        
+    Returns:
+        Last completed trading day
+    """
+    if from_date is None:
+        from_date = datetime.now()
+    
+    current_date = from_date
+    
+    # If today is a trading day, we want YESTERDAY's completed trading day
+    # If today is holiday/weekend, we want the last trading day before today
+    if is_us_trading_day(current_date):
+        current_date -= timedelta(days=1)  # Go back one day first
+    
+    # Now find the most recent trading day
+    while not is_us_trading_day(current_date):
+        current_date -= timedelta(days=1)
+    
+    logger.info(f"🗓️ Last completed trading day: {current_date.strftime('%Y-%m-%d %A')}")
+    return current_date
 
 
 def get_last_n_trading_days(from_date: datetime, n: int) -> List[datetime]:
@@ -214,9 +268,23 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
             logger.info(f"🗓️ Leap year adjustment + trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')}")
             return target_date
     
-    # Map shorter periods to approximate trading days
+    # Handle 1D specially - get last COMPLETED trading day (not current day)
+    if period == '1d':
+        # Get last 2 trading days, use the older one for 1D historical comparison
+        last_two_days = get_last_n_trading_days(from_date, 2)
+        if len(last_two_days) >= 2:
+            historical_day = last_two_days[0]  # Older trading day (Thursday)
+            current_day = last_two_days[1]     # Most recent trading day (Friday)
+            logger.info(f"🗓️ Using 1D historical: {historical_day.strftime('%Y-%m-%d %A')} (vs current: {current_day.strftime('%Y-%m-%d %A')})")
+            return historical_day
+        else:
+            # Fallback to existing logic if insufficient data
+            last_completed = get_last_completed_trading_day(from_date)
+            logger.info(f"🗓️ Fallback to last completed trading day for 1D: {last_completed.strftime('%Y-%m-%d %A')}")
+            return last_completed
+    
+    # Map other periods to approximate trading days
     trading_days_map = {
-        '1d': 1,      # 1 trading day back
         '1w': 5,      # ~1 week = 5 trading days  
         '1m': 22,     # ~1 month = 22 trading days
         '3m': 65,     # ~3 months = 65 trading days
@@ -225,16 +293,38 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
     
     trading_days_back = trading_days_map.get(period, 1)
     
-    # Get the Nth trading day back
+    # Get the Nth trading day back, with holiday base period adjustment
     trading_days = get_last_n_trading_days(from_date, trading_days_back + 1)  # +1 because we want the day before the last N days
     
     if len(trading_days) >= 2:
-        return trading_days[0]  # Return the oldest trading day (target for comparison)
+        target_date = trading_days[0]  # The oldest trading day (target for comparison)
+        
+        # Verify the target date is actually a trading day (additional safety check)
+        if not is_us_trading_day(target_date):
+            logger.warning(f"Target date {target_date.strftime('%Y-%m-%d')} is not a trading day, adjusting...")
+            # Find the last trading day before the target
+            adjusted_target = target_date
+            while not is_us_trading_day(adjusted_target):
+                adjusted_target -= timedelta(days=1)
+            logger.info(f"🗓️ Adjusted base period from {target_date.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
+            return adjusted_target
+        
+        return target_date
     else:
-        # Fallback to simple date math if trading day calculation fails
-        logger.warning(f"Trading day calculation failed for {period}, falling back to calendar math")
+        # Fallback to calendar math with trading day adjustment
+        logger.warning(f"Trading day calculation failed for {period}, using calendar math with adjustment")
         days_back = {'1d': 1, '1w': 7, '1m': 30, '3m': 90, '6m': 180}.get(period, 1)
-        return from_date - timedelta(days=days_back)
+        calendar_target = from_date - timedelta(days=days_back)
+        
+        # Adjust if calendar target falls on holiday/weekend
+        if not is_us_trading_day(calendar_target):
+            adjusted_target = calendar_target
+            while not is_us_trading_day(adjusted_target):
+                adjusted_target -= timedelta(days=1)
+            logger.info(f"🗓️ Calendar fallback adjusted from {calendar_target.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
+            return adjusted_target
+        
+        return calendar_target
 
 
 class DatabaseIntegratedPerformanceCalculator:
@@ -552,6 +642,13 @@ class DatabaseIntegratedPerformanceCalculator:
         # FIXED: Calculate target date using proper trading day logic
         target_date = get_trading_day_target(period, datetime.now())
         
+        # DIAGNOSTIC: Enhanced logging for 1D period debugging
+        current_time = datetime.now()
+        logger.info(f"🔍 DIAGNOSTIC: {ticker} {period} calculation:")
+        logger.info(f"   📅 Current time: {current_time.strftime('%Y-%m-%d %A %H:%M')}")
+        logger.info(f"   🎯 Target date: {target_date.strftime('%Y-%m-%d %A')}")
+        logger.info(f"   🔄 Period: {period}")
+        
         # Step 1: Check database first
         logger.info(f"🔍 Looking for {ticker} historical price for {period} (target: {target_date.strftime('%Y-%m-%d')})")
         
@@ -819,22 +916,14 @@ def get_enhanced_period_label(period: str) -> str:
     Returns:
         Enhanced label with baseline date for specified periods, standard label for others
     """
-    # Standard labels for periods that don't need baseline dates
-    standard_labels = {
-        '1d': '1 Day',
-        'ytd': 'YTD'
-    }
-    
-    # Return standard label for 1D and YTD
-    if period in standard_labels:
-        return standard_labels[period]
-    
-    # Enhanced labels with baseline dates for 1W, 1M, 3M, 6M, 1Y
+    # Enhanced labels with baseline dates for ALL periods
     enhanced_periods = {
+        '1d': '1D',
         '1w': '1W',
         '1m': '1M', 
         '3m': '3M',
         '6m': '6M',
+        'ytd': 'YTD',
         '1y': '1Y'
     }
     
@@ -848,59 +937,6 @@ def get_enhanced_period_label(period: str) -> str:
     # Fallback for unknown periods
     return period.upper()
 
-
-def get_enhanced_period_label(period: str) -> str:
-    """
-    Get enhanced period label with baseline date for specific periods
-    
-    Args:
-        period: Time period key ('1d', '1w', '1m', etc.)
-        
-    Returns:
-        Enhanced label with baseline date for specified periods, standard label for others
-    """
-    # Standard labels for periods that don't need baseline dates
-    standard_labels = {
-        '1d': '1 Day',
-        'ytd': 'YTD'
-    }
-    
-    # Return standard label for 1D and YTD
-    if period in standard_labels:
-        return standard_labels[period]
-    
-    # Enhanced labels with baseline dates for 1W, 1M, 3M, 6M, 1Y
-    enhanced_periods = {
-        '1w': '1W',
-        '1m': '1M', 
-        '3m': '3M',
-        '6m': '6M',
-        '1y': '1Y'
-    }
-    
-    if period in enhanced_periods:
-        baseline_date = get_baseline_date_for_display(period)
-        # Convert to MM/DD/YY format
-        baseline_dt = datetime.strptime(baseline_date, '%Y-%m-%d')
-        baseline_formatted = baseline_dt.strftime('%m/%d/%y')
-        return f"{enhanced_periods[period]} ({baseline_formatted})"
-    
-    # Fallback for unknown periods
-    return period.upper()
-
-
-def get_baseline_date_for_display(period: str) -> str:
-    """
-    Get the baseline date for UI display purposes
-    
-    Args:
-        period: Time period key ('1d', '1w', '1m', etc.)
-        
-    Returns:
-        Formatted date string for display (e.g., "2025-08-22")
-    """
-    target_date = get_trading_day_target(period, datetime.now())
-    return target_date.strftime('%Y-%m-%d')
 
 
 # Factory function and convenience functions for backward compatibility
