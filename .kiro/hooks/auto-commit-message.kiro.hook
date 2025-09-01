@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "name": "Auto Commit Message Generator",
+  "description": "Analyzes file changes and generates conventional commit messages with proper scope and formatting",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.py",
+      "**/*.md",
+      "**/*.toml",
+      "**/*.txt",
+      "**/*.json",
+      "**/*.yaml",
+      "**/*.yml"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Analyze the recent file changes and generate a conventional commit message. Follow these steps:\n\n1. Review what files were modified and identify the specific changes made\n2. Determine the type of change using conventional commits format:\n   - feat: new feature\n   - fix: bug fix\n   - refactor: code refactoring\n   - docs: documentation changes\n   - style: formatting, missing semicolons, etc.\n   - test: adding or updating tests\n   - chore: maintenance tasks, dependency updates\n   - perf: performance improvements\n   - ci: continuous integration changes\n   - build: build system or external dependencies\n\n3. Identify the scope if changes are focused on specific components (e.g., heatmap, data, config, visualization, calculations)\n\n4. Write a clear, concise commit message following this format:\n   - type(scope): brief description (under 50 chars if possible)\n   - Optional longer description for complex changes\n\n5. For this Python financial dashboard project, common scopes include:\n   - heatmap: visualization components\n   - data: data fetching/processing\n   - config: configuration files\n   - calculations: performance calculations\n   - ui: streamlit interface\n   - database: SQLite operations\n   - scripts: utility scripts\n   - docs: documentation\n   - tests: test files\n\nGenerate the commit message and explain your reasoning for the type and scope selection."
+  }
+}
