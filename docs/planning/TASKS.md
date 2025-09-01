@@ -1,5 +1,5 @@
 # Stock Performance Heatmap Dashboard - Tasks
-Date: 7/24/25
+Date: 8/27/25
 
 ## 📋 Quick Navigation
 - [Current Status](#-current-status-100-complete-production-ready-system)
@@ -14,7 +14,7 @@ Date: 7/24/25
 
 ## 🎯 CURRENT STATUS: 100% COMPLETE PRODUCTION-READY SYSTEM
 
-**MAJOR ACHIEVEMENT**: Successfully completed all core MVP phases PLUS enhanced three-bucket UI system with full database toggle functionality. All critical issues resolved.
+**MAJOR ACHIEVEMENT**: Successfully completed all core MVP phases PLUS enhanced three-bucket UI system with full database toggle functionality AND trading day logic fixes. All critical issues resolved.
 
 ### **Current Working State:**
 ```bash
@@ -105,7 +105,22 @@ save_custom_to_database: True  # Works for all buckets now
 
 ---
 
-## ✅ RECENTLY COMPLETED (Phases 1-7)
+## ✅ RECENTLY COMPLETED (Phases 1-7 + Recent Enhancements)
+
+### **Recent Session: Trading Day Logic & Enhanced Period Labels - DELIVERED (August 2025)**
+**Achievement**: Completed trading day logic verification and enhanced user experience with baseline date display
+
+**What Was Accomplished:**
+- ✅ **Trading Day Logic Verification**: Confirmed all periods (1D, 1W, 1M, 3M, 6M, 1Y) use proper trading day calculations
+- ✅ **1Y Period Fix**: Implemented proper trading day logic for 1Y comparisons (calendar year back → find last trading day)
+- ✅ **Weekend Issue Resolution**: Eliminated 0% performance display on weekends across all time periods
+- ✅ **Enhanced Period Labels**: Added baseline dates to hover tooltips (e.g., "1Y (8/23/24)" instead of "1 Year")
+- ✅ **User Experience**: Tooltips now show exact comparison dates for 1W, 1M, 3M, 6M, 1Y periods
+
+**User Impact:**
+- Weekend app usage now shows correct trading day performance comparisons
+- Hover tooltips provide clarity on exact baseline dates being used for comparisons
+- All time periods consistently use proper trading day logic instead of calendar math
 
 ### **Phase 7: Database Toggle Parameter Threading Fix - DELIVERED (July 2025)**
 **Achievement**: Fixed bucket-specific database toggles for all three buckets
@@ -210,7 +225,8 @@ See: [IMPROVEMENT BACKLOG (Future Sessions)](#📝-improvement-backlog-future-se
 
 - [ ] **Remove Invalid Tickers**: Delete data for 'VST', 'DAL', 'TSLA' from database
 - [ ] **Data Validation**: Review and clean any other problematic ticker data
-- [ ] **Incorrect Calculation**: Incorrectly using weekend day when when calculating 1D % chg on Sunday and Monday (0% change) 
+- [x] **Incorrect Calculation**: Incorrectly using weekend day when when calculating 1D % chg on Sunday and Monday (0% change) 
+  - Completed 8/23/25
 
 ## 🤔 FUTURE CONSIDERATIONS (Evaluation Phase)
 
