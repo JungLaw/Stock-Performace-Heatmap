@@ -408,9 +408,42 @@ class DatabaseIntegratedPerformanceCalculator:
         finally:
             conn.close()
     
+    def _validate_exact_target_date(self, hist_data: pd.DataFrame, target_date: datetime, ticker: str) -> Optional[float]:
+        """
+        Validate that yfinance response contains exact target date and return price
+        
+        Args:
+            hist_data: Historical data from yfinance
+            target_date: Required target date
+            ticker: Stock ticker for logging
+            
+        Returns:
+            Price for exact target date, or None if exact date not available
+        """
+        if hist_data.empty:
+            return None
+            
+        # Convert to date objects for comparison
+        hist_data.index = pd.to_datetime(hist_data.index).date
+        target_date_only = target_date.date()
+        
+        # Require EXACT date match - no approximations
+        if target_date_only in hist_data.index:
+            exact_price = float(hist_data.loc[target_date_only, 'Close'])
+            logger.info(f"✅ Found EXACT target date {target_date_only} for {ticker}: ${exact_price:.2f}")
+            return exact_price
+        else:
+            available_dates = list(hist_data.index)
+            logger.warning(f"❌ EXACT target date {target_date_only} NOT found for {ticker}")
+            logger.info(f"   📅 Available dates in response: {available_dates}")
+            return None
+
     def _find_closest_date_in_db(self, ticker: str, target_date: datetime) -> Optional[Tuple[str, float]]:
         """
-        Find the closest available date in database before or on target date
+        DEPRECATED: Find the closest available date in database before or on target date
+        
+        This function is preserved for backward compatibility but should not be used
+        in the main data flow. Use exact date validation instead.
         
         Args:
             ticker: Stock ticker symbol
@@ -621,15 +654,15 @@ class DatabaseIntegratedPerformanceCalculator:
     
     def get_historical_price(self, ticker: str, period: str, save_to_db: bool = True) -> Optional[float]:
         """
-        Get historical price using database-first approach with proper trading day logic
+        Get historical price using database-first approach with STRICT date validation
         
-        Implementation of agreed pattern:
-        1. Calculate proper trading day target date (FIXED: no more calendar math)
-        2. Check database for ticker + date
+        Implementation with exact date requirement:
+        1. Calculate proper trading day target date
+        2. Check database for exact ticker + date
         3. If found: return cached price (no API call)
-        4. If missing: fetch from yfinance
-        5. Auto-save fetched data to database
-        6. Return price
+        4. If missing: fetch from yfinance with auto-save
+        5. Require EXACT target date match - no approximations
+        6. Return price only if exact date available
         
         Args:
             ticker: Stock ticker symbol
@@ -637,34 +670,29 @@ class DatabaseIntegratedPerformanceCalculator:
             save_to_db: Whether to save fetched data to database
             
         Returns:
-            Historical price as float, or None if not available
+            Historical price as float, or None if exact date not available
         """
-        # FIXED: Calculate target date using proper trading day logic
+        # Calculate target date using proper trading day logic
         target_date = get_trading_day_target(period, datetime.now())
+        target_date_str = target_date.strftime('%Y-%m-%d')
         
-        # DIAGNOSTIC: Enhanced logging for 1D period debugging
+        # DIAGNOSTIC: Enhanced logging
         current_time = datetime.now()
-        logger.info(f"🔍 DIAGNOSTIC: {ticker} {period} calculation:")
+        logger.info(f"🔍 STRICT VALIDATION: {ticker} {period} calculation:")
         logger.info(f"   📅 Current time: {current_time.strftime('%Y-%m-%d %A %H:%M')}")
         logger.info(f"   🎯 Target date: {target_date.strftime('%Y-%m-%d %A')}")
         logger.info(f"   🔄 Period: {period}")
         
-        # Step 1: Check database first
-        logger.info(f"🔍 Looking for {ticker} historical price for {period} (target: {target_date.strftime('%Y-%m-%d')})")
-        
-        # Try exact date first
-        target_date_str = target_date.strftime('%Y-%m-%d')
+        # Step 1: Check database for EXACT date
+        logger.info(f"🔍 Looking for {ticker} EXACT date {target_date_str} in database")
         db_price = self._query_historical_price_from_db(ticker, target_date_str)
         
         if db_price is not None:
-            logger.info(f"📊 Using cached price for {ticker}: ${db_price:.2f}")
+            logger.info(f"📊 Using cached EXACT price for {ticker}: ${db_price:.2f}")
             return db_price
         
-        # FIXED: No longer use closest date fallback - always fetch exact dates
-        # If exact date not found in database, fetch from API (don't use approximations)
-        
-        # Step 2: Not found in database, fetch from yfinance
-        logger.info(f"📡 Fetching {ticker} from yfinance (not in database)")
+        # Step 2: Not found in database - auto-fetch from yfinance
+        logger.info(f"📡 Auto-fetching {ticker} from yfinance (exact date {target_date_str} not in database)")
         
         try:
             stock = yf.Ticker(ticker)
@@ -683,21 +711,15 @@ class DatabaseIntegratedPerformanceCalculator:
             if self.db_available:
                 self._save_historical_data_to_db(ticker, hist_data, save_to_db=save_to_db)
             
-            # Step 4: Find the closest date in fetched data
-            hist_data.index = pd.to_datetime(hist_data.index).date
-            target_date_only = target_date.date()
+            # Step 4: STRICT VALIDATION - require exact target date
+            exact_price = self._validate_exact_target_date(hist_data, target_date, ticker)
             
-            # Get the closest available date that's not after our target
-            available_dates = [d for d in hist_data.index if d <= target_date_only]
-            if not available_dates:
-                logger.warning(f"⚠️ No suitable historical dates found for {ticker}")
+            if exact_price is not None:
+                logger.info(f"✅ Retrieved {ticker} EXACT historical price: ${exact_price:.2f}")
+                return exact_price
+            else:
+                logger.error(f"❌ EXACT target date {target_date_str} unavailable for {ticker} - returning None")
                 return None
-            
-            closest_date = max(available_dates)
-            historical_price = float(hist_data.loc[closest_date, 'Close'])
-            
-            logger.info(f"✅ Retrieved {ticker} historical price from yfinance: ${historical_price:.2f}")
-            return historical_price
             
         except Exception as e:
             logger.error(f"Error fetching historical price for {ticker} from yfinance: {e}")
