@@ -21,6 +21,7 @@ sys.path.insert(0, str(src_path))
 
 # Import our modules
 from calculations.performance import DatabaseIntegratedPerformanceCalculator
+from calculations.volume import DatabaseIntegratedVolumeCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
 
@@ -32,6 +33,8 @@ def initialize_session_state():
         st.session_state.last_update = None
     if 'calculator' not in st.session_state:
         st.session_state.calculator = DatabaseIntegratedPerformanceCalculator()
+    if 'volume_calculator' not in st.session_state:
+        st.session_state.volume_calculator = DatabaseIntegratedVolumeCalculator()
     if 'heatmap_generator' not in st.session_state:
         st.session_state.heatmap_generator = FinvizHeatmapGenerator()
     
@@ -55,6 +58,16 @@ def initialize_session_state():
 
     if 'selected_bucket' not in st.session_state:
         st.session_state.selected_bucket = 'custom'  # Default to custom bucket
+    
+    # Analysis mode selection
+    if 'selected_analysis_mode' not in st.session_state:
+        st.session_state.selected_analysis_mode = 'price'  # Default to price performance
+    
+    # Volume analysis data storage (separate from price performance)
+    if 'volume_data' not in st.session_state:
+        st.session_state.volume_data = None
+    if 'volume_last_update' not in st.session_state:
+        st.session_state.volume_last_update = None
 
     # Filtering state (Step 3: Future-ready for additions)
     if 'country_visible_tickers' not in st.session_state:
@@ -328,6 +341,21 @@ def create_sidebar_controls():
     """Create sidebar controls for bucket-based ticker management"""
     st.sidebar.title("⚙️ Dashboard Controls")
 
+    # STEP 0: Analysis Mode Selection
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📈 Analysis Mode")
+    
+    st.session_state.selected_analysis_mode = st.sidebar.radio(
+        "Choose analysis type:",
+        options=['price', 'volume'],
+        format_func=lambda x: {
+            'price': '💰 Price Performance',
+            'volume': '📊 Volume Performance'
+        }[x],
+        index=['price', 'volume'].index(st.session_state.selected_analysis_mode),
+        key='analysis_mode_selection'
+    )
+
     # STEP 1: Bucket Selection
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Select Analysis Bucket")
@@ -577,20 +605,31 @@ def create_sidebar_controls():
     }
     group_name = bucket_titles[st.session_state.selected_bucket]
     
-    # Time Period Selection
+    # Time Period Selection - conditional based on analysis mode
     st.sidebar.subheader("⏰ Time Period")
-    period_options = {
-        "1 Day": "1d",
-        "1 Week": "1w", 
-        "1 Month": "1m",
-        "3 Months": "3m",
-        "6 Months": "6m",
-        "Year to Date": "ytd",
-        "1 Year": "1y"
-    }
+    
+    if st.session_state.selected_analysis_mode == 'price':
+        period_options = {
+            "1 Day": "1d",
+            "1 Week": "1w", 
+            "1 Month": "1m",
+            "3 Months": "3m",
+            "6 Months": "6m",
+            "Year to Date": "ytd",
+            "1 Year": "1y"
+        }
+        period_label = "Compare against:"
+    else:  # volume mode
+        period_options = {
+            "10 Days": "10d",
+            "1 Week": "1w",
+            "1 Month": "1m", 
+            "60 Days": "60d"
+        }
+        period_label = "Volume benchmark period:"
     
     selected_period_name = st.sidebar.selectbox(
-        "Compare against:",
+        period_label,
         options=list(period_options.keys()),
         index=0
     )
@@ -612,7 +651,8 @@ def create_sidebar_controls():
         'period': selected_period,
         'period_name': selected_period_name,
         'refresh': refresh_button,
-        'database_save': bucket_save_to_db  # ← NOW USES BUCKET-SPECIFIC TOGGLE
+        'database_save': bucket_save_to_db,  # ← NOW USES BUCKET-SPECIFIC TOGGLE
+        'analysis_mode': st.session_state.selected_analysis_mode
     }
 
 
@@ -681,6 +721,50 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
         
         return performance_data
 
+def fetch_volume_data(tickers, period, save_to_db: bool = True):
+    """Fetch volume data with progress tracking and database usage reporting"""
+    with st.spinner(f"Fetching volume data for {len(tickers)} tickers..."):
+        # Create progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        volume_calculator = st.session_state.volume_calculator
+        
+        # Use the group calculation method for better efficiency
+        status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
+        
+        try:
+            volume_data = volume_calculator.calculate_volume_performance_for_group(tickers, period)
+            
+            # Show database usage statistics
+            valid_count = len([v for v in volume_data if not v.get('error', False)])
+            error_count = len([v for v in volume_data if v.get('error', False)])
+            database_usage = len([v for v in volume_data if v.get('data_source') == 'database'])
+            
+            progress_bar.progress(1.0)
+            status_text.empty()
+            
+            # Display efficiency information
+            if database_usage > 0:
+                cache_rate = database_usage / valid_count * 100 if valid_count > 0 else 0
+                st.success(
+                    f"✅ Volume data fetched successfully! "
+                    f"Database cache used for {database_usage}/{valid_count} tickers "
+                    f"({cache_rate:.0f}% cache hit rate)"
+                )
+            else:
+                st.info("ℹ️ Volume data fetched from yfinance (no database cache available)")
+            
+        except Exception as e:
+            st.error(f"Error fetching volume data: {str(e)}")
+            volume_data = []
+        
+        # Clear progress indicators
+        progress_bar.empty()
+        status_text.empty()
+        
+        return volume_data
+
 def display_summary_stats(performance_data):
     """Display summary statistics"""
     generator = st.session_state.heatmap_generator
@@ -730,16 +814,32 @@ def display_summary_stats(performance_data):
         
         with col1:
             best = stats['best_performer']
+            # Handle both price and volume data structures
+            if 'percentage_change' in best:
+                performance_value = best['percentage_change']
+            elif 'volume_change' in best:
+                performance_value = best['volume_change']
+            else:
+                performance_value = 0.0
+            
             st.success(
                 f"🏆 Best: **{best['ticker']}** "
-                f"({best['percentage_change']:+.2f}%)"
+                f"({performance_value:+.2f}%)"
             )
         
         with col2:
             worst = stats['worst_performer']
+            # Handle both price and volume data structures
+            if 'percentage_change' in worst:
+                performance_value = worst['percentage_change']
+            elif 'volume_change' in worst:
+                performance_value = worst['volume_change']
+            else:
+                performance_value = 0.0
+            
             st.error(
                 f"📉 Worst: **{worst['ticker']}** "
-                f"({worst['percentage_change']:+.2f}%)"
+                f"({performance_value:+.2f}%)"
             )
 
 def display_heatmap(performance_data, title, asset_group=None):
@@ -759,7 +859,7 @@ def display_heatmap(performance_data, title, asset_group=None):
     st.plotly_chart(fig, use_container_width=True)
 
 def display_data_table(performance_data):
-    """Display detailed data table"""
+    """Display detailed data table for both price and volume data"""
     if not performance_data:
         return
     
@@ -770,22 +870,43 @@ def display_data_table(performance_data):
         st.warning("No valid data to display in table")
         return
     
-    # Create display DataFrame
-    df_display = pd.DataFrame([
-        {
-            'Ticker': p['ticker'],
-            'Current Price': f"${p['current_price']:.2f}" if p['current_price'] else "N/A",
-            'Historical Price': f"${p['historical_price']:.2f}" if p['historical_price'] else "N/A",
-            'Absolute Change': f"${p['absolute_change']:+.2f}" if p['absolute_change'] else "N/A",
-            'Percentage Change': f"{p['percentage_change']:+.2f}%" if p['percentage_change'] is not None else "N/A",
-            'Period': p.get('period_label', p.get('period', 'N/A'))
-        }
-        for p in valid_data
-    ])
-    
-    # Sort by percentage change (descending)
-    df_display = df_display.sort_values('Percentage Change', key=lambda x: 
-        pd.to_numeric(x.str.rstrip('%'), errors='coerce'), ascending=False)
+    # Detect data type and create appropriate DataFrame
+    if valid_data and 'percentage_change' in valid_data[0]:
+        # Price performance data
+        df_display = pd.DataFrame([
+            {
+                'Ticker': p['ticker'],
+                'Current Price': f"${p['current_price']:.2f}" if p['current_price'] else "N/A",
+                'Historical Price': f"${p['historical_price']:.2f}" if p['historical_price'] else "N/A",
+                'Absolute Change': f"${p['absolute_change']:+.2f}" if p['absolute_change'] else "N/A",
+                'Percentage Change': f"{p['percentage_change']:+.2f}%" if p['percentage_change'] is not None else "N/A",
+                'Period': p.get('period_label', p.get('period', 'N/A'))
+            }
+            for p in valid_data
+        ])
+        # Sort by percentage change (descending)
+        df_display = df_display.sort_values('Percentage Change', key=lambda x: 
+            pd.to_numeric(x.str.rstrip('%'), errors='coerce'), ascending=False)
+            
+    elif valid_data and 'volume_change' in valid_data[0]:
+        # Volume performance data
+        df_display = pd.DataFrame([
+            {
+                'Ticker': p['ticker'],
+                'Current Volume': f"{p['current_volume']:,}" if p['current_volume'] else "N/A",
+                'Benchmark Average': f"{p['benchmark_average']:,.0f}" if p['benchmark_average'] else "N/A",
+                'Volume Change': f"{p['volume_change']:+.2f}%" if p['volume_change'] is not None else "N/A",
+                'Benchmark Period': p.get('benchmark_label', p.get('benchmark_period', 'N/A'))
+            }
+            for p in valid_data
+        ])
+        # Sort by volume change (descending)
+        df_display = df_display.sort_values('Volume Change', key=lambda x: 
+            pd.to_numeric(x.str.rstrip('%'), errors='coerce'), ascending=False)
+    else:
+        # Unknown data structure
+        st.warning("Unknown data format - cannot display table")
+        return
     
     st.dataframe(
         df_display,
@@ -812,73 +933,105 @@ def main():
     # Create sidebar controls
     controls = create_sidebar_controls()
         
-    # Check if we need to fetch new data (STEP 3: Include filter changes)
+    # Check if we need to fetch new data - handle both price and volume modes
+    if controls['analysis_mode'] == 'price':
+        current_data = st.session_state.performance_data
+        last_update = st.session_state.last_update
+    else:  # volume mode
+        current_data = st.session_state.volume_data
+        last_update = st.session_state.volume_last_update
+    
     ticker_count_changed = (
-        st.session_state.performance_data is not None and 
-        len(controls['tickers']) != len([p for p in st.session_state.performance_data if not p.get('error', False)])
+        current_data is not None and 
+        len(controls['tickers']) != len([p for p in current_data if not p.get('error', False)])
     )
 
     should_fetch = (
         controls['refresh'] or 
-        st.session_state.performance_data is None or
-        (st.session_state.last_update is None) or
+        current_data is None or
+        last_update is None or
         ticker_count_changed  # NEW: Refresh when ticker count changes
     )
     
     if should_fetch:
-        # Fetch performance data
-        performance_data = fetch_performance_data(
-            controls['tickers'], 
-            controls['period'],
-            save_to_db=controls['database_save']
-        )
+        if controls['analysis_mode'] == 'price':
+            # Fetch price performance data
+            performance_data = fetch_performance_data(
+                controls['tickers'], 
+                controls['period'],
+                save_to_db=controls['database_save']
+            )
+            
+            # Store in session state
+            st.session_state.performance_data = performance_data
+            st.session_state.last_update = datetime.now()
+            current_data = performance_data
+            
+        else:  # volume mode
+            # Fetch volume performance data
+            volume_data = fetch_volume_data(
+                controls['tickers'], 
+                controls['period'],
+                save_to_db=controls['database_save']
+            )
+            
+            # Store in session state
+            st.session_state.volume_data = volume_data
+            st.session_state.volume_last_update = datetime.now()
+            current_data = volume_data
         
-        # Store in session state
-        st.session_state.performance_data = performance_data
-        st.session_state.last_update = datetime.now()
-        
-        st.success(f"✅ Data updated successfully at {st.session_state.last_update.strftime('%H:%M:%S')}")
+        st.success(f"✅ Data updated successfully at {datetime.now().strftime('%H:%M:%S')}")
     else:
-        performance_data = st.session_state.performance_data
+        # Use cached data based on analysis mode
+        if controls['analysis_mode'] == 'price':
+            current_data = st.session_state.performance_data
+        else:
+            current_data = st.session_state.volume_data
     
-    if performance_data:
-        # Create heatmap title
-        title = f"{controls['group_name']} - {controls['period_name']} Performance"
+    if current_data:
+        # Create heatmap title based on analysis mode
+        if controls['analysis_mode'] == 'price':
+            title = f"{controls['group_name']} - {controls['period_name']} Performance"
+        else:  # volume mode
+            title = f"{controls['group_name']} - Current Volume vs. {controls['period_name']} Avg."
         
         # Display summary statistics
         st.subheader("📊 Summary Statistics")
-        display_summary_stats(performance_data)
+        display_summary_stats(current_data)
         
         st.markdown("---")
         
         # Display heatmap
         st.subheader("🗺️ Performance Heatmap")
         
-        # Add baseline date info
-        baseline_date = None
-        if performance_data:
-            for item in performance_data:
-                if not item.get('error', False):
-                    period = item.get('period', '1d')
-                    
-                    # FIXED: Use proper trading day calculation for baseline date
-                    from src.calculations.performance import get_baseline_date_for_display
-                    baseline_date_str = get_baseline_date_for_display(period)
-                    baseline_date = datetime.strptime(baseline_date_str, '%Y-%m-%d').strftime('%m/%d/%y')
-                    break
+        # Add baseline date info (only for price mode)
+        if controls['analysis_mode'] == 'price':
+            baseline_date = None
+            if current_data:
+                for item in current_data:
+                    if not item.get('error', False):
+                        period = item.get('period', '1d')
+                        
+                        # FIXED: Use proper trading day calculation for baseline date
+                        from src.calculations.performance import get_baseline_date_for_display
+                        baseline_date_str = get_baseline_date_for_display(period)
+                        baseline_date = datetime.strptime(baseline_date_str, '%Y-%m-%d').strftime('%m/%d/%y')
+                        break
+            
+            if baseline_date:
+                st.caption(f"Baseline Date: {baseline_date}")
         
-        if baseline_date:
-            st.caption(f"Baseline Date: {baseline_date}")
-        
-        display_heatmap(performance_data, title, controls['group'])
+        display_heatmap(current_data, title, controls['group'])
         
         # Display data table
         with st.expander("📋 Detailed Data Table", expanded=False):
-            display_data_table(performance_data)
+            display_data_table(current_data)
         
-        # Show last update time
-        if st.session_state.last_update:
+        # Show last update time based on analysis mode
+        if controls['analysis_mode'] == 'price' and st.session_state.last_update:
             st.caption(f"Last updated: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+        elif controls['analysis_mode'] == 'volume' and st.session_state.volume_last_update:
+            st.caption(f"Last updated: {st.session_state.volume_last_update.strftime('%Y-%m-%d %H:%M:%S')}")
     
     else:
         st.info("👆 Select your preferences in the sidebar and click 'Refresh Data' to get started!")

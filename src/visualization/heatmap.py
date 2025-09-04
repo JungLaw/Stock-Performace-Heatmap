@@ -90,10 +90,25 @@ class FinvizHeatmapGenerator:
         
         for item in valid_data:
             ticker = item['ticker']
-            pct_change = item['percentage_change']
-            current_price = item['current_price']
-            historical_price = item['historical_price']
-            absolute_change = item['absolute_change']
+            
+            # Handle both price and volume data structures
+            if 'percentage_change' in item:
+                # Price performance data
+                pct_change = item['percentage_change']
+                current_value = item['current_price']
+                historical_value = item['historical_price']
+                absolute_change = item['absolute_change']
+                period_label = item.get('period_label', 'N/A')
+            elif 'volume_change' in item:
+                # Volume performance data
+                pct_change = item['volume_change']
+                current_value = item['current_volume']
+                historical_value = item['benchmark_average']
+                absolute_change = current_value - historical_value if current_value and historical_value else 0
+                period_label = item.get('benchmark_label', item.get('benchmark_period', 'N/A'))
+            else:
+                # Skip unknown data structure
+                continue
             
             # Get display name based on asset group
             if use_display_names:
@@ -120,49 +135,89 @@ class FinvizHeatmapGenerator:
                 'ticker': ticker,
                 'display_name': display_name,
                 'percentage_change': pct_change,
-                'current_price': current_price,
-                'historical_price': historical_price,
+                'current_price': current_value,
+                'historical_price': historical_value,
                 'absolute_change': absolute_change,
                 'color': color,
                 'size': size,
                 'label': label,
                 'hover_text': hover_text,
-                'period_label': item.get('period_label', 'N/A')
+                'period_label': period_label
             })
         
         return pd.DataFrame(df_data)
     
     def _create_hover_text(self, performance_item: Dict, display_name: str = None) -> str:
-        """Create rich hover tooltip text"""
+        """Create rich hover tooltip text for both price and volume data"""
         ticker = performance_item['ticker']
-        pct_change = performance_item['percentage_change']
-        current_price = performance_item['current_price']
-        historical_price = performance_item['historical_price']
-        absolute_change = performance_item['absolute_change']
-        period_label = performance_item.get('period_label', 'N/A')
         
-        # Use display name if provided, otherwise use ticker
-        title = display_name if display_name else ticker
-        
-        # Format prices and changes
-        price_format = f"${current_price:.2f}" if current_price else "N/A"
-        hist_price_format = f"${historical_price:.2f}" if historical_price else "N/A"
-        abs_change_format = f"${absolute_change:+.2f}" if absolute_change else "N/A"
-        pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
-        
-        # Always show ticker in hover, even if display name is used
-        if display_name and display_name != ticker:
-            hover_text = f"""<b>{title}</b><br>
+        # Handle both price and volume data structures
+        if 'percentage_change' in performance_item:
+            # Price performance data
+            pct_change = performance_item['percentage_change']
+            current_price = performance_item['current_price']
+            historical_price = performance_item['historical_price']
+            absolute_change = performance_item['absolute_change']
+            period_label = performance_item.get('period_label', 'N/A')
+            
+            # Use display name if provided, otherwise use ticker
+            title = display_name if display_name else ticker
+            
+            # Format prices and changes
+            price_format = f"${current_price:.2f}" if current_price else "N/A"
+            hist_price_format = f"${historical_price:.2f}" if historical_price else "N/A"
+            abs_change_format = f"${absolute_change:+.2f}" if absolute_change else "N/A"
+            pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
+            
+            # Create price hover text
+            if display_name and display_name != ticker:
+                hover_text = f"""<b>{title}</b><br>
 <i>Ticker: {ticker}</i><br>
 Current: {price_format}<br>
 {period_label}: {hist_price_format}<br>
 Change: {abs_change_format} ({pct_format})<br>
 <extra></extra>"""
-        else:
-            hover_text = f"""<b>{title}</b><br>
+            else:
+                hover_text = f"""<b>{title}</b><br>
 Current: {price_format}<br>
 {period_label}: {hist_price_format}<br>
 Change: {abs_change_format} ({pct_format})<br>
+<extra></extra>"""
+                
+        elif 'volume_change' in performance_item:
+            # Volume performance data
+            pct_change = performance_item['volume_change']
+            current_volume = performance_item['current_volume']
+            benchmark_average = performance_item['benchmark_average']
+            benchmark_label = performance_item.get('benchmark_label', performance_item.get('benchmark_period', 'N/A'))
+            
+            # Use display name if provided, otherwise use ticker
+            title = display_name if display_name else ticker
+            
+            # Format volume and changes
+            volume_format = f"{current_volume:,}" if current_volume else "N/A"
+            benchmark_format = f"{benchmark_average:,.0f}" if benchmark_average else "N/A"
+            pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
+            
+            # Create volume hover text
+            if display_name and display_name != ticker:
+                hover_text = f"""<b>{title}</b><br>
+<i>Ticker: {ticker}</i><br>
+Current Volume: {volume_format}<br>
+{benchmark_label} Avg: {benchmark_format}<br>
+Volume Change: {pct_format}<br>
+<extra></extra>"""
+            else:
+                hover_text = f"""<b>{title}</b><br>
+Current Volume: {volume_format}<br>
+{benchmark_label} Avg: {benchmark_format}<br>
+Volume Change: {pct_format}<br>
+<extra></extra>"""
+        else:
+            # Fallback for unknown data structure
+            title = display_name if display_name else ticker
+            hover_text = f"""<b>{title}</b><br>
+Data unavailable<br>
 <extra></extra>"""
         
         return hover_text
@@ -281,10 +336,10 @@ Change: {abs_change_format} ({pct_format})<br>
     
     def create_summary_stats(self, performance_data: List[Dict]) -> Dict:
         """
-        Create summary statistics for display
+        Create summary statistics for display - handles both price and volume data
         
         Args:
-            performance_data: List of performance dictionaries
+            performance_data: List of performance dictionaries (price or volume)
             
         Returns:
             Dictionary with summary statistics
@@ -303,14 +358,33 @@ Change: {abs_change_format} ({pct_format})<br>
                 'worst_performer': None
             }
         
-        percentages = [p['percentage_change'] for p in valid_data]
+        # Detect data type and extract performance values
+        if 'percentage_change' in valid_data[0]:
+            # Price performance data
+            percentages = [p['percentage_change'] for p in valid_data]
+            best_performer = max(valid_data, key=lambda x: x['percentage_change'])
+            worst_performer = min(valid_data, key=lambda x: x['percentage_change'])
+        elif 'volume_change' in valid_data[0]:
+            # Volume performance data
+            percentages = [p['volume_change'] for p in valid_data]
+            best_performer = max(valid_data, key=lambda x: x['volume_change'])
+            worst_performer = min(valid_data, key=lambda x: x['volume_change'])
+        else:
+            # Fallback - unknown data structure
+            return {
+                'total_tickers': len(performance_data),
+                'valid_data': 0,
+                'avg_performance': 0.0,
+                'positive_count': 0,
+                'negative_count': 0,
+                'neutral_count': 0,
+                'best_performer': None,
+                'worst_performer': None
+            }
         
         positive_count = len([p for p in percentages if p > 0])
         negative_count = len([p for p in percentages if p < 0])
         neutral_count = len([p for p in percentages if p == 0])
-        
-        best_performer = max(valid_data, key=lambda x: x['percentage_change'])
-        worst_performer = min(valid_data, key=lambda x: x['percentage_change'])
         
         return {
             'total_tickers': len(performance_data),

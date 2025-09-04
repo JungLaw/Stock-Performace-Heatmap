@@ -1,6 +1,7 @@
 """
 Database Inspection Script
 Quick check of database contents and new data additions
+Enhanced with volume data quality assessment
 """
 
 import sqlite3
