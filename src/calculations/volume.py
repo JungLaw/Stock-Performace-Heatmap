@@ -213,9 +213,11 @@ class DatabaseIntegratedVolumeCalculator:
         
         logger.info(f"🔍 Calculating {period_label} volume benchmark for {ticker} ({trading_days_needed} trading days)")
         
-        # Get the required trading days
+        # Get the required trading days (EXCLUDING current day from benchmark)
         current_trading_day = get_last_completed_trading_day()
-        trading_days = get_last_n_trading_days(current_trading_day, trading_days_needed)
+        # Get N+1 trading days, then exclude the most recent (current) day
+        trading_days_plus_current = get_last_n_trading_days(current_trading_day, trading_days_needed + 1)
+        trading_days = trading_days_plus_current[:-1]  # Remove most recent day (exclude current from benchmark)
         
         if len(trading_days) < trading_days_needed:
             logger.warning(f"❌ Insufficient trading days available: {len(trading_days)}/{trading_days_needed}")
