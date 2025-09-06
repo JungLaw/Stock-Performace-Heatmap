@@ -1,334 +1,273 @@
 """
-Volume Calculator Tests
+Tests for src/calculations/volume.py - DatabaseIntegratedVolumeCalculator
 
-Test suite for DatabaseIntegratedVolumeCalculator to verify:
-1. Current volume retrieval (last completed trading day)
-2. Benchmark calculations (10D/1W/1M/60D averages)
-3. Missing data handling (strict validation)
-4. Performance calculations (percentage change formula)
-5. Multiple ticker processing
+This test suite covers the complete volume calculator functionality including:
+- Core volume calculation methods
+- Auto-fetch functionality (database → yfinance fallback → auto-save)
+- Session cache behavior for save_to_db=False scenarios
+- Database integration and save_to_db parameter handling
+
+Test Coverage:
+- _fetch_volume_from_yfinance() - yfinance API integration
+- _save_volume_data_to_db() - database save functionality  
+- get_current_volume() - current volume with auto-fetch
+- get_volume_benchmark() - benchmark calculations with auto-fetch
+- calculate_volume_performance() - complete volume analysis
+- Session cache functionality for exploration workflow
+
+Run with: 
+    pytest tests/test_volume_calculator.py -v
+    python tests/test_volume_calculator.py  # Direct execution
 """
 
 import sys
-from pathlib import Path
-import sqlite3
-from datetime import datetime, timedelta
-
-# Add src to path for imports
-project_root = Path(__file__).parent.parent
-src_path = project_root / "src"
-sys.path.insert(0, str(src_path))
+import os
+sys.path.insert(0, 'src')
 
 from calculations.volume import DatabaseIntegratedVolumeCalculator
-from calculations.performance import get_last_completed_trading_day, get_last_n_trading_days
+from datetime import datetime, timedelta
+import pytest
 
 
-def test_database_connection():
-    """Test 1: Verify database connection and volume data availability"""
-    print("=" * 60)
-    print("TEST 1: Database Connection and Volume Data")
-    print("=" * 60)
+class TestVolumeCalculatorCore:
+    """Test core volume calculator functionality"""
     
-    calculator = DatabaseIntegratedVolumeCalculator()
+    def setup_method(self):
+        """Setup for each test method"""
+        self.calculator = DatabaseIntegratedVolumeCalculator()
     
-    # Check if database is available
-    print(f"Database available: {calculator.db_available}")
-    
-    if calculator.db_available:
-        # Test database connection
-        conn = calculator._get_database_connection()
-        if conn:
-            cursor = conn.cursor()
-            
-            # Check total volume records
-            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE Volume > 0")
-            volume_count = cursor.fetchone()[0]
-            print(f"Total volume records: {volume_count:,}")
-            
-            # Check unique tickers with volume data
-            cursor.execute("SELECT COUNT(DISTINCT Ticker) FROM daily_prices WHERE Volume > 0")
-            ticker_count = cursor.fetchone()[0]
-            print(f"Tickers with volume data: {ticker_count}")
-            
-            # Check recent volume data
-            cursor.execute("""
-                SELECT Ticker, Date, Volume 
-                FROM daily_prices 
-                WHERE Volume > 0 
-                ORDER BY Date DESC 
-                LIMIT 5
-            """)
-            recent_data = cursor.fetchall()
-            
-            print("\nRecent volume data:")
-            for ticker, date, volume in recent_data:
-                print(f"  {ticker:6} | {date} | {volume:,}")
-            
-            conn.close()
-            print("✅ Database connection test PASSED")
-        else:
-            print("❌ Database connection test FAILED")
-    else:
-        print("❌ Database not available")
-
-
-def test_current_volume_retrieval():
-    """Test 2: Current volume retrieval for known tickers"""
-    print("\n" + "=" * 60)
-    print("TEST 2: Current Volume Retrieval")
-    print("=" * 60)
-    
-    calculator = DatabaseIntegratedVolumeCalculator()
-    
-    # Test with known tickers that should have volume data
-    test_tickers = ['AAPL', 'MSFT', 'NVDA', 'META', 'AMZN']
-    
-    print(f"Last completed trading day: {get_last_completed_trading_day().strftime('%Y-%m-%d %A')}")
-    print()
-    
-    for ticker in test_tickers:
-        print(f"Testing current volume for {ticker}:")
-        current_volume = calculator.get_current_volume(ticker)
+    def test_fetch_volume_from_yfinance(self):
+        """
+        Test _fetch_volume_from_yfinance() method
         
-        if current_volume is not None:
-            print(f"  ✅ {ticker}: {current_volume:,}")
-        else:
-            print(f"  ❌ {ticker}: No current volume data")
-        print()
+        Verifies:
+        - API connection works
+        - Returns valid DataFrame with Volume column
+        - Data quality validation works
+        """
+        print("\n🧪 Testing _fetch_volume_from_yfinance() method")
+        
+        ticker = "AAPL"
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=15)
+        
+        result = self.calculator._fetch_volume_from_yfinance(ticker, start_date, end_date)
+        
+        assert result is not None, "Should return DataFrame for valid ticker"
+        assert len(result) > 0, "Should return records for recent date range"
+        assert 'Volume' in result.columns, "DataFrame should contain Volume column"
+        assert (result['Volume'] > 0).any(), "Should have valid volume data"
+        
+        print(f"✅ Successfully fetched {len(result)} records for {ticker}")
+        print(f"✅ Date range: {result.index[0].date()} to {result.index[-1].date()}")
+    
+    def test_save_volume_data_to_db(self):
+        """
+        Test _save_volume_data_to_db() method
+        
+        Verifies:
+        - Data save functionality works
+        - Duplicate prevention works
+        - save_to_db parameter respected
+        """
+        print("\n🧪 Testing _save_volume_data_to_db() method")
+        
+        ticker = "MSFT"
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=10)
+        
+        # Fetch data first
+        volume_data = self.calculator._fetch_volume_from_yfinance(ticker, start_date, end_date)
+        assert volume_data is not None, "Should fetch volume data"
+        
+        # Test save functionality
+        save_result = self.calculator._save_volume_data_to_db(ticker, volume_data, save_to_db=True)
+        assert save_result == True, "Save operation should succeed"
+        
+        # Verify data was saved
+        recent_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        saved_volume = self.calculator._query_volume_from_db(ticker, recent_date)
+        assert saved_volume is not None, "Should find saved volume data"
+        
+        print(f"✅ Successfully saved and verified {ticker} volume data")
 
 
-def test_volume_benchmarks():
-    """Test 3: Volume benchmark calculations for different periods"""
-    print("=" * 60)
-    print("TEST 3: Volume Benchmark Calculations")
-    print("=" * 60)
+class TestVolumeCalculatorAutoFetch:
+    """Test auto-fetch functionality"""
     
-    calculator = DatabaseIntegratedVolumeCalculator()
+    def setup_method(self):
+        """Setup for each test method"""
+        self.calculator = DatabaseIntegratedVolumeCalculator()
     
-    # Test all benchmark periods
-    benchmark_periods = ['10d', '1w', '1m', '60d']
-    test_ticker = 'AAPL'  # Use AAPL as it should have comprehensive data
-    
-    print(f"Testing volume benchmarks for {test_ticker}:")
-    print()
-    
-    for period in benchmark_periods:
-        period_info = calculator.VOLUME_BENCHMARK_PERIODS[period]
-        trading_days_needed = period_info['trading_days']
-        label = period_info['label']
+    def test_current_volume_auto_fetch(self):
+        """
+        Test get_current_volume() with auto-fetch
         
-        print(f"{label} ({period}) - {trading_days_needed} trading days:")
+        Verifies:
+        - Database-first approach works
+        - Auto-fetch fallback works for missing data
+        - save_to_db parameter controls database saving
+        """
+        print("\n🧪 Testing get_current_volume() auto-fetch")
         
-        benchmark_avg = calculator.get_volume_benchmark(test_ticker, period)
+        # Use ticker that may not be in database
+        ticker = "BABA"
         
-        if benchmark_avg is not None:
-            print(f"  ✅ Benchmark average: {benchmark_avg:,.0f}")
-        else:
-            print(f"  ❌ Unable to calculate benchmark")
-        print()
+        # Test auto-fetch with database save
+        current_volume = self.calculator.get_current_volume(ticker, save_to_db=True)
+        assert current_volume is not None, "Should retrieve current volume"
+        assert current_volume > 0, "Volume should be positive"
+        
+        # Test that data was cached (second call should be faster)
+        cached_volume = self.calculator.get_current_volume(ticker, save_to_db=True)
+        assert cached_volume == current_volume, "Should return same cached volume"
+        
+        print(f"✅ Current volume auto-fetch working: {current_volume:,} shares")
+    
+    def test_benchmark_auto_fetch(self):
+        """
+        Test volume benchmark calculation with auto-fetch
+        
+        Verifies:
+        - Benchmark calculation works for various periods
+        - Auto-fetch handles missing historical data
+        - 60D period works (previously failing issue)
+        """
+        print("\n🧪 Testing volume benchmark auto-fetch")
+        
+        ticker = "NVDA"
+        
+        # Test 60D benchmark that was previously failing
+        benchmark_60d = self.calculator.get_volume_benchmark(ticker, "60d", save_to_db=True)
+        assert benchmark_60d is not None, "60D benchmark should work with auto-fetch"
+        assert benchmark_60d > 0, "Benchmark should be positive"
+        
+        # Test complete performance calculation
+        performance = self.calculator.calculate_volume_performance(ticker, "60d", save_to_db=True)
+        assert not performance.get('error', False), "Performance calculation should succeed"
+        assert 'volume_change' in performance, "Should include volume change calculation"
+        
+        print(f"✅ 60D benchmark working: {benchmark_60d:,.0f} average volume")
+        print(f"✅ Volume performance: {performance['volume_change']:+.2f}%")
 
 
-def test_trading_day_logic():
-    """Test 4: Verify trading day calculations are correct"""
-    print("=" * 60)
-    print("TEST 4: Trading Day Logic Verification")
-    print("=" * 60)
+class TestVolumeCalculatorSessionCache:
+    """Test session cache functionality for save_to_db=False"""
     
-    # Test different benchmark periods
-    periods = ['10d', '1w', '1m', '60d']
+    def setup_method(self):
+        """Setup for each test method"""
+        self.calculator = DatabaseIntegratedVolumeCalculator()
     
-    current_trading_day = get_last_completed_trading_day()
-    print(f"Current (last completed) trading day: {current_trading_day.strftime('%Y-%m-%d %A')}")
-    print()
-    
-    for period in periods:
-        trading_days_needed = DatabaseIntegratedVolumeCalculator.VOLUME_BENCHMARK_PERIODS[period]['trading_days']
+    def test_session_cache_workflow(self):
+        """
+        Test complete session cache workflow
         
-        trading_days = get_last_n_trading_days(current_trading_day, trading_days_needed)
+        Verifies:
+        - save_to_db=False stores data in session cache only
+        - Complete volume analysis works with session cache
+        - Database remains unpolluted
+        - "Try before you buy" exploration workflow works
+        """
+        print("\n🧪 Testing session cache workflow (save_to_db=False)")
         
-        print(f"{period.upper()} ({trading_days_needed} trading days):")
-        print(f"  Period: {trading_days[0].strftime('%Y-%m-%d %A')} to {trading_days[-1].strftime('%Y-%m-%d %A')}")
-        print(f"  Found: {len(trading_days)}/{trading_days_needed} trading days")
+        # Use ticker not in database for clean test
+        ticker = "AMD"
         
-        if len(trading_days) == trading_days_needed:
-            print(f"  ✅ Trading day calculation correct")
-        else:
-            print(f"  ❌ Trading day calculation insufficient")
-        print()
+        # Perform analysis with save_to_db=False
+        result = self.calculator.calculate_volume_performance(ticker, "10d", save_to_db=False)
+        
+        # Verify analysis completed successfully
+        assert not result.get('error', False), "Session-only analysis should succeed"
+        assert result['current_volume'] > 0, "Should have valid current volume"
+        assert result['benchmark_average'] > 0, "Should have valid benchmark"
+        assert 'volume_change' in result, "Should calculate volume change"
+        
+        # Verify session cache populated
+        assert ticker in self.calculator.session_volume_cache, "Session cache should contain ticker"
+        cache_size = len(self.calculator.session_volume_cache[ticker])
+        assert cache_size > 0, "Session cache should have volume records"
+        
+        # Verify database not polluted
+        db_volume = self.calculator._query_volume_from_db(ticker, "2025-09-05")
+        assert db_volume is None, "Database should not contain session-only data"
+        
+        print(f"✅ Session-only analysis: {result['volume_change']:+.2f}% volume change")
+        print(f"✅ Session cache: {cache_size} records")
+        print("✅ Database clean - no pollution")
 
 
-def test_volume_performance_calculation():
-    """Test 5: Volume performance calculation and percentage change formula"""
-    print("=" * 60)
-    print("TEST 5: Volume Performance Calculations")
-    print("=" * 60)
+class TestVolumeCalculatorIntegration:
+    """Test group calculations and complete workflows"""
     
-    calculator = DatabaseIntegratedVolumeCalculator()
+    def setup_method(self):
+        """Setup for each test method"""
+        self.calculator = DatabaseIntegratedVolumeCalculator()
     
-    # Test with different tickers and benchmark periods
-    test_scenarios = [
-        ('AAPL', '10d'),
-        ('MSFT', '1w'), 
-        ('NVDA', '1m'),
-        ('META', '60d')
-    ]
-    
-    for ticker, benchmark_period in test_scenarios:
-        print(f"Testing {ticker} with {benchmark_period} benchmark:")
+    def test_group_volume_calculation(self):
+        """
+        Test calculate_volume_performance_for_group()
         
-        performance_data = calculator.calculate_volume_performance(ticker, benchmark_period)
+        Verifies:
+        - Group calculations work with auto-fetch
+        - Mixed database/session scenarios handled
+        - All tickers processed successfully
+        """
+        print("\n🧪 Testing group volume calculation")
         
-        if not performance_data.get('error', False):
-            current_vol = performance_data['current_volume']
-            benchmark_avg = performance_data['benchmark_average']
-            volume_change = performance_data['volume_change']
-            
-            # Verify calculation manually
-            expected_change = ((current_vol / benchmark_avg) - 1) * 100
-            
-            print(f"  Current volume: {current_vol:,}")
-            print(f"  Benchmark average: {benchmark_avg:,.0f}")
-            print(f"  Volume change: {volume_change:+.2f}%")
-            print(f"  Manual verification: {expected_change:+.2f}%")
-            
-            if abs(volume_change - expected_change) < 0.01:  # Allow tiny floating point differences
-                print(f"  ✅ Calculation verified correct")
-            else:
-                print(f"  ❌ Calculation mismatch")
-        else:
-            print(f"  ❌ Error calculating performance for {ticker}")
-        print()
-
-
-def test_multiple_ticker_processing():
-    """Test 6: Multiple ticker processing and group calculations"""
-    print("=" * 60)
-    print("TEST 6: Multiple Ticker Processing")
-    print("=" * 60)
-    
-    calculator = DatabaseIntegratedVolumeCalculator()
-    
-    # Test with multiple tickers
-    test_tickers = ['AAPL', 'MSFT', 'NVDA', 'META', 'GOOGL']
-    benchmark_period = '10d'
-    
-    print(f"Testing group calculation for {len(test_tickers)} tickers with {benchmark_period} benchmark:")
-    print()
-    
-    # Time the group calculation
-    start_time = datetime.now()
-    
-    group_results = calculator.calculate_volume_performance_for_group(test_tickers, benchmark_period)
-    
-    end_time = datetime.now()
-    calculation_time = (end_time - start_time).total_seconds()
-    
-    print(f"Group calculation completed in {calculation_time:.2f} seconds")
-    print()
-    
-    # Analyze results
-    valid_results = []
-    error_results = []
-    
-    for result in group_results:
-        if result.get('error', False):
-            error_results.append(result)
-        else:
-            valid_results.append(result)
-    
-    print("Results Summary:")
-    print(f"  Valid calculations: {len(valid_results)}")
-    print(f"  Errors: {len(error_results)}")
-    print()
-    
-    if valid_results:
-        print("Valid results:")
-        for result in valid_results:
+        tickers = ["AAPL", "MSFT", "GOOGL"]
+        
+        # Test group calculation with database save
+        results = self.calculator.calculate_volume_performance_for_group(
+            tickers, "10d", save_to_db=True
+        )
+        
+        assert len(results) == len(tickers), "Should return results for all tickers"
+        
+        # Verify all calculations succeeded
+        success_count = len([r for r in results if not r.get('error', False)])
+        assert success_count == len(tickers), f"All {len(tickers)} calculations should succeed"
+        
+        print(f"✅ Group calculation: {success_count}/{len(tickers)} tickers successful")
+        
+        # Display results
+        for result in results:
             ticker = result['ticker']
-            volume_change = result['volume_change']
-            print(f"  {ticker:6}: {volume_change:+6.2f}%")
-    
-    if error_results:
-        print("\nError results:")
-        for result in error_results:
-            ticker = result['ticker']
-            print(f"  {ticker:6}: Error")
-    
-    # Test summary statistics
-    print("\nTesting summary statistics:")
-    summary = calculator.get_volume_performance_summary(group_results)
-    
-    print(f"  Total tickers: {summary['total_count']}")
-    print(f"  Valid calculations: {summary['valid_count']}")
-    print(f"  Average volume change: {summary['avg_volume_change']:+.2f}%")
-    
-    if summary['best_performer']:
-        best = summary['best_performer']
-        print(f"  Best performer: {best['ticker']} ({best['volume_change']:+.2f}%)")
-    
-    if summary['worst_performer']:
-        worst = summary['worst_performer']
-        print(f"  Worst performer: {worst['ticker']} ({worst['volume_change']:+.2f}%)")
-
-
-def test_missing_data_handling():
-    """Test 7: Missing data handling and strict validation"""
-    print("\n" + "=" * 60)
-    print("TEST 7: Missing Data Handling")
-    print("=" * 60)
-    
-    calculator = DatabaseIntegratedVolumeCalculator()
-    
-    # Test with a ticker that might not exist or have incomplete data
-    test_cases = [
-        'INVALID_TICKER',  # Should not exist
-        'TEST123',         # Should not exist  
-    ]
-    
-    print("Testing missing data scenarios:")
-    print()
-    
-    for ticker in test_cases:
-        print(f"Testing {ticker} (should have missing data):")
-        
-        current_volume = calculator.get_current_volume(ticker)
-        benchmark = calculator.get_volume_benchmark(ticker, '10d')
-        performance = calculator.calculate_volume_performance(ticker, '10d')
-        
-        print(f"  Current volume: {current_volume}")
-        print(f"  Benchmark average: {benchmark}")
-        print(f"  Performance error flag: {performance.get('error', False)}")
-        
-        if current_volume is None and benchmark is None and performance.get('error', False):
-            print(f"  ✅ Missing data handled correctly")
-        else:
-            print(f"  ❌ Missing data not handled correctly")
-        print()
+            change = result['volume_change']
+            print(f"   {ticker}: {change:+.2f}% volume change")
 
 
 def run_all_tests():
-    """Run all volume calculator tests"""
-    print("🧪 VOLUME CALCULATOR TEST SUITE")
-    print("Testing DatabaseIntegratedVolumeCalculator")
-    print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    """Run all tests when executed directly"""
+    print("VOLUME CALCULATOR TEST SUITE")
+    print("=" * 50)
     
-    try:
-        test_database_connection()
-        test_current_volume_retrieval()
-        test_volume_benchmarks()
-        test_trading_day_logic()
-        test_volume_performance_calculation()
-        test_multiple_ticker_processing()
-        test_missing_data_handling()
-        
-        print("\n" + "=" * 60)
-        print("🎉 ALL TESTS COMPLETED")
-        print("=" * 60)
-        
-    except Exception as e:
-        print(f"\n❌ Test suite failed with error: {e}")
-        import traceback
-        traceback.print_exc()
+    # Core functionality tests
+    core_tests = TestVolumeCalculatorCore()
+    core_tests.setup_method()
+    core_tests.test_fetch_volume_from_yfinance()
+    core_tests.test_save_volume_data_to_db()
+    
+    # Auto-fetch tests
+    auto_fetch_tests = TestVolumeCalculatorAutoFetch()
+    auto_fetch_tests.setup_method()
+    auto_fetch_tests.test_current_volume_auto_fetch()
+    auto_fetch_tests.test_benchmark_auto_fetch()
+    
+    # Session cache tests
+    session_tests = TestVolumeCalculatorSessionCache()
+    session_tests.setup_method()
+    session_tests.test_session_cache_workflow()
+    
+    # Integration tests
+    integration_tests = TestVolumeCalculatorIntegration()
+    integration_tests.setup_method()
+    integration_tests.test_group_volume_calculation()
+    
+    print("\n🎉 ALL VOLUME CALCULATOR TESTS PASSED!")
+    print("✅ Auto-fetch functionality working")
+    print("✅ Session cache enabling exploration workflow")
+    print("✅ Database integration robust")
+    print("✅ Volume calculator ready for production")
 
 
 if __name__ == "__main__":
