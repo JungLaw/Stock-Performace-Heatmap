@@ -239,9 +239,15 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
     if from_date is None:
         from_date = datetime.now()
     
-    # Handle YTD specially
+    # Handle YTD specially - use last trading day of previous year
     if period == 'ytd':
-        return datetime(from_date.year, 1, 1)
+        # Get December 31st of previous year
+        dec_31_prev_year = datetime(from_date.year - 1, 12, 31)
+        # Move to Friday if Dec 31st falls on weekend
+        while dec_31_prev_year.weekday() >= 5:  # Saturday=5, Sunday=6
+            dec_31_prev_year -= timedelta(days=1)
+        logger.info(f"YTD baseline: {dec_31_prev_year.strftime('%Y-%m-%d %A')}")
+        return dec_31_prev_year
     
     # Handle 1Y specially - use exact calendar year then find last trading day
     if period == '1y':
@@ -254,7 +260,7 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
             while not is_us_trading_day(target_date):
                 target_date -= timedelta(days=1)
             
-            logger.info(f"🗓️ Using last trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')} (calendar: {calendar_year_back.strftime('%Y-%m-%d')})")
+            logger.info(f"Using last trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')} (calendar: {calendar_year_back.strftime('%Y-%m-%d')})")
             return target_date
         except ValueError:
             # Handle leap year edge case (Feb 29)
@@ -265,7 +271,7 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
             while not is_us_trading_day(target_date):
                 target_date -= timedelta(days=1)
                 
-            logger.info(f"🗓️ Leap year adjustment + trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')}")
+            logger.info(f"Leap year adjustment + trading day for 1Y: {target_date.strftime('%Y-%m-%d %A')}")
             return target_date
     
     # Handle 1D specially - get last COMPLETED trading day (not current day)
@@ -275,12 +281,12 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
         if len(last_two_days) >= 2:
             historical_day = last_two_days[0]  # Older trading day (Thursday)
             current_day = last_two_days[1]     # Most recent trading day (Friday)
-            logger.info(f"🗓️ Using 1D historical: {historical_day.strftime('%Y-%m-%d %A')} (vs current: {current_day.strftime('%Y-%m-%d %A')})")
+            logger.info(f"Using 1D historical: {historical_day.strftime('%Y-%m-%d %A')} (vs current: {current_day.strftime('%Y-%m-%d %A')})")
             return historical_day
         else:
             # Fallback to existing logic if insufficient data
             last_completed = get_last_completed_trading_day(from_date)
-            logger.info(f"🗓️ Fallback to last completed trading day for 1D: {last_completed.strftime('%Y-%m-%d %A')}")
+            logger.info(f"Fallback to last completed trading day for 1D: {last_completed.strftime('%Y-%m-%d %A')}")
             return last_completed
     
     # Map other periods to approximate trading days
@@ -306,7 +312,7 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
             adjusted_target = target_date
             while not is_us_trading_day(adjusted_target):
                 adjusted_target -= timedelta(days=1)
-            logger.info(f"🗓️ Adjusted base period from {target_date.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
+            logger.info(f"Adjusted base period from {target_date.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
             return adjusted_target
         
         return target_date
@@ -321,7 +327,7 @@ def get_trading_day_target(period: str, from_date: datetime = None) -> datetime:
             adjusted_target = calendar_target
             while not is_us_trading_day(adjusted_target):
                 adjusted_target -= timedelta(days=1)
-            logger.info(f"🗓️ Calendar fallback adjusted from {calendar_target.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
+            logger.info(f"Calendar fallback adjusted from {calendar_target.strftime('%Y-%m-%d')} to {adjusted_target.strftime('%Y-%m-%d %A')}")
             return adjusted_target
         
         return calendar_target
