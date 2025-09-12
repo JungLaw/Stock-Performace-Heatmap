@@ -26,36 +26,61 @@ A professional Finviz-style interactive heatmap dashboard for visualizing stock 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9+
-- Virtual environment (recommended)
+- Python 3.12+ (includes `venv` and `ensurepip`)
+- Optional: install the `uv` CLI globally  
+  ```bash
+  pip install uv
+  ```
 
 ### Installation
 
-1. **Clone/Navigate to the project**:
+1. **Clone the repository and cd into it**  
    ```bash
-   cd C:\\Users\\lawre\\Projects\\stock-heatmap-dashboard
+   git clone <your-repo-url>
+   cd stock-heatmap-dashboard
    ```
 
-2. **Activate virtual environment**:
+2. **Create and activate your virtual environment**  
    ```bash
-   # Windows
-   .venv\\Scripts\\activate
-   
-   # Linux/Mac  
+   python -m venv .venv
+
+   # Windows PowerShell
+   . .\.venv\Scripts\Activate.ps1
+
+   # macOS/Linux
    source .venv/bin/activate
    ```
 
-3. **Install dependencies** (if not already installed):
+3. **Bootstrap and upgrade pip**  
    ```bash
-   pip install -r requirements.txt
+   python -m ensurepip --upgrade
+   python -m pip install --upgrade pip
    ```
 
-4. **Run the dashboard**:
+4. **Install all project dependencies**  
+   ```bash
+   uv sync
+   ```
+
+5. **Run the dashboard**:
    ```bash
    streamlit run streamlit_app.py
    ```
 
-5. **Open your browser** to `http://localhost:8501`
+6. **Open your browser** to `http://localhost:8501`
+
+### Adding or Updating Dependencies
+
+Whenever you need to add a new package or bump an existing one, run:
+
+```bash
+uv add <package-name>
+uv sync
+```
+
+This updates your `pyproject.toml` and `uv.lock`, then installs the resolved dependency graph into `.venv`.  
+```
+
 
 ## 📱 How to Use
 
