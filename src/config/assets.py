@@ -3,7 +3,8 @@ Asset Group Definitions for Heatmap Dashboard
 Enhanced with display names for better user experience
 """
 
-# Country ETFs with display names (52 entries)
+# Country ETFs with display names (51 entries a/o 9/12)
+# 9/14/25: Have 3 emerging |3 developed | 2 'World's: All + Total |2 xcl. Japan
 COUNTRY_ETFS = [
     # Format: (ticker, display_name)
     ('VTI', 'US Total Market'),
@@ -12,9 +13,13 @@ COUNTRY_ETFS = [
     ('EEM', 'Emerging Markets'),
     ('VGK', 'Europe'),
     ('VPL', 'Asia-Pacific ex-Japan'),
+    ('EPP', 'Asia-Pacific ex-Japan'),
     ('EWJ', 'Japan'),
     ('EWZ', 'Brazil'),
     ('INDA', 'India'),
+    ('MCHI', 'China'),  # added 9/15    
+    ('FXI', 'China (lc)'),  # added 9/15
+    ('KWEB', 'China (tech)'),  # added 9/15    
     ('EWU', 'United Kingdom'),
     ('EWG', 'Germany'),
     ('EWQ', 'France'),
@@ -26,12 +31,11 @@ COUNTRY_ETFS = [
     ('EWD', 'Sweden'),
     ('EWN', 'Netherlands'),
     ('EWS', 'Singapore'),
-    ('EWT', 'Taiwan'),
+    ('EWT', 'Taiwan'),  # TWN
     ('EWY', 'South Korea'),
     ('EWH', 'Hong Kong'),
     ('EWM', 'Malaysia'),
     ('EPOL', 'Poland'),
-    ('EPP', 'Asia-Pacific ex-Japan'),
     ('EZA', 'South Africa'),
     ('ECH', 'Chile'),
     ('EIDO', 'Indonesia'),
@@ -40,49 +44,53 @@ COUNTRY_ETFS = [
     ('THD', 'Thailand'),
     ('TUR', 'Turkey'),
     ('RSX', 'Russia'),
-    ('QQQ', 'Nasdaq 100'),
-    ('ONEQ', 'Nasdaq'),
-    ('SPY', 'S&P 500'),
-    ('IWM', 'Russell 2000'),
-    ('DIA', 'Dow Jones'),
     ('EFA', 'Developed Markets'),
     ('IEFA', 'Developed Markets'),
     ('IEMG', 'Emerging Markets'),
     ('ACWI', 'All World'),
     ('VT', 'Total World'),
+    ('QQQ', 'Nasdaq 100'),
+    ('ONEQ', 'Nasdaq'),
+    ('SPY', 'S&P 500'),
+    ('IWM', 'Russell 2000'),
+    ('DIA', 'Dow Jones'),
     ('BND', 'US Bonds'),
     ('AGG', 'US Aggregate Bonds'),
     ('TLT', 'Long-Term Treasury'),
-    ('GLD', 'Gold'),
-    ('SLV', 'Silver'),
-    ('VNQ', 'US REITs'),
-    ('VNQI', 'International REITs'),
+    ('VCIT', 'Corporate Bond (Inter.)'), # New 9/14/25
+    ('USHY', 'Corporate Bonds (HY)'),       # New 9/14/25
+#    ('GLD', 'Gold'),     # 9/14: moved to 'SECTOR_ETFS
+#    ('SLV', 'Silver'),
+#    ('VNQ', 'US REITs'),
+#    ('VNQI', 'Intl. REITs'),
 ]
 
-# Sector ETFs with display names (30 entries)
+# Sector ETFs with display names (30 entries a/o 9/12)
 SECTOR_ETFS = [
     # Format: (ticker, display_name)
     ('XLF', 'Financial'),
+    ('KBE', 'Banking'),
+    ('KRE', 'Regional Banks'),    
     ('XLK', 'Technology'),
     ('XLE', 'Energy'),
-    ('XLV', 'Healthcare'),
+    ('XLV', 'Healthcare'),   # VHT, IYH
     ('XLI', 'Industrial'),
     ('XLP', 'Consumer Staples'),
     ('XLY', 'Consumer Discretionary'),
     ('XLU', 'Utilities'),
-    ('XLRE', 'Real Estate'),
-    ('XLC', 'Communication Services'),
+    ('XLC', 'Communications'),
     ('XLB', 'Materials'),
     ('XME', 'Metals & Mining'),
     ('XRT', 'Retail'),
     ('XHB', 'Homebuilders'),
     ('ITB', 'Home Construction'),
-    ('KBE', 'Banking'),
-    ('KRE', 'Regional Banks'),
-    ('SMH', 'Semiconductors'),
+    ('XLRE', 'REITs (xcl. Home, Office)'),
+    ('VNQ', 'REITs'),    # 9/14    
+    ('VNQI', 'Intl. REITs'),   # 9/14 
+ #  ('SMH', 'Semiconductors'),
     ('SOXX', 'Semiconductor Index'),
-    ('IBB', 'Biotech'),
-    ('XBI', 'Biotech Index'),
+    ('IBB', 'Biotech (MW,LC)'),
+    ('XBI', 'Biotech (EW, <LC)'),
     ('ARKK', 'Innovation ETF'),
     ('ARKQ', 'Autonomous & Robotics'),
     ('ARKW', 'Next Generation Internet'),
@@ -90,9 +98,24 @@ SECTOR_ETFS = [
     ('ARKG', 'Genomic Revolution'),
     ('HACK', 'Cybersecurity'),
     ('SKYY', 'Cloud Computing'),
-    ('ICLN', 'Clean Energy'),
-    ('PBW', 'Clean Energy'),
+    ('ICLN', 'Clean Energy (Global, LC)'),
+    ('PBW', 'Clean Energy (US, <LC)'),
+    ('GLD', 'Gold'),      # Moved: 9/14
+    ('SLV', 'Silver'),     # Moved: 9/14
+    ('NLR', 'Nuclear/Uran.'), # New: 9/14       
+    ('QQQ', 'Nasdaq 100'),     # Copied: 9/14
+    ('ONEQ', 'Nasdaq'),         # Copied: 9/14
+    ('SPY', 'S&P 500'),         # Copied: 9/14
+    ('IWM', 'Russell 2000'),         # Copied: 9/14
+    ('DIA', 'Dow Jones'),       # Copied: 9/14
+    ('BND', 'US Bonds'),    # Copied: 9/14
+    ('AGG', 'US Aggregate Bonds'),    # Copied: 9/14
+    ('TLT', 'Long-Term Treasury'),    # Copied: 9/14
+    ('VCIT', 'Corporate Bond (Inter.)'), # New/Copied 9/14/25
+    ('USHY', 'Corporate Bonds (HY)'),       # New/Copied 9/14/25    
 ]
+    # Potential additions: small cap, mid cap
+
 
 # Default custom tickers (remain as tickers only)
 CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'ONEQ']
@@ -136,7 +159,7 @@ ASSET_GROUPS = {
         "description": "Exchange-traded funds representing different countries and regions",
         "tickers": get_tickers_only(COUNTRY_ETFS),
         "ticker_names": get_ticker_name_dict(COUNTRY_ETFS),
-        "max_tickers": 52,
+        "max_tickers": 60,    # 52
         "use_display_names": True  # Flag to indicate display names should be used
     },
     "sector": {
@@ -144,7 +167,7 @@ ASSET_GROUPS = {
         "description": "Exchange-traded funds representing different market sectors",
         "tickers": get_tickers_only(SECTOR_ETFS),
         "ticker_names": get_ticker_name_dict(SECTOR_ETFS),
-        "max_tickers": 30,
+        "max_tickers": 60,   # 30
         "use_display_names": True  # Flag to indicate display names should be used
     },
     "custom": {
