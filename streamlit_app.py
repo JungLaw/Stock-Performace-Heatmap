@@ -22,6 +22,7 @@ sys.path.insert(0, str(src_path))
 # Import our modules
 from calculations.performance import DatabaseIntegratedPerformanceCalculator
 from calculations.volume import DatabaseIntegratedVolumeCalculator
+from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
 
@@ -35,6 +36,8 @@ def initialize_session_state():
         st.session_state.calculator = DatabaseIntegratedPerformanceCalculator()
     if 'volume_calculator' not in st.session_state:
         st.session_state.volume_calculator = DatabaseIntegratedVolumeCalculator()
+    if 'technical_calculator' not in st.session_state:
+        st.session_state.technical_calculator = DatabaseIntegratedTechnicalCalculator()
     if 'heatmap_generator' not in st.session_state:
         st.session_state.heatmap_generator = FinvizHeatmapGenerator()
     
@@ -58,6 +61,10 @@ def initialize_session_state():
 
     if 'selected_bucket' not in st.session_state:
         st.session_state.selected_bucket = 'custom'  # Default to custom bucket
+    
+    # Page selection for navigation
+    if 'selected_page' not in st.session_state:
+        st.session_state.selected_page = 'performance_heatmaps'  # Default to existing heatmaps
     
     # Analysis mode selection
     if 'selected_analysis_mode' not in st.session_state:
@@ -914,19 +921,127 @@ def display_data_table(performance_data):
         hide_index=True
     )
 
-def main():
-    """Main application function"""
-    # Page config
-    st.set_page_config(
-        page_title="Stock Performance Heatmap Dashboard",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+def show_technical_analysis_dashboard():
+    """Dashboard 1: Single Stock Technical Analysis"""
+    st.title("🎯 Technical Analysis Dashboard")
     
-    # Initialize session state
-    initialize_session_state()
+    # Description
+    st.markdown("""
+    Comprehensive technical analysis for individual stocks with moving averages,
+    technical indicators, and signal analysis.
+    """)
     
+    # Ticker input section
+    st.subheader("📊 Stock Selection")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        ticker = st.text_input(
+            "Enter Stock Symbol:",
+            value="NVDA",
+            placeholder="e.g., AAPL, MSFT, GOOGL",
+            help="Enter any valid stock ticker symbol"
+        ).upper().strip()
+    
+    with col2:
+        analyze_button = st.button(
+            "🔍 Analyze Stock",
+            type="primary",
+            use_container_width=True
+        )
+    
+    if ticker and (analyze_button or 'current_ticker' not in st.session_state or st.session_state.current_ticker != ticker):
+        # Store current ticker for persistence
+        st.session_state.current_ticker = ticker
+        
+        # Fetch technical analysis data
+        with st.spinner(f"Analyzing {ticker}..."):
+            try:
+                technical_calculator = st.session_state.technical_calculator
+                
+                # Calculate comprehensive technical analysis
+                analysis_data = technical_calculator.calculate_comprehensive_analysis(ticker)
+                
+                if not analysis_data.get('error'):
+                    # Store in session state
+                    st.session_state.technical_analysis_data = analysis_data
+                    st.session_state.technical_analysis_ticker = ticker
+                    st.session_state.technical_analysis_timestamp = datetime.now()
+                    
+                    st.success(f"✅ Analysis complete for {ticker}")
+                else:
+                    st.error(f"❌ Error analyzing {ticker}: {analysis_data.get('message', 'Unknown error')}")
+                    return
+                    
+            except Exception as e:
+                st.error(f"❌ Error analyzing {ticker}: {str(e)}")
+                return
+    
+    # Display analysis if available
+    if ('technical_analysis_data' in st.session_state and 
+        'technical_analysis_ticker' in st.session_state and
+        st.session_state.technical_analysis_ticker == ticker):
+        
+        data = st.session_state.technical_analysis_data
+        
+        # Show timestamp
+        if 'technical_analysis_timestamp' in st.session_state:
+            timestamp = st.session_state.technical_analysis_timestamp
+            st.caption(f"Analysis generated: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        st.markdown("---")
+        
+        # PLACEHOLDER: Display technical analysis components
+        # These will be implemented in subsequent steps
+        
+        # Moving Averages Table
+        st.subheader("📈 Moving Averages Analysis")
+        if 'moving_averages' in data:
+            # TODO: Implement moving averages table display
+            st.info("Moving averages table coming soon...")
+            with st.expander("Raw Moving Averages Data", expanded=False):
+                st.json(data['moving_averages'])
+        
+        # Technical Indicators Table  
+        st.subheader("📊 Technical Indicators")
+        if 'technical_indicators' in data:
+            # TODO: Implement technical indicators table display
+            st.info("Technical indicators table coming soon...")
+            with st.expander("Raw Technical Indicators Data", expanded=False):
+                st.json(data['technical_indicators'])
+        
+        # 52-Week High Analysis
+        st.subheader("📊 52-Week High Analysis")
+        if 'price_extremes' in data:
+            # TODO: Implement 52-week high analysis table
+            st.info("52-week high analysis coming soon...")
+            with st.expander("Raw Price Extremes Data", expanded=False):
+                st.json(data['price_extremes'])
+        
+        # Pivot Points
+        st.subheader("⚖️ Pivot Points")
+        if 'pivot_points' in data:
+            # TODO: Implement pivot points table
+            st.info("Pivot points table coming soon...")
+            with st.expander("Raw Pivot Points Data", expanded=False):
+                st.json(data['pivot_points'])
+        
+        # Rolling Heatmap
+        st.subheader("🔥 Rolling Signal Heatmap")
+        if 'rolling_signals' in data:
+            # TODO: Implement 10-day rolling heatmap
+            st.info("Rolling signal heatmap coming soon...")
+            with st.expander("Raw Rolling Signals Data", expanded=False):
+                st.json(data['rolling_signals'])
+    
+    elif ticker:
+        st.info(f"👆 Click 'Analyze Stock' to get technical analysis for {ticker}")
+    else:
+        st.info("👆 Enter a stock ticker symbol above to get started")
+
+def show_performance_heatmaps():
+    """Original Performance Heatmaps Dashboard (Existing Functionality)"""
     # Create header
     create_header()
     
@@ -1042,6 +1157,51 @@ def main():
         "Built with ❤️ using Streamlit and Plotly | "
         "Data provided by Yahoo Finance via yfinance"
     )
+
+def main():
+    """Main application function with page navigation"""
+    # Page config
+    st.set_page_config(
+        page_title="Stock Performance Dashboard",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize session state
+    initialize_session_state()
+    
+    # Page navigation in sidebar
+    st.sidebar.title("📊 Navigation")
+    st.session_state.selected_page = st.sidebar.selectbox(
+        "Choose Dashboard:",
+        options=['performance_heatmaps', 'technical_analysis', 'stock_comparison'],
+        format_func=lambda x: {
+            'performance_heatmaps': '📈 Performance Heatmaps',
+            'technical_analysis': '🎯 Technical Analysis',  
+            'stock_comparison': '📋 Stock Comparison'
+        }[x],
+        index=['performance_heatmaps', 'technical_analysis', 'stock_comparison'].index(
+            st.session_state.selected_page
+        ),
+        key='page_navigation'
+    )
+    
+    # Route to appropriate dashboard
+    if st.session_state.selected_page == 'performance_heatmaps':
+        show_performance_heatmaps()
+    elif st.session_state.selected_page == 'technical_analysis':
+        show_technical_analysis_dashboard()
+    elif st.session_state.selected_page == 'stock_comparison':
+        # Placeholder for Dashboard 2
+        st.title("📋 Stock Comparison Dashboard")
+        st.info("Dashboard 2: Multi-stock technical comparison coming soon...")
+        st.markdown("""
+        This dashboard will allow you to:
+        - Compare technical indicators across multiple stocks
+        - Use the existing bucket system (Country/Sector/Custom)
+        - Display technical heatmaps for comparative analysis
+        """)
 
 if __name__ == "__main__":
     main()
