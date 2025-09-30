@@ -40,6 +40,47 @@
 
 ---
 
+## PHASE 0.0: Preliminary `pandas-ta-classic` Validation Tests & Data Completeness Analysis
+NOTE: I added this on 9/27. Not sure where it should go, or whether it is necessary. I added this as I confirmed later that we could not go to "PHASE 1: Core Technical Calculator" as originally stated.
+
+**Priority**:   
+**Complexity**:   
+**Estimated Time**: 
+
+Validate that `pandas-ta-classic` works perfectly with the existing system **before** we start Phase 1 implementation, preventing mid-development issues.
+
+**Tasks:**
+- [x] **Create validation scripts**
+  - [x] tests/validate_pandas_ta.py - Tests pandas-ta-classic with the existing NVDA data
+  - [x] tests/validate_signal_logic.py - Validates the corrected signal logic (RSI 35-70, MA ±0.025%, ADX fix)
+  - [x] tests/validate_database_schema.py - Safely adds technical analysis tables with backup
+  - [x] run_validation.py - Master script to run all validations in sequence
+
+**1. pandas-ta-classic Integration**
+- [x] Confirm pandas-ta-classic works with the existing OHLCV data format
+- [x] Test key indicators: RSI, MACD, Elder Ray Index (ERI), ADX, Stochastic
+- [ ] Verify crossover detection tools: `ta.xsignals()`, `ta.tsignals()`
+- [x] Test with actual NVDA data from the existing database
+
+**2. Signal Logic Validation**
+- [x] Test the corrected RSI logic (35-70 neutral zone vs old 50+ bias)
+- [x] Validate moving average ±0.025% threshold logic
+- [x] Confirm ADX directional indicator logic (-DI > +DI for sell signals)
+
+**3. Database Schema Preparation**
+- [x] Create the 3 new technical analysis tables (`technical_indicators_daily`, `price_extremes_periods`, `pivot_points_daily`)
+- [x] Test on a database copy first (safety)
+- [x] Verify schema integrates with existing `daily_prices` table
+
+**Data Completeness Analysis** 
+- On 9/27/25, Claude confirmed that: "The technical analysis calculator can leverage these existing patterns without needing separate data validation infrastructure. Your auto-fetch system will naturally fill any gaps as technical indicators request historical data."
+"Your existing files provide complete data completeness & integrity coverage for technical analysis features:
+- **performance.py**: Trading day logic, holiday handling, auto-fetch, strict date validation
+- **database.py**: Database utilities and data quality checks
+- **inspect_database.py**: Gap detection and freshness monitoring
+- **settings.py**: Configuration management"
+
+
 ## 🔧 PHASE 1: Core Technical Calculator (Weeks 1-2)
 
 ### **P1.1: Database Schema Design and Implementation**
@@ -69,6 +110,9 @@
 - ✅ Database queries execute in <500ms for single ticker
 - ✅ Migration script can be run safely on production database
 - ✅ All existing functionality continues to work unchanged
+
+
+
 
 ### **P1.2: DatabaseIntegratedTechnicalCalculator Foundation**  
 **Priority**: P0 (Blocking)  

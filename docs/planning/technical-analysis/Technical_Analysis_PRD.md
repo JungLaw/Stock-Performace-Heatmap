@@ -112,7 +112,7 @@ Current Price: $177.19 (9/25/25, 12:31PM)
 ```
 
 **52-Week High Features:**
-- ✅ Multiple time periods: 52W, 3M, 1M, 2W
+- ✅ Multiple time periods: 52W, 6M, 3M, 1M, 2W
 - ✅ Percentage breakdown levels: -5%, -10%, -15%, -20%
 - ✅ Current price comparison to all levels
 - ✅ Color coding for proximity to highs/lows
