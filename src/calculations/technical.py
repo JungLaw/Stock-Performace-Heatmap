@@ -497,7 +497,7 @@ class DatabaseIntegratedTechnicalCalculator:
     
     def _save_technical_indicators_to_db(self, ticker: str, date: date, indicators: Dict) -> bool:
         """
-        Save technical indicators to database
+        Save technical indicators to database (only if final data available)
         
         Args:
             ticker: Stock ticker symbol
@@ -507,6 +507,25 @@ class DatabaseIntegratedTechnicalCalculator:
         Returns:
             True if saved successfully, False otherwise
         """
+        # Import trading day logic
+        from .performance import get_last_completed_trading_day
+        
+        # Final data validation: Only save if date is last completed trading day or earlier
+        last_complete_day = get_last_completed_trading_day()
+        
+        # Convert to date objects for comparison
+        if isinstance(last_complete_day, datetime):
+            last_complete_day = last_complete_day.date()
+        
+        if isinstance(date, datetime):
+            date_only = date.date()
+        else:
+            date_only = date
+        
+        if date_only > last_complete_day:
+            logger.warning(f"⚠️ Skipping database save for {ticker} on {date_only} - final data not available yet (last complete: {last_complete_day})")
+            return False
+        
         conn = self._get_database_connection()
         if not conn:
             return False

@@ -84,6 +84,69 @@ def initialize_session_state():
     if 'custom_visible_tickers' not in st.session_state:
         st.session_state.custom_visible_tickers = []   # Will be populated on first run
 
+def is_bucket_ticker(ticker: str) -> bool:
+    """
+    Check if ticker exists in any of the three buckets (COUNTRY/SECTOR/CUSTOM)
+    
+    Args:
+        ticker: Stock ticker symbol (uppercase)
+        
+    Returns:
+        True if ticker is in any bucket, False otherwise
+    """
+    # Get all bucket tickers
+    all_bucket_tickers = []
+    
+    # COUNTRY_ETFS
+    for item in ASSET_GROUPS.get('country', []):
+        if isinstance(item, tuple):
+            all_bucket_tickers.append(item[0])  # (ticker, display_name)
+        else:
+            all_bucket_tickers.append(item)     # Just ticker
+    
+    # SECTOR_ETFS
+    for item in ASSET_GROUPS.get('sector', []):
+        if isinstance(item, tuple):
+            all_bucket_tickers.append(item[0])
+        else:
+            all_bucket_tickers.append(item)
+    
+    # CUSTOM_DEFAULT
+    for item in CUSTOM_DEFAULT:
+        if isinstance(item, tuple):
+            all_bucket_tickers.append(item[0])
+        else:
+            all_bucket_tickers.append(item)
+    
+    return ticker.upper() in [t.upper() for t in all_bucket_tickers]
+
+def is_final_data_available_for_date(target_date: datetime) -> bool:
+    """
+    Check if final data is available for a given date
+    Only save to database if data is from last completed trading day or earlier
+    
+    Args:
+        target_date: The date to check
+        
+    Returns:
+        True if final data is available (target_date <= last completed trading day)
+    """
+    from calculations.performance import get_last_completed_trading_day
+    
+    last_complete_day = get_last_completed_trading_day()
+    
+    # Convert both to date objects for comparison
+    if isinstance(last_complete_day, datetime):
+        last_complete_day = last_complete_day.date()
+    
+    if isinstance(target_date, datetime):
+        target_date_only = target_date.date()
+    else:
+        target_date_only = target_date
+    
+    # Final data is available if target date is on or before last completed trading day
+    return target_date_only <= last_complete_day
+
 def create_level1_predefined_selection():
     """Level 1: Predefined ticker selection with checkboxes"""
     from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
@@ -934,7 +997,7 @@ def show_technical_analysis_dashboard():
     # Ticker input section
     st.subheader("📊 Stock Selection")
     
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([3, 2, 1])
     
     with col1:
         ticker = st.text_input(
@@ -945,8 +1008,17 @@ def show_technical_analysis_dashboard():
         ).upper().strip()
     
     with col2:
+        # Save to database checkbox (only for non-bucket tickers)
+        save_to_db_checkbox = st.checkbox(
+            "Save to database (Tracker)",
+            value=False,
+            help="Check to permanently track this ticker with daily updates. Bucket tickers (Country/Sector/Custom) are always saved.",
+            key="ta_save_to_db_checkbox"
+        )
+    
+    with col3:
         analyze_button = st.button(
-            "🔍 Analyze Stock",
+            "🔍 Analyze",
             type="primary",
             use_container_width=True
         )
@@ -955,13 +1027,30 @@ def show_technical_analysis_dashboard():
         # Store current ticker for persistence
         st.session_state.current_ticker = ticker
         
+        # Determine if we should save to database
+        is_bucket = is_bucket_ticker(ticker)
+        
+        # Bucket tickers always save, non-bucket tickers respect checkbox
+        should_save_to_db = is_bucket or save_to_db_checkbox
+        
+        # Show info message about save behavior
+        if is_bucket:
+            st.info(f"ℹ️ {ticker} is a bucket ticker and will be automatically tracked with daily updates.")
+        elif save_to_db_checkbox:
+            st.info(f"ℹ️ {ticker} will be added to tracking list with daily updates.")
+        else:
+            st.info(f"ℹ️ {ticker} analysis is session-only. Check 'Save to database' to track permanently.")
+        
         # Fetch technical analysis data
         with st.spinner(f"Analyzing {ticker}..."):
             try:
                 technical_calculator = st.session_state.technical_calculator
                 
-                # Calculate comprehensive technical analysis
-                analysis_data = technical_calculator.calculate_comprehensive_analysis(ticker)
+                # Calculate comprehensive technical analysis with save_to_db control
+                analysis_data = technical_calculator.calculate_comprehensive_analysis(
+                    ticker, 
+                    save_to_db=should_save_to_db
+                )
                 
                 if not analysis_data.get('error'):
                     # Store in session state
