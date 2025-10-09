@@ -589,6 +589,368 @@ class DatabaseIntegratedTechnicalCalculator:
         finally:
             conn.close()
     
+    def _get_latest_indicator_date(self, ticker: str) -> Optional[datetime.date]:
+        """Get the latest date with technical indicators for a ticker"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            query = f"""
+            SELECT MAX(date) as latest_date
+            FROM {self.technical_table}
+            WHERE ticker = ?
+            """
+            
+            cursor.execute(query, (ticker,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result and result[0]:
+                return datetime.strptime(result[0], '%Y-%m-%d').date()
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting latest indicator date for {ticker}: {e}")
+            return None
+    
+    def _calculate_indicators_for_date(self, ohlcv_data: pd.DataFrame, target_date: datetime.date) -> Dict:
+        """Calculate technical indicators using data up to target_date"""
+        try:
+            # Filter data up to target date
+            ohlcv_data.index = pd.to_datetime(ohlcv_data.index)
+            target_datetime = pd.Timestamp(target_date)
+            filtered_data = ohlcv_data[ohlcv_data.index <= target_datetime].copy()
+            
+            if len(filtered_data) < 200:
+                logger.warning(f"Insufficient data for {target_date}: only {len(filtered_data)} rows")
+                return {}
+            
+            # Calculate all indicators using existing methods
+            indicators = {}
+            
+            # Moving averages
+            ma_results = self._calculate_moving_averages(filtered_data)
+            if ma_results:
+                indicators.update(ma_results)
+            
+            # Technical indicators
+            tech_results = self._calculate_technical_indicators(filtered_data)
+            if tech_results:
+                indicators.update(tech_results)
+            
+            return indicators
+            
+        except Exception as e:
+            logger.error(f"Error calculating indicators for {target_date}: {e}")
+            return {}
+    
+    def backfill_technical_indicators(self, ticker: str, days: int = 22) -> Dict:
+        """
+        Fill gaps in technical_indicators_daily table for time-series continuity
+        
+        Args:
+            ticker: Stock ticker symbol
+            days: Number of trading days to backfill (default: 22 = 1 month)
+        
+        Returns:
+            Dict with success status and number of dates backfilled
+        """
+        try:
+            from .performance import get_last_completed_trading_day, get_last_n_trading_days
+            
+            # 1. Check if data is current
+            latest_date = self._get_latest_indicator_date(ticker)
+            last_complete_day = get_last_completed_trading_day()
+            
+            if latest_date and latest_date >= last_complete_day:
+                logger.info(f"✅ {ticker} technical indicators current (latest: {latest_date})")
+                return {'success': True, 'backfilled': 0, 'reason': 'data_current'}
+            
+            # 2. Get required date range (last 22 trading days)
+            required_dates = get_last_n_trading_days(days, end_date=last_complete_day)
+            
+            # 3. Query database for existing dates
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            placeholders = ','.join(['?' for _ in required_dates])
+            query = f"""
+            SELECT DISTINCT date
+            FROM {self.technical_table}
+            WHERE ticker = ? AND date IN ({placeholders})
+            """
+            
+            date_strings = [d.strftime('%Y-%m-%d') for d in required_dates]
+            cursor.execute(query, [ticker] + date_strings)
+            existing_dates_raw = cursor.fetchall()
+            conn.close()
+            
+            existing_dates = [datetime.strptime(row[0], '%Y-%m-%d').date() for row in existing_dates_raw]
+            
+            # 4. Identify missing dates
+            missing_dates = [d for d in required_dates if d not in existing_dates]
+            
+            if not missing_dates:
+                logger.info(f"✅ {ticker} has complete {days}-day history")
+                return {'success': True, 'backfilled': 0, 'reason': 'no_gaps'}
+            
+            logger.info(f"🔄 Backfilling {len(missing_dates)} missing dates for {ticker}")
+            
+            # 5. Fetch OHLCV data (includes gap detection)
+            ohlcv_data = self._get_sufficient_ohlcv_data(
+                ticker=ticker,
+                periods_needed=200,  # Need sufficient data for 200-day MA
+                save_to_db=True
+            )
+            
+            if ohlcv_data is None or ohlcv_data.empty:
+                logger.error(f"Failed to fetch OHLCV data for {ticker}")
+                return {'success': False, 'error': 'ohlcv_fetch_failed'}
+            
+            # 6. Calculate and save indicators for each missing date
+            backfilled_count = 0
+            for date in sorted(missing_dates):
+                indicators = self._calculate_indicators_for_date(ohlcv_data, date)
+                
+                if indicators:
+                    success = self._save_technical_indicators_to_db(ticker, date, indicators)
+                    if success:
+                        backfilled_count += 1
+            
+            logger.info(f"✅ Backfilled {backfilled_count}/{len(missing_dates)} dates for {ticker}")
+            return {
+                'success': True,
+                'backfilled': backfilled_count,
+                'attempted': len(missing_dates)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error backfilling technical indicators for {ticker}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _get_price_extremes_from_db(self, ticker: str, period: str) -> Optional[Dict]:
+        """Get cached price extremes from database with staleness check"""
+        try:
+            from .performance import get_last_completed_trading_day
+            
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            query = f"""
+            SELECT high_price, low_price, high_date, low_date,
+                   level_minus_5pct, level_minus_10pct, level_minus_15pct,
+                   level_minus_20pct, level_minus_33pct, updated_at
+            FROM {self.extremes_table}
+            WHERE ticker = ? AND period = ?
+            """
+            
+            cursor.execute(query, (ticker, period))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result:
+                return None
+            
+            # Check staleness
+            updated_at = datetime.strptime(result[9], '%Y-%m-%d %H:%M:%S').date()
+            last_complete_day = get_last_completed_trading_day()
+            
+            if updated_at < last_complete_day:
+                logger.info(f"Cached {period} extremes for {ticker} are stale (updated: {updated_at})")
+                return None
+            
+            return {
+                'high_price': result[0],
+                'low_price': result[1],
+                'high_date': result[2],
+                'low_date': result[3],
+                'level_minus_5pct': result[4],
+                'level_minus_10pct': result[5],
+                'level_minus_15pct': result[6],
+                'level_minus_20pct': result[7],
+                'level_minus_33pct': result[8],
+                'updated_at': result[9]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting price extremes from DB for {ticker} {period}: {e}")
+            return None
+    
+    def _calculate_price_extremes(self, ticker: str, period: str, start_date: datetime.date, 
+                                   close_based: bool = True) -> Optional[Dict]:
+        """Calculate high/low extremes for a period"""
+        try:
+            # Fetch OHLCV data
+            ohlcv_data = self._get_sufficient_ohlcv_data(ticker, periods_needed=200, save_to_db=True)
+            if ohlcv_data is None or ohlcv_data.empty:
+                return None
+            
+            # Filter data from start_date to present
+            ohlcv_data.index = pd.to_datetime(ohlcv_data.index)
+            start_datetime = pd.Timestamp(start_date)
+            period_data = ohlcv_data[ohlcv_data.index >= start_datetime].copy()
+            
+            if period_data.empty:
+                logger.warning(f"No data available for {ticker} from {start_date}")
+                return None
+            
+            # Calculate high/low based on close_based flag
+            if close_based:
+                high_price = period_data['Close'].max()
+                low_price = period_data['Close'].min()
+                high_date = period_data['Close'].idxmax().date()
+                low_date = period_data['Close'].idxmin().date()
+            else:
+                high_price = period_data['High'].max()
+                low_price = period_data['Low'].min()
+                high_date = period_data['High'].idxmax().date()
+                low_date = period_data['Low'].idxmin().date()
+            
+            # Calculate breakdown levels
+            breakdown_levels = {
+                'level_minus_5pct': high_price * 0.95,
+                'level_minus_10pct': high_price * 0.90,
+                'level_minus_15pct': high_price * 0.85,
+                'level_minus_20pct': high_price * 0.80,
+                'level_minus_33pct': high_price * 0.67
+            }
+            
+            return {
+                'high_price': high_price,
+                'low_price': low_price,
+                'high_date': high_date.strftime('%Y-%m-%d'),
+                'low_date': low_date.strftime('%Y-%m-%d'),
+                **breakdown_levels
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating price extremes for {ticker} {period}: {e}")
+            return None
+    
+    def _save_price_extremes_to_db(self, ticker: str, period: str, extremes_data: Dict) -> bool:
+        """Save price extremes to database"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            query = f"""
+            INSERT OR REPLACE INTO {self.extremes_table}
+            (ticker, period, high_price, low_price, high_date, low_date,
+             level_minus_5pct, level_minus_10pct, level_minus_15pct,
+             level_minus_20pct, level_minus_33pct, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """
+            
+            cursor.execute(query, (
+                ticker,
+                period,
+                extremes_data['high_price'],
+                extremes_data['low_price'],
+                extremes_data['high_date'],
+                extremes_data['low_date'],
+                extremes_data['level_minus_5pct'],
+                extremes_data['level_minus_10pct'],
+                extremes_data['level_minus_15pct'],
+                extremes_data['level_minus_20pct'],
+                extremes_data['level_minus_33pct']
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"✅ Price extremes saved for {ticker} {period}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving price extremes for {ticker} {period}: {e}")
+            return False
+    
+    def calculate_52_week_analysis(self, ticker: str, user_52w_high: Optional[float] = None) -> Dict:
+        """
+        Calculate 52-week high/low analysis with 6 periods
+        
+        Args:
+            ticker: Stock ticker symbol
+            user_52w_high: Optional user-inputted intraday high for '52w' period
+        
+        Returns:
+            Dict with all 6 periods and their breakdown levels
+        """
+        try:
+            from .performance import get_trading_day_target, get_last_completed_trading_day
+            
+            last_complete_day = get_last_completed_trading_day()
+            
+            # Define all 6 periods with their start dates
+            periods_config = {
+                '52w_close': ('52w', True),   # Close-based calculation
+                '6m': ('6m', True),
+                '3m': ('3m', True),
+                '1m': ('1m', True),
+                'ytd': ('ytd', True)
+            }
+            
+            results = {}
+            
+            # Calculate all close-based periods first
+            for period, (period_key, close_based) in periods_config.items():
+                # Check cache first
+                cached = self._get_price_extremes_from_db(ticker, period)
+                if cached:
+                    results[period] = cached
+                    continue
+                
+                # Calculate if not cached or stale
+                start_date = get_trading_day_target(period_key)
+                extremes = self._calculate_price_extremes(ticker, period, start_date, close_based=True)
+                
+                if extremes:
+                    self._save_price_extremes_to_db(ticker, period, extremes)
+                    results[period] = extremes
+            
+            # Handle '52w' period with user override logic
+            # First calculate intraday-based 52w high
+            start_date_52w = get_trading_day_target('52w')
+            intraday_extremes = self._calculate_price_extremes(ticker, '52w', start_date_52w, close_based=False)
+            
+            if intraday_extremes and results.get('52w_close'):
+                # Determine final 52w high: max(intraday_high, user_input) or just intraday_high
+                intraday_high = intraday_extremes['high_price']
+                close_based_high = results['52w_close']['high_price']
+                
+                # Validation: user input must exceed close-based high
+                if user_52w_high:
+                    if user_52w_high <= close_based_high:
+                        return {
+                            'error': True,
+                            'message': f'Custom high (${user_52w_high:.2f}) must exceed 52W closing high (${close_based_high:.2f})'
+                        }
+                    final_52w_high = max(intraday_high, user_52w_high)
+                else:
+                    final_52w_high = intraday_high
+                
+                # Use intraday low for consistency
+                final_extremes = {
+                    'high_price': final_52w_high,
+                    'low_price': intraday_extremes['low_price'],
+                    'high_date': intraday_extremes['high_date'],
+                    'low_date': intraday_extremes['low_date'],
+                    'level_minus_5pct': final_52w_high * 0.95,
+                    'level_minus_10pct': final_52w_high * 0.90,
+                    'level_minus_15pct': final_52w_high * 0.85,
+                    'level_minus_20pct': final_52w_high * 0.80,
+                    'level_minus_33pct': final_52w_high * 0.67
+                }
+                
+                self._save_price_extremes_to_db(ticker, '52w', final_extremes)
+                results['52w'] = final_extremes
+            
+            return {'success': True, 'periods': results}
+            
+        except Exception as e:
+            logger.error(f"Error calculating 52-week analysis for {ticker}: {e}")
+            return {'success': False, 'error': str(e)}
+    
     def calculate_comprehensive_analysis(self, ticker: str, save_to_db: bool = True) -> Dict:
         """
         Calculate comprehensive technical analysis for Dashboard 1
