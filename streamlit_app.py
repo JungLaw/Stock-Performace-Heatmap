@@ -1058,6 +1058,11 @@ def show_technical_analysis_dashboard():
                     st.session_state.technical_analysis_ticker = ticker
                     st.session_state.technical_analysis_timestamp = datetime.now()
                     
+                    # Also calculate 52-week analysis on initial analysis
+                    extremes_result = technical_calculator.calculate_52_week_analysis(ticker)
+                    if extremes_result.get('success'):
+                        st.session_state.price_extremes_data = extremes_result['periods']
+                    
                     st.success(f"✅ Analysis complete for {ticker}")
                 else:
                     st.error(f"❌ Error analyzing {ticker}: {analysis_data.get('message', 'Unknown error')}")
@@ -1109,38 +1114,13 @@ def show_technical_analysis_dashboard():
         
         # Display current price
         st.markdown(f"**Current Price:** ${current_price:.2f} ({timestamp_str})")
-        
-        # Custom 52W high input field
-        custom_52w_high = st.number_input(
-            "Input custom 52W high:",
-            min_value=0.01,
-            value=None,
-            step=0.01,
-            format="%.2f",
-            placeholder="e.g., 195.30",
-            help="Enter an intraday high that exceeds the 52W closing high",
-            key="custom_52w_high_input"
-        )
-        
-        # Calculate 52-week analysis with optional user override
-        if st.button("🔄 Calculate 52-Week Analysis", key="calc_52w"):
-            with st.spinner("Calculating 52-week analysis..."):
-                extremes_result = st.session_state.technical_calculator.calculate_52_week_analysis(
-                    ticker, 
-                    user_52w_high=custom_52w_high
-                )
-                
-                if extremes_result.get('error'):
-                    st.error(f"❌ {extremes_result['message']}")
-                elif extremes_result.get('success'):
-                    st.session_state.price_extremes_data = extremes_result['periods']
-                    st.success("✅ 52-week analysis calculated")
+        st.markdown("---")
         
         # Display 52-week analysis table if data available
-        if 'price_extremes_data' in st.session_state:
+        if 'price_extremes_data' in st.session_state and st.session_state.price_extremes_data:
             periods_data = st.session_state.price_extremes_data
             
-            # Create display table
+            # Create display table with restructured columns
             table_rows = []
             period_order = ['52w', '52w_close', '6m', '3m', '1m', 'ytd']
             period_labels = {
@@ -1168,28 +1148,71 @@ def show_technical_analysis_dashboard():
                     row = {
                         'Period': period_labels[period],
                         'High': f"${p_data['high_price']:.2f}",
+                        '% Chg (High)': f"{vs_high:+.1f}%",
                         '-5%': f"${p_data['level_minus_5pct']:.2f}",
+                        '% Chg (-5%)': f"{vs_5pct:+.1f}%",
                         '-10%': f"${p_data['level_minus_10pct']:.2f}",
+                        '% Chg (-10%)': f"{vs_10pct:+.1f}%",
                         '-15%': f"${p_data['level_minus_15pct']:.2f}",
+                        '% Chg (-15%)': f"{vs_15pct:+.1f}%",
                         '-20%': f"${p_data['level_minus_20pct']:.2f}",
+                        '% Chg (-20%)': f"{vs_20pct:+.1f}%",
                         '-33%': f"${p_data['level_minus_33pct']:.2f}",
+                        '% Chg (-33%)': f"{vs_33pct:+.1f}%",
                         'Low': f"${p_data['low_price']:.2f}",
-                        'vs High': f"{vs_high:+.1f}%",
-                        'vs -5%': f"{vs_5pct:+.1f}%",
-                        'vs -10%': f"{vs_10pct:+.1f}%",
-                        'vs -15%': f"{vs_15pct:+.1f}%",
-                        'vs -20%': f"{vs_20pct:+.1f}%",
-                        'vs -33%': f"{vs_33pct:+.1f}%",
-                        'vs Low': f"{vs_low:+.1f}%"
+                        '% Chg (Low)': f"{vs_low:+.1f}%"
                     }
                     table_rows.append(row)
             
             if table_rows:
                 df = pd.DataFrame(table_rows)
+                # TODO: Add styling for negative percentages (red color)
                 st.dataframe(df, use_container_width=True, hide_index=True)
         
-        else:
-            st.info("👆 Click 'Calculate 52-Week Analysis' to generate the table")
+        # Custom input section BELOW table
+        st.markdown("---")
+        st.markdown("**Update 52W High** (optional)")
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
+        with col1:
+            custom_52w_high = st.number_input(
+                "Custom 52W high:",
+                min_value=0.01,
+                value=None,
+                step=None,  # Removes +/- buttons
+                format="%.2f",
+                placeholder="e.g., 195.30",
+                help="Enter intraday high exceeding 52W closing high",
+                key="custom_52w_high_input"
+            )
+        
+        with col2:
+            custom_date = st.date_input(
+                "Date of high:",
+                value=None,
+                help="Date when the custom high occurred",
+                key="custom_52w_date_input"
+            )
+        
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacer for alignment
+            if st.button("🔄 Update", key="update_52w", use_container_width=True):
+                if custom_52w_high:
+                    with st.spinner("Updating 52-week analysis..."):
+                        extremes_result = st.session_state.technical_calculator.calculate_52_week_analysis(
+                            ticker,
+                            user_52w_high=custom_52w_high
+                        )
+                        
+                        if extremes_result.get('error'):
+                            st.error(f"❌ {extremes_result['message']}")
+                        elif extremes_result.get('success'):
+                            st.session_state.price_extremes_data = extremes_result['periods']
+                            st.success("✅ 52-week analysis updated")
+                            st.rerun()
+                else:
+                    st.warning("⚠️ Enter a custom high value first")
         
         # Pivot Points
         st.subheader("⚖️ Pivot Points")

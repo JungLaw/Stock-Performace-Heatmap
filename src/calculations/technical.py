@@ -883,7 +883,7 @@ class DatabaseIntegratedTechnicalCalculator:
             
             # Define all 6 periods with their start dates
             periods_config = {
-                '52w_close': ('52w', True),   # Close-based calculation
+                '52w_close': ('1y', True),   # Close-based calculation (use '1y' not '52w')
                 '6m': ('6m', True),
                 '3m': ('3m', True),
                 '1m': ('1m', True),
@@ -910,16 +910,17 @@ class DatabaseIntegratedTechnicalCalculator:
             
             # Handle '52w' period with user override logic
             # First calculate intraday-based 52w high
-            start_date_52w = get_trading_day_target('52w')
+            start_date_52w = get_trading_day_target('1y')  # Use '1y' for 52-week period
             intraday_extremes = self._calculate_price_extremes(ticker, '52w', start_date_52w, close_based=False)
             
-            if intraday_extremes and results.get('52w_close'):
-                # Determine final 52w high: max(intraday_high, user_input) or just intraday_high
+            if intraday_extremes:
                 intraday_high = intraday_extremes['high_price']
-                close_based_high = results['52w_close']['high_price']
+                
+                # Get close-based high for validation (if available)
+                close_based_high = results.get('52w_close', {}).get('high_price', 0)
                 
                 # Validation: user input must exceed close-based high
-                if user_52w_high:
+                if user_52w_high and close_based_high:
                     if user_52w_high <= close_based_high:
                         return {
                             'error': True,
@@ -927,7 +928,8 @@ class DatabaseIntegratedTechnicalCalculator:
                         }
                     final_52w_high = max(intraday_high, user_52w_high)
                 else:
-                    final_52w_high = intraday_high
+                    # No validation if no user input or no 52w_close available
+                    final_52w_high = max(intraday_high, user_52w_high) if user_52w_high else intraday_high
                 
                 # Use intraday low for consistency
                 final_extremes = {
