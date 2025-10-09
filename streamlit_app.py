@@ -1260,6 +1260,20 @@ def main():
     # Initialize session state
     initialize_session_state()
     
+    # Background update: Pre-load technical indicators for CUSTOM_DEFAULT tickers
+    if 'technical_background_updated' not in st.session_state:
+        with st.spinner(f'Refreshing technical indicators for {len(CUSTOM_DEFAULT)} tickers...'):
+            for ticker in CUSTOM_DEFAULT:
+                try:
+                    st.session_state.tech_calculator.calculate_comprehensive_analysis(
+                        ticker=ticker,
+                        save_to_db=True
+                    )
+                except Exception as e:
+                    # Silent failure - don't break app load for individual ticker failures
+                    pass
+        st.session_state.technical_background_updated = True
+    
     # Page navigation in sidebar
     st.sidebar.title("📊 Navigation")
     st.session_state.selected_page = st.sidebar.selectbox(

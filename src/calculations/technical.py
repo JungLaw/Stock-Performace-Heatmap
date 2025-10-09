@@ -547,11 +547,21 @@ class DatabaseIntegratedTechnicalCalculator:
                 'atr_14': indicators.get('atr_14'),
                 'bull_power': indicators.get('bull_power'),
                 'bear_power': indicators.get('bear_power'),
+                'sma_5': indicators.get('sma_5'),
+                'sma_9': indicators.get('sma_9'),
+                'sma_10': indicators.get('sma_10'),
                 'sma_20': indicators.get('sma_20'),
+                'sma_21': indicators.get('sma_21'),
                 'sma_50': indicators.get('sma_50'),
+                'sma_100': indicators.get('sma_100'),
                 'sma_200': indicators.get('sma_200'),
+                'ema_5': indicators.get('ema_5'),
+                'ema_9': indicators.get('ema_9'),
+                'ema_10': indicators.get('ema_10'),
                 'ema_20': indicators.get('ema_20'),
+                'ema_21': indicators.get('ema_21'),
                 'ema_50': indicators.get('ema_50'),
+                'ema_100': indicators.get('ema_100'),
                 'ema_200': indicators.get('ema_200')
             }
             
