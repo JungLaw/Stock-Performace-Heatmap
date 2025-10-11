@@ -83,6 +83,10 @@ class DatabaseIntegratedTechnicalCalculator:
         self.extremes_table = "price_extremes_periods"
         self.pivot_table = "pivot_points_daily"
         
+        # Import and initialize performance calculator for current price fetching
+        from .performance import DatabaseIntegratedPerformanceCalculator
+        self.performance_calculator = DatabaseIntegratedPerformanceCalculator(db_file)
+        
         # Session-level cache for technical data when save_to_db=False
         self.session_technical_cache = {}  # {ticker: {date: indicators_dict}}
         
@@ -1122,8 +1126,14 @@ class DatabaseIntegratedTechnicalCalculator:
             }
         
         try:
-            # Current price (most recent close)
-            current_price = df['Close'].iloc[-1]
+            # Current price - fetch live price from yfinance with session caching
+            current_price = self.performance_calculator.get_current_price(ticker)
+            
+            # Fallback to last database close if yfinance fails
+            if current_price is None:
+                current_price = df['Close'].iloc[-1]
+                logger.warning(f"⚠️ Using last database close for {ticker}: ${current_price:.2f}")
+            
             current_date = df.index[-1]
             
             # All periods per PRD specification
