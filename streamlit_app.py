@@ -928,6 +928,397 @@ def display_heatmap(performance_data, title, asset_group=None):
     # Display with full width
     st.plotly_chart(fig, use_container_width=True)
 
+def generate_ma_comment(ticker, period, ma_type, current_price, ma_value, price_vs_ma):
+    """Generate contextual comment for moving average"""
+    # Determine if price is above or below MA
+    if price_vs_ma > 0:
+        direction = "above"
+        fall_pct = abs((ma_value - current_price) / current_price * 100)
+        comment = f"{ticker} is {price_vs_ma:+.1f}% above its {period}D {ma_type}. It has to fall {fall_pct:.1f}% to reach it."
+    else:
+        direction = "below"
+        rise_pct = abs((ma_value - current_price) / current_price * 100)
+        comment = f"{ticker} is {price_vs_ma:.1f}% below its {period}D {ma_type}. It has to rise {rise_pct:.1f}% to reach it."
+    
+    return comment
+
+def display_technical_indicators_cards(indicators_data):
+    """Display technical indicators in card-based layout similar to Investing.com"""
+    if not indicators_data:
+        st.warning("No technical indicators data available")
+        return
+    
+    # Define indicator display order and formatting
+    indicator_configs = {
+        'rsi_14': {
+            'name': 'RSI (14)',
+            'format': '{:.2f}',
+            'description': 'Relative Strength Index'
+        },
+        'macd': {
+            'name': 'MACD (12,26)',
+            'format': '{:.3f}',
+            'description': 'Moving Average Convergence Divergence'
+        },
+        'stochastic': {
+            'name': 'STOCH (9,6)',
+            'format': '{:.2f}',
+            'description': 'Stochastic Oscillator'
+        },
+        'adx': {
+            'name': 'ADX (14)',
+            'format': '{:.2f}',
+            'description': 'Average Directional Index'
+        },
+        'elder_ray': {
+            'name': 'Bull/Bear Power',
+            'format': '{:.3f}',
+            'description': 'Elder-ray System'
+        },
+        'atr_14': {
+            'name': 'ATR (14)',
+            'format': '{:.2f}',
+            'description': 'Average True Range'
+        },
+        'williams_r': {
+            'name': 'Williams %R',
+            'format': '{:.2f}',
+            'description': 'Williams Percent Range'
+        },
+        'cci_14': {
+            'name': 'CCI (14)',
+            'format': '{:.2f}',
+            'description': 'Commodity Channel Index'
+        },
+        'ultimate_osc': {
+            'name': 'Ultimate Osc',
+            'format': '{:.2f}',
+            'description': 'Ultimate Oscillator'
+        },
+        'roc_12': {
+            'name': 'ROC (12)',
+            'format': '{:.2f}',
+            'description': 'Rate of Change'
+        }
+    }
+    
+    # Create responsive grid layout - 3 columns for 10 indicators
+    cols = st.columns(3)
+    
+    col_index = 0
+    for indicator_key, config in indicator_configs.items():
+        if indicator_key in indicators_data:
+            indicator = indicators_data[indicator_key]
+            
+            with cols[col_index % 3]:
+                _display_indicator_card(
+                    indicator_key,
+                    config,
+                    indicator
+                )
+            
+            col_index += 1
+
+def _display_indicator_card(indicator_key, config, indicator_data):
+    """Display individual technical indicator card"""
+    
+    # Extract signal information
+    signal_info = indicator_data.get('signal', {})
+    signal = signal_info.get('signal', 'N/A')
+    description = signal_info.get('description', '')
+    
+    # Get indicator value(s)
+    if indicator_key == 'macd':
+        value = indicator_data.get('value', 0)
+        signal_line = indicator_data.get('signal_line', 0)
+        display_value = f"{value:.3f} / {signal_line:.3f}"
+    elif indicator_key == 'stochastic':
+        k_value = indicator_data.get('k', 0)
+        d_value = indicator_data.get('d', 0)
+        display_value = f"%K: {k_value:.2f}, %D: {d_value:.2f}"
+    elif indicator_key == 'adx':
+        adx_value = indicator_data.get('value', 0)
+        plus_di = indicator_data.get('plus_di', 0)
+        minus_di = indicator_data.get('minus_di', 0)
+        display_value = f"{adx_value:.2f} (+DI: {plus_di:.2f}, -DI: {minus_di:.2f})"
+    elif indicator_key == 'elder_ray':
+        bull_power = indicator_data.get('bull_power', 0)
+        bear_power = indicator_data.get('bear_power', 0)
+        display_value = f"Bull: {bull_power:.3f}, Bear: {bear_power:.3f}"
+    else:
+        value = indicator_data.get('value', 0)
+        # Handle None values gracefully
+        if value is None:
+            display_value = "N/A"
+        else:
+            display_value = config['format'].format(value)
+    
+    # Determine signal color
+    signal_colors = {
+        'Buy': '🟢',
+        'Strong Buy': '🟢',
+        'Sell': '🔴', 
+        'Strong Sell': '🔴',
+        'Neutral': '⚪',
+        'N/A': '⚫'
+    }
+    
+    signal_color = signal_colors.get(signal, '⚪')
+    
+    # Generate contextual comment
+    comment = _generate_indicator_comment(indicator_key, indicator_data, signal_info)
+    
+    # Create card using container
+    with st.container():
+        st.markdown(f"""
+        <div style="
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background-color: #fafafa;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h4 style="margin: 0; color: #333;">{config['name']}</h4>
+                <span style="font-size: 18px;">{signal_color}</span>
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong style="font-size: 18px; color: #333;">{display_value}</strong>
+            </div>
+            <div style="margin-bottom: 8px;">
+                <span style="
+                    background-color: {'#d4edda' if 'Buy' in signal else '#f8d7da' if 'Sell' in signal else '#e2e3e5'};
+                    color: {'#155724' if 'Buy' in signal else '#721c24' if 'Sell' in signal else '#383d41'};
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-weight: bold;
+                ">{signal}</span>
+            </div>
+            <div style="font-size: 14px; color: #666; line-height: 1.4;">
+                {comment}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def _generate_indicator_comment(indicator_key, indicator_data, signal_info):
+    """Generate contextual comments for technical indicators"""
+    
+    signal = signal_info.get('signal', 'N/A')
+    description = signal_info.get('description', '')
+    
+    if indicator_key == 'rsi_14':
+        value = indicator_data.get('value', 0)
+        if value >= 70:
+            return f"RSI at {value:.1f} indicates overbought conditions. Consider potential selling opportunity."
+        elif value <= 30:
+            return f"RSI at {value:.1f} shows oversold conditions. Potential buying opportunity may emerge."
+        elif value >= 50:
+            return f"RSI at {value:.1f} suggests bullish momentum above the midpoint."
+        else:
+            return f"RSI at {value:.1f} indicates bearish momentum below the midpoint."
+    
+    elif indicator_key == 'macd':
+        value = indicator_data.get('value', 0)
+        signal_line = indicator_data.get('signal_line', 0)
+        if value > 0:
+            return f"MACD above zero line at {value:.3f} indicates bullish momentum."
+        else:
+            return f"MACD below zero line at {value:.3f} suggests bearish momentum."
+    
+    elif indicator_key == 'stochastic':
+        k_value = indicator_data.get('k', 0)
+        if k_value > 80:
+            return f"Stochastic %K at {k_value:.1f} is in overbought territory above 80."
+        elif k_value < 20:
+            return f"Stochastic %K at {k_value:.1f} is in oversold territory below 20."
+        elif k_value > 50:
+            return f"Stochastic %K at {k_value:.1f} above 50 shows bullish bias."
+        else:
+            return f"Stochastic %K at {k_value:.1f} below 50 indicates bearish bias."
+    
+    elif indicator_key == 'adx':
+        adx_value = indicator_data.get('value', 0)
+        plus_di = indicator_data.get('plus_di', 0)
+        minus_di = indicator_data.get('minus_di', 0)
+        
+        if adx_value < 25:
+            return f"ADX at {adx_value:.1f} indicates weak trend strength. Market may be range-bound."
+        elif adx_value >= 50:
+            trend_direction = "bullish" if plus_di > minus_di else "bearish"
+            return f"ADX at {adx_value:.1f} shows strong {trend_direction} trend with +DI at {plus_di:.1f} and -DI at {minus_di:.1f}."
+        else:
+            trend_direction = "bullish" if plus_di > minus_di else "bearish"
+            return f"ADX at {adx_value:.1f} indicates moderate {trend_direction} trend strength."
+    
+    elif indicator_key == 'elder_ray':
+        bull_power = indicator_data.get('bull_power', 0)
+        bear_power = indicator_data.get('bear_power', 0)
+        combined = bull_power + bear_power
+        
+        if combined > 0:
+            return f"Combined power at {combined:.3f} suggests bulls are stronger. Bull power: {bull_power:.3f}, Bear power: {bear_power:.3f}."
+        else:
+            return f"Combined power at {combined:.3f} indicates bears are in control. Bull power: {bull_power:.3f}, Bear power: {bear_power:.3f}."
+    
+    elif indicator_key == 'atr_14':
+        value = indicator_data.get('value', 0)
+        return f"ATR at {value:.2f} measures current volatility. Higher values indicate increased price movement potential."
+    
+    elif indicator_key == 'williams_r':
+        value = indicator_data.get('value', 0)
+        if value > -20:
+            return f"Williams %R at {value:.1f} is in overbought territory above -20. Potential selling opportunity."
+        elif value < -80:
+            return f"Williams %R at {value:.1f} is in oversold territory below -80. Potential buying opportunity."
+        else:
+            return f"Williams %R at {value:.1f} is in neutral range between -20 and -80."
+    
+    elif indicator_key == 'cci_14':
+        value = indicator_data.get('value', 0)
+        if value > 100:
+            return f"CCI at {value:.1f} above +100 indicates strong upward deviation and potential overbought conditions."
+        elif value < -100:
+            return f"CCI at {value:.1f} below -100 shows strong downward deviation and potential oversold conditions."
+        elif value > 0:
+            return f"CCI at {value:.1f} above zero suggests bullish bias with upward price deviation."
+        else:
+            return f"CCI at {value:.1f} below zero indicates bearish bias with downward price deviation."
+    
+    elif indicator_key == 'ultimate_osc':
+        value = indicator_data.get('value', 0)
+        if value > 70:
+            return f"Ultimate Oscillator at {value:.1f} above 70 indicates overbought conditions."
+        elif value < 30:
+            return f"Ultimate Oscillator at {value:.1f} below 30 shows oversold conditions."
+        elif value > 50:
+            return f"Ultimate Oscillator at {value:.1f} above 50 suggests bullish momentum."
+        else:
+            return f"Ultimate Oscillator at {value:.1f} below 50 indicates bearish momentum."
+    
+    elif indicator_key == 'roc_12':
+        value = indicator_data.get('value', 0)
+        if value > 0:
+            return f"ROC at {value:.2f}% shows positive rate of change, indicating upward price momentum."
+        elif value < 0:
+            return f"ROC at {value:.2f}% indicates negative rate of change, suggesting downward price momentum."
+        else:
+            return f"ROC at {value:.2f}% shows no significant price change over the period."
+    
+    # Fallback to signal description
+    return description or f"{signal} signal detected."
+
+def display_moving_averages_table(ma_data):
+    """Display professional moving averages table with color coding and comments"""
+    if not ma_data or ma_data.get('error'):
+        st.error(f"Error loading moving averages: {ma_data.get('message', 'Unknown error')}")
+        return
+    
+    # Extract data
+    ticker = ma_data['ticker']
+    current_price = ma_data['current_price']
+    calc_date = ma_data['calculation_date']
+    periods_data = ma_data['periods']
+    
+    # Display current price header
+    st.caption(f"Current Price: ${current_price:.2f} ({calc_date})")
+    
+    # Prepare table data
+    table_rows = []
+    periods = [5, 9, 10, 20, 21, 50, 100, 200]
+    
+    for period in periods:
+        period_key = f'MA{period}'
+        if period_key not in periods_data:
+            continue
+        
+        sma_data = periods_data[period_key]['sma']
+        ema_data = periods_data[period_key]['ema']
+        
+        # Generate comments for both SMA and EMA
+        sma_comment = generate_ma_comment(ticker, period, 'SMA', current_price, 
+                                         sma_data['value'], sma_data['price_vs_ma'])
+        ema_comment = generate_ma_comment(ticker, period, 'EMA', current_price,
+                                         ema_data['value'], ema_data['price_vs_ma'])
+        
+        # Column order: Period | SMA | P0/SMA | SMA/P0 | Signal | Comments | EMA | P0/EMA | EMA/P0 | Signal | Comments
+        row = {
+            'Period': f'MA{period}',
+            'SMA': f"${sma_data['value']:.2f}",
+            'P0/SMA': f"{sma_data['price_vs_ma']:+.1f}%",
+            'SMA/P0': f"{sma_data['ma_vs_price']:+.1f}%",
+            'SMA_Signal': sma_data['signal'],
+            'SMA_Comments': sma_comment,
+            'EMA': f"${ema_data['value']:.2f}",
+            'P0/EMA': f"{ema_data['price_vs_ma']:+.1f}%",
+            'EMA/P0': f"{ema_data['ma_vs_price']:+.1f}%",
+            'EMA_Signal': ema_data['signal'],
+            'EMA_Comments': ema_comment
+        }
+        table_rows.append(row)
+    
+    # Create DataFrame
+    df = pd.DataFrame(table_rows)
+    
+    # Apply styling with proper function for row-wise styling
+    def style_row(row):
+        """Apply color to signal cells"""
+        styles = [''] * len(row)
+        
+        # Find signal column indices
+        cols = list(row.index)
+        if 'SMA_Signal' in cols:
+            sma_signal_idx = cols.index('SMA_Signal')
+            if row['SMA_Signal'] == 'Buy':
+                styles[sma_signal_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
+            elif row['SMA_Signal'] == 'Sell':
+                styles[sma_signal_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+            else:  # Neutral
+                styles[sma_signal_idx] = 'background-color: #f8f9fa; color: #6c757d; font-weight: bold'
+        
+        if 'EMA_Signal' in cols:
+            ema_signal_idx = cols.index('EMA_Signal')
+            if row['EMA_Signal'] == 'Buy':
+                styles[ema_signal_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
+            elif row['EMA_Signal'] == 'Sell':
+                styles[ema_signal_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+            else:  # Neutral
+                styles[ema_signal_idx] = 'background-color: #f8f9fa; color: #6c757d; font-weight: bold'
+        
+        return styles
+    
+    # Apply styling
+    styled_df = df.style.apply(style_row, axis=1).set_properties(**{
+        'text-align': 'left',
+        'font-size': '14px',
+        'padding': '8px'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [('background-color', '#f8f9fa'), 
+                                      ('font-weight', 'bold'),
+                                      ('text-align', 'left'),
+                                      ('padding', '10px')]}
+    ])
+    
+    # Display table
+    st.dataframe(
+        styled_df,
+        column_config={
+            'Period': st.column_config.TextColumn('Period', width='small'),
+            'SMA': st.column_config.TextColumn('SMA', width='small'),
+            'P0/SMA': st.column_config.TextColumn('P0/SMA', width='small'),
+            'SMA/P0': st.column_config.TextColumn('SMA/P0', width='small'),
+            'SMA_Signal': st.column_config.TextColumn('Signal', width='small'),
+            'SMA_Comments': st.column_config.TextColumn('Comments', width='large'),
+            'EMA': st.column_config.TextColumn('EMA', width='small'),
+            'P0/EMA': st.column_config.TextColumn('P0/EMA', width='small'),
+            'EMA/P0': st.column_config.TextColumn('EMA/P0', width='small'),
+            'EMA_Signal': st.column_config.TextColumn('Signal', width='small'),
+            'EMA_Comments': st.column_config.TextColumn('Comments', width='large')
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+
 def display_data_table(performance_data):
     """Display detailed data table for both price and volume data"""
     if not performance_data:
@@ -1092,18 +1483,14 @@ def show_technical_analysis_dashboard():
         # Moving Averages Table
         st.subheader("📈 Moving Averages Analysis")
         if 'moving_averages' in data:
-            # TODO: Implement moving averages table display
-            st.info("Moving averages table coming soon...")
-            with st.expander("Raw Moving Averages Data", expanded=False):
-                st.json(data['moving_averages'])
+            display_moving_averages_table(data['moving_averages'])
         
         # Technical Indicators Table  
         st.subheader("📊 Technical Indicators")
         if 'technical_indicators' in data:
-            # TODO: Implement technical indicators table display
-            st.info("Technical indicators table coming soon...")
-            with st.expander("Raw Technical Indicators Data", expanded=False):
-                st.json(data['technical_indicators'])
+            display_technical_indicators_cards(data['technical_indicators'])
+        else:
+            st.warning("Technical indicators data not available")
         
         # 52-Week High Analysis
         st.subheader("📊 52-Week High Analysis")

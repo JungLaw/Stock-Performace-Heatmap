@@ -382,6 +382,30 @@ class DatabaseIntegratedTechnicalCalculator:
             if not atr_values.empty:
                 indicators['atr_14'] = atr_values.iloc[-1]
             
+            # 8. Williams %R (14-period)
+            williams_r_values = ta.willr(df['High'], df['Low'], df['Close'], length=14)
+            if not williams_r_values.empty:
+                indicators['williams_r'] = williams_r_values.iloc[-1]
+                indicators['williams_r_signal'] = self._generate_williams_r_signal(indicators['williams_r'])
+            
+            # 9. CCI (Commodity Channel Index, 14-period)
+            cci_values = ta.cci(df['High'], df['Low'], df['Close'], length=14)
+            if not cci_values.empty:
+                indicators['cci_14'] = cci_values.iloc[-1]
+                indicators['cci_signal'] = self._generate_cci_signal(indicators['cci_14'])
+            
+            # 10. Ultimate Oscillator
+            uo_values = ta.uo(df['High'], df['Low'], df['Close'])
+            if not uo_values.empty:
+                indicators['ultimate_osc'] = uo_values.iloc[-1]
+                indicators['ultimate_osc_signal'] = self._generate_ultimate_osc_signal(indicators['ultimate_osc'])
+            
+            # 11. ROC (Rate of Change, 12-period)
+            roc_values = ta.roc(df['Close'], length=12)
+            if not roc_values.empty:
+                indicators['roc_12'] = roc_values.iloc[-1]
+                indicators['roc_signal'] = self._generate_roc_signal(indicators['roc_12'])
+            
             # Add metadata
             indicators.update({
                 'ticker': ticker,
@@ -498,6 +522,52 @@ class DatabaseIntegratedTechnicalCalculator:
             return {'signal': 'Sell', 'strength': 'Moderate', 'description': '%K below %D'}
         else:
             return {'signal': 'Neutral', 'strength': 'Weak', 'description': 'Stochastic neutral'}
+    
+    def _generate_williams_r_signal(self, williams_r_value: float) -> Dict:
+        """Generate Williams %R signal using corrected logic"""
+        if williams_r_value > -20:
+            return {'signal': 'Sell', 'strength': 'Strong', 'description': 'Overbought territory above -20'}
+        elif williams_r_value < -80:
+            return {'signal': 'Buy', 'strength': 'Strong', 'description': 'Oversold territory below -80'}
+        elif williams_r_value > -50:
+            return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'Bearish bias above -50'}
+        else:
+            return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'Bullish bias below -50'}
+    
+    def _generate_cci_signal(self, cci_value: float) -> Dict:
+        """Generate CCI signal using corrected logic"""
+        if cci_value > 100:
+            return {'signal': 'Buy', 'strength': 'Strong', 'description': 'Strong upward deviation, bullish bias'}
+        elif cci_value < -100:
+            return {'signal': 'Sell', 'strength': 'Strong', 'description': 'Strong downward deviation, bearish bias'}
+        elif cci_value > 0:
+            return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'Above zero, bullish bias'}
+        else:
+            return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'Below zero, bearish bias'}
+    
+    def _generate_ultimate_osc_signal(self, uo_value: float) -> Dict:
+        """Generate Ultimate Oscillator signal using corrected logic"""
+        if uo_value > 70:
+            return {'signal': 'Sell', 'strength': 'Strong', 'description': 'Overbought, potential sell signal'}
+        elif uo_value < 30:
+            return {'signal': 'Buy', 'strength': 'Strong', 'description': 'Oversold, potential buy signal'}
+        elif uo_value > 50:
+            return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'Above midpoint, bullish bias'}
+        else:
+            return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'Below midpoint, bearish bias'}
+    
+    def _generate_roc_signal(self, roc_value: float) -> Dict:
+        """Generate ROC signal using corrected logic"""
+        if roc_value > 5:
+            return {'signal': 'Strong Buy', 'strength': 'Strong', 'description': 'Strong positive momentum'}
+        elif roc_value > 0:
+            return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'Price increasing, bullish momentum'}
+        elif roc_value < -5:
+            return {'signal': 'Strong Sell', 'strength': 'Strong', 'description': 'Strong negative momentum'}
+        elif roc_value < 0:
+            return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'Price decreasing, bearish momentum'}
+        else:
+            return {'signal': 'Neutral', 'strength': 'Weak', 'description': 'No significant momentum'}
     
     def _save_technical_indicators_to_db(self, ticker: str, date: date, indicators: Dict) -> bool:
         """
@@ -1082,6 +1152,22 @@ class DatabaseIntegratedTechnicalCalculator:
             'atr_14': {
                 'value': raw_indicators.get('atr_14'),
                 'signal': {'signal': 'N/A', 'description': 'Volatility measure only'}
+            },
+            'williams_r': {
+                'value': raw_indicators.get('williams_r'),
+                'signal': raw_indicators.get('williams_r_signal', {})
+            },
+            'cci_14': {
+                'value': raw_indicators.get('cci_14'),
+                'signal': raw_indicators.get('cci_signal', {})
+            },
+            'ultimate_osc': {
+                'value': raw_indicators.get('ultimate_osc'),
+                'signal': raw_indicators.get('ultimate_osc_signal', {})
+            },
+            'roc_12': {
+                'value': raw_indicators.get('roc_12'),
+                'signal': raw_indicators.get('roc_signal', {})
             }
         }
         
