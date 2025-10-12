@@ -244,7 +244,7 @@ class DatabaseIntegratedTechnicalCalculator:
         
         # Get approximately periods_needed trading days worth of calendar days
         # Assuming ~252 trading days per year, add buffer for weekends/holidays
-        days_buffer = int(periods_needed * 1.4) + 30  # ~40% buffer + 30 days extra
+        days_buffer = int(periods_needed * 4) + 30  # For 200 periods = ~824 days/~2.3 years ('5':~1030 days/~3 years)
         start_date = end_date - timedelta(days=days_buffer)
         
         logger.info(f"🔍 Getting OHLCV data for {ticker}: need {periods_needed} periods, fetching {days_buffer} calendar days")
