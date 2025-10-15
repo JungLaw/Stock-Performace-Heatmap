@@ -14,6 +14,7 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from typing import Dict
 
 # Add src to path for imports
 src_path = Path(__file__).parent / "src"
@@ -1102,64 +1103,41 @@ def _display_indicator_card(indicator_key, config, indicator_data):
         """, unsafe_allow_html=True)
 
 def _generate_indicator_comment(indicator_key, indicator_data, signal_info):
-    """Generate contextual comments for technical indicators"""
+    """Generate contextual comments for technical indicators using signal_info to avoid duplication"""
     
     signal = signal_info.get('signal', 'N/A')
     description = signal_info.get('description', '')
     
     if indicator_key == 'rsi_14':
         value = indicator_data.get('value', 0)
-        if value >= 70:
-            return f"RSI at {value:.1f} indicates overbought conditions. Consider potential selling opportunity."
-        elif value <= 30:
-            return f"RSI at {value:.1f} shows oversold conditions. Potential buying opportunity may emerge."
-        elif value >= 50:
-            return f"RSI at {value:.1f} suggests bullish momentum above the midpoint."
-        else:
-            return f"RSI at {value:.1f} indicates bearish momentum below the midpoint."
+        # Use signal_info description and add contextual value information
+        base_comment = description or f"RSI signal: {signal}"
+        return f"RSI at {value:.1f}. {base_comment}"
     
     elif indicator_key == 'macd':
         value = indicator_data.get('value', 0)
         signal_line = indicator_data.get('signal_line', 0)
-        if value > 0:
-            return f"MACD above zero line at {value:.3f} indicates bullish momentum."
-        else:
-            return f"MACD below zero line at {value:.3f} suggests bearish momentum."
+        base_comment = description or f"MACD signal: {signal}"
+        return f"MACD at {value:.3f} (Signal: {signal_line:.3f}). {base_comment}"
     
     elif indicator_key == 'stochastic':
         k_value = indicator_data.get('k', 0)
-        if k_value > 80:
-            return f"Stochastic %K at {k_value:.1f} is in overbought territory above 80."
-        elif k_value < 20:
-            return f"Stochastic %K at {k_value:.1f} is in oversold territory below 20."
-        elif k_value > 50:
-            return f"Stochastic %K at {k_value:.1f} above 50 shows bullish bias."
-        else:
-            return f"Stochastic %K at {k_value:.1f} below 50 indicates bearish bias."
+        d_value = indicator_data.get('d', 0)
+        base_comment = description or f"Stochastic signal: {signal}"
+        return f"Stochastic %K: {k_value:.1f}, %D: {d_value:.1f}. {base_comment}"
     
     elif indicator_key == 'adx':
         adx_value = indicator_data.get('value', 0)
         plus_di = indicator_data.get('plus_di', 0)
         minus_di = indicator_data.get('minus_di', 0)
-        
-        if adx_value < 25:
-            return f"ADX at {adx_value:.1f} indicates weak trend strength. Market may be range-bound."
-        elif adx_value >= 50:
-            trend_direction = "bullish" if plus_di > minus_di else "bearish"
-            return f"ADX at {adx_value:.1f} shows strong {trend_direction} trend with +DI at {plus_di:.1f} and -DI at {minus_di:.1f}."
-        else:
-            trend_direction = "bullish" if plus_di > minus_di else "bearish"
-            return f"ADX at {adx_value:.1f} indicates moderate {trend_direction} trend strength."
+        base_comment = description or f"ADX signal: {signal}"
+        return f"ADX: {adx_value:.1f} (+DI: {plus_di:.1f}, -DI: {minus_di:.1f}). {base_comment}"
     
     elif indicator_key == 'elder_ray':
         bull_power = indicator_data.get('bull_power', 0)
         bear_power = indicator_data.get('bear_power', 0)
-        combined = bull_power + bear_power
-        
-        if combined > 0:
-            return f"Combined power at {combined:.3f} suggests bulls are stronger. Bull power: {bull_power:.3f}, Bear power: {bear_power:.3f}."
-        else:
-            return f"Combined power at {combined:.3f} indicates bears are in control. Bull power: {bull_power:.3f}, Bear power: {bear_power:.3f}."
+        base_comment = description or f"Elder Ray signal: {signal}"
+        return f"Bull Power: {bull_power:.3f}, Bear Power: {bear_power:.3f}. {base_comment}"
     
     elif indicator_key == 'atr_14':
         value = indicator_data.get('value', 0)
@@ -1167,43 +1145,23 @@ def _generate_indicator_comment(indicator_key, indicator_data, signal_info):
     
     elif indicator_key == 'williams_r':
         value = indicator_data.get('value', 0)
-        if value > -20:
-            return f"Williams %R at {value:.1f} is in overbought territory above -20. Potential selling opportunity."
-        elif value < -80:
-            return f"Williams %R at {value:.1f} is in oversold territory below -80. Potential buying opportunity."
-        else:
-            return f"Williams %R at {value:.1f} is in neutral range between -20 and -80."
+        base_comment = description or f"Williams %R signal: {signal}"
+        return f"Williams %R at {value:.1f}. {base_comment}"
     
     elif indicator_key == 'cci_14':
         value = indicator_data.get('value', 0)
-        if value > 100:
-            return f"CCI at {value:.1f} above +100 indicates strong upward deviation and potential overbought conditions."
-        elif value < -100:
-            return f"CCI at {value:.1f} below -100 shows strong downward deviation and potential oversold conditions."
-        elif value > 0:
-            return f"CCI at {value:.1f} above zero suggests bullish bias with upward price deviation."
-        else:
-            return f"CCI at {value:.1f} below zero indicates bearish bias with downward price deviation."
+        base_comment = description or f"CCI signal: {signal}"
+        return f"CCI at {value:.1f}. {base_comment}"
     
     elif indicator_key == 'ultimate_osc':
         value = indicator_data.get('value', 0)
-        if value > 70:
-            return f"Ultimate Oscillator at {value:.1f} above 70 indicates overbought conditions."
-        elif value < 30:
-            return f"Ultimate Oscillator at {value:.1f} below 30 shows oversold conditions."
-        elif value > 50:
-            return f"Ultimate Oscillator at {value:.1f} above 50 suggests bullish momentum."
-        else:
-            return f"Ultimate Oscillator at {value:.1f} below 50 indicates bearish momentum."
+        base_comment = description or f"Ultimate Oscillator signal: {signal}"
+        return f"Ultimate Oscillator at {value:.1f}. {base_comment}"
     
     elif indicator_key == 'roc_12':
         value = indicator_data.get('value', 0)
-        if value > 0:
-            return f"ROC at {value:.2f}% shows positive rate of change, indicating upward price momentum."
-        elif value < 0:
-            return f"ROC at {value:.2f}% indicates negative rate of change, suggesting downward price momentum."
-        else:
-            return f"ROC at {value:.2f}% shows no significant price change over the period."
+        base_comment = description or f"ROC signal: {signal}"
+        return f"ROC at {value:.2f}%. {base_comment}"
     
     # Fallback to signal description
     return description or f"{signal} signal detected."
@@ -1318,6 +1276,86 @@ def display_moving_averages_table(ma_data):
         hide_index=True,
         use_container_width=True
     )
+
+def display_pivot_points(ticker: str, pivot_data: Dict, current_price: float) -> None:
+    """
+    Display pivot points analysis - All 4 pivot types side-by-side
+    
+    Args:
+        ticker: Stock ticker symbol
+        pivot_data: Dictionary with pivot calculations (classic, fibonacci, camarilla, woodys)
+        current_price: Current stock price
+    """
+    if pivot_data.get('error'):
+        st.error(f"Error calculating pivot points: {pivot_data.get('message', 'Unknown error')}")
+        return
+    
+    # Display calculation metadata
+    st.caption(f"Calculated using {pivot_data.get('ohlc_date', 'N/A')} OHLC data (previous trading day)")
+    
+    # Extract all pivot types
+    classic = pivot_data.get('classic')
+    fibonacci = pivot_data.get('fibonacci')
+    camarilla = pivot_data.get('camarilla')
+    woodys = pivot_data.get('woodys')
+    
+    # Check if we have at least one pivot type
+    if not any([classic, fibonacci, camarilla, woodys]):
+        st.warning("No pivot data available")
+        return
+    
+    # Build DataFrame for side-by-side display
+    pivot_levels = ['R3', 'R2', 'R1', 'Pivot', 'S1', 'S2', 'S3']
+    pivot_keys = ['r3', 'r2', 'r1', 'pivot', 's1', 's2', 's3']
+    
+    table_data = []
+    for level_name, level_key in zip(pivot_levels, pivot_keys):
+        row = {'Level': level_name}
+        
+        # Add Classic
+        if classic and level_key in classic:
+            row['Classic'] = f"${classic[level_key]:.2f}"
+        else:
+            row['Classic'] = "N/A"
+        
+        # Add Fibonacci
+        if fibonacci and level_key in fibonacci:
+            row['Fibonacci'] = f"${fibonacci[level_key]:.2f}"
+        else:
+            row['Fibonacci'] = "N/A"
+        
+        # Add Camarilla
+        if camarilla and level_key in camarilla:
+            row['Camarilla'] = f"${camarilla[level_key]:.2f}"
+        else:
+            row['Camarilla'] = "N/A"
+        
+        # Add Woody's
+        if woodys and level_key in woodys:
+            row["Woody's"] = f"${woodys[level_key]:.2f}"
+        else:
+            row["Woody's"] = "N/A"
+        
+        table_data.append(row)
+    
+    # Create DataFrame
+    df = pd.DataFrame(table_data)
+    
+    # Display as styled table
+    st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Level": st.column_config.TextColumn("Level", width="small"),
+            "Classic": st.column_config.TextColumn("Classic", width="medium"),
+            "Fibonacci": st.column_config.TextColumn("Fibonacci", width="medium"),
+            "Camarilla": st.column_config.TextColumn("Camarilla", width="medium"),
+            "Woody's": st.column_config.TextColumn("Woody's", width="medium")
+        }
+    )
+    
+    st.caption(f"Current Price: ${current_price:.2f}")
 
 def display_data_table(performance_data):
     """Display detailed data table for both price and volume data"""
@@ -1601,13 +1639,38 @@ def show_technical_analysis_dashboard():
                 else:
                     st.warning("⚠️ Enter a custom high value first")
         
-        # Pivot Points
-        st.subheader("⚖️ Pivot Points")
-        if 'pivot_points' in data:
-            # TODO: Implement pivot points table
-            st.info("Pivot points table coming soon...")
-            with st.expander("Raw Pivot Points Data", expanded=False):
-                st.json(data['pivot_points'])
+        # Pivot Points Analysis
+        st.markdown("---")
+        st.subheader("📍 Pivot Points Analysis")
+        
+        # Determine save_to_db setting (same logic as main analysis)
+        is_bucket = is_bucket_ticker(ticker)
+        should_save_to_db = is_bucket or st.session_state.get('ta_save_to_db_checkbox', False)
+        
+        # Calculate pivot points if not already cached in session
+        if 'pivot_points_data' not in st.session_state or st.session_state.get('pivot_points_ticker') != ticker:
+            with st.spinner("Calculating pivot points..."):
+                try:
+                    pivot_data = st.session_state.technical_calculator.calculate_pivot_points(
+                        ticker=ticker,
+                        target_date=None,  # Auto-detect previous trading day
+                        save_to_db=should_save_to_db
+                    )
+                    st.session_state.pivot_points_data = pivot_data
+                    st.session_state.pivot_points_ticker = ticker
+                except Exception as e:
+                    st.error(f"Error calculating pivot points: {str(e)}")
+                    st.session_state.pivot_points_data = {'error': True, 'message': str(e)}
+        
+        # Display pivot points
+        if 'pivot_points_data' in st.session_state:
+            display_pivot_points(
+                ticker=ticker,
+                pivot_data=st.session_state.pivot_points_data,
+                current_price=current_price
+            )
+        else:
+            st.info("Pivot points data not available")
         
         # Rolling Heatmap
         st.subheader("🔥 Rolling Signal Heatmap")

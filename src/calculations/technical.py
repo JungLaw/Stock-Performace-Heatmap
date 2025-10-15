@@ -1316,6 +1316,520 @@ class DatabaseIntegratedTechnicalCalculator:
         logger.info(f"   - Errors: {error_count} tickers")
         
         return results
+    
+    # ===== PIVOT POINTS ANALYSIS METHODS =====
+    
+    def _get_pivot_ohlc(self, ticker: str, target_date: date) -> Optional[Dict]:
+        """
+        Get High, Low, Close, Open for pivot calculations (database-first approach)
+        
+        Args:
+            ticker: Stock ticker symbol
+            target_date: Date to fetch OHLC data for
+            
+        Returns:
+            Dict with OHLC values or None if data unavailable
+        """
+        try:
+            # Try database first
+            conn = self._get_database_connection()
+            if conn:
+                query = f"""
+                SELECT Open, High, Low, Close
+                FROM {self.daily_prices_table}
+                WHERE Ticker = ? AND Date = ?
+                """
+                
+                date_str = target_date.strftime('%Y-%m-%d')
+                cursor = conn.cursor()
+                cursor.execute(query, (ticker, date_str))
+                result = cursor.fetchone()
+                conn.close()
+                
+                if result:
+                    logger.info(f"✅ Found OHLC data in database for {ticker} on {date_str}")
+                    return {
+                        'open': result[0],
+                        'high': result[1],
+                        'low': result[2],
+                        'close': result[3],
+                        'date': target_date
+                    }
+            
+            # Fallback to yfinance if not in database
+            logger.info(f"📡 Fetching OHLC from yfinance for {ticker} on {target_date}")
+            
+            # Get data with buffer to ensure we have the target date
+            start_date = target_date - timedelta(days=5)
+            end_date = target_date + timedelta(days=1)
+            
+            hist_data = self._fetch_ohlcv_data_from_yfinance(ticker, start_date, end_date, save_to_db=True)
+            
+            if hist_data is not None and not hist_data.empty:
+                # Find the exact date
+                target_datetime = pd.Timestamp(target_date)
+                if target_datetime in hist_data.index:
+                    row = hist_data.loc[target_datetime]
+                    return {
+                        'open': row['Open'],
+                        'high': row['High'],
+                        'low': row['Low'],
+                        'close': row['Close'],
+                        'date': target_date
+                    }
+            
+            logger.warning(f"⚠️ No OHLC data found for {ticker} on {target_date}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching OHLC for {ticker} on {target_date}: {e}")
+            return None
+    
+    def _calculate_classic_pivot(self, high: float, low: float, close: float) -> Dict:
+        """
+        Calculate Classic Pivot Points
+        
+        Formula:
+            PP = (H + L + C) / 3
+            R1 = 2*PP - L
+            R2 = PP + (H - L)
+            R3 = H + 2*(PP - L)
+            S1 = 2*PP - H
+            S2 = PP - (H - L)
+            S3 = L - 2*(H - PP)
+        
+        Args:
+            high: High price
+            low: Low price
+            close: Close price
+            
+        Returns:
+            Dict with pivot point and resistance/support levels
+        """
+        try:
+            # Calculate pivot point
+            pp = (high + low + close) / 3
+            
+            # Calculate resistance levels
+            r1 = 2 * pp - low
+            r2 = pp + (high - low)
+            r3 = high + 2 * (pp - low)
+            
+            # Calculate support levels
+            s1 = 2 * pp - high
+            s2 = pp - (high - low)
+            s3 = low - 2 * (high - pp)
+            
+            return {
+                'pivot': pp,
+                'r1': r1,
+                'r2': r2,
+                'r3': r3,
+                's1': s1,
+                's2': s2,
+                's3': s3
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating classic pivot: {e}")
+            return None
+    
+    def _calculate_fibonacci_pivot(self, high: float, low: float, close: float) -> Dict:
+        """
+        Calculate Fibonacci Pivot Points
+        
+        Formula:
+            PP = (H + L + C) / 3
+            R1 = PP + 0.382 * (H - L)
+            R2 = PP + 0.618 * (H - L)
+            R3 = PP + 1.000 * (H - L)
+            S1 = PP - 0.382 * (H - L)
+            S2 = PP - 0.618 * (H - L)
+            S3 = PP - 1.000 * (H - L)
+        
+        Args:
+            high: High price
+            low: Low price
+            close: Close price
+            
+        Returns:
+            Dict with pivot point and resistance/support levels
+        """
+        try:
+            # Calculate pivot point
+            pp = (high + low + close) / 3
+            
+            # Calculate range
+            range_hl = high - low
+            
+            # Calculate resistance levels using Fibonacci ratios
+            r1 = pp + 0.382 * range_hl
+            r2 = pp + 0.618 * range_hl
+            r3 = pp + 1.000 * range_hl
+            
+            # Calculate support levels using Fibonacci ratios
+            s1 = pp - 0.382 * range_hl
+            s2 = pp - 0.618 * range_hl
+            s3 = pp - 1.000 * range_hl
+            
+            return {
+                'pivot': pp,
+                'r1': r1,
+                'r2': r2,
+                'r3': r3,
+                's1': s1,
+                's2': s2,
+                's3': s3
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating fibonacci pivot: {e}")
+            return None
+    
+    def _calculate_camarilla_pivot(self, high: float, low: float, close: float) -> Dict:
+        """
+        Calculate Camarilla Pivot Points
+        
+        Formula:
+            PP = (H + L + C) / 3
+            R1 = C + (H - L) * 1.1/12
+            R2 = C + (H - L) * 1.1/6
+            R3 = C + (H - L) * 1.1/4
+            S1 = C - (H - L) * 1.1/12
+            S2 = C - (H - L) * 1.1/6
+            S3 = C - (H - L) * 1.1/4
+        
+        Args:
+            high: High price
+            low: Low price
+            close: Close price
+            
+        Returns:
+            Dict with pivot point and resistance/support levels
+        """
+        try:
+            # Calculate pivot point (same as Classic)
+            pp = (high + low + close) / 3
+            
+            # Calculate range
+            range_hl = high - low
+            
+            # Calculate resistance levels using Camarilla multipliers
+            r1 = close + range_hl * 1.1/12
+            r2 = close + range_hl * 1.1/6
+            r3 = close + range_hl * 1.1/4
+            
+            # Calculate support levels using Camarilla multipliers
+            s1 = close - range_hl * 1.1/12
+            s2 = close - range_hl * 1.1/6
+            s3 = close - range_hl * 1.1/4
+            
+            return {
+                'pivot': pp,
+                'r1': r1,
+                'r2': r2,
+                'r3': r3,
+                's1': s1,
+                's2': s2,
+                's3': s3
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating camarilla pivot: {e}")
+            return None
+    
+    def _calculate_woodys_pivot(self, high: float, low: float, close: float, open_price: float) -> Dict:
+        """
+        Calculate Woody's Pivot Points
+        
+        Formula:
+            PP = (H + L + 2*C) / 4
+            R1 = 2*PP - L
+            R2 = PP + (H - L)
+            R3 = H + 2*(PP - L)
+            S1 = 2*PP - H
+            S2 = PP - (H - L)
+            S3 = L - 2*(H - PP)
+        
+        Args:
+            high: High price
+            low: Low price
+            close: Close price
+            open_price: Open price (used in Woody's calculation)
+            
+        Returns:
+            Dict with pivot point and resistance/support levels
+        """
+        try:
+            # Calculate pivot point (Woody's formula weights close more heavily)
+            pp = (high + low + 2 * close) / 4
+            
+            # Calculate resistance levels (same as Classic but using Woody's PP)
+            r1 = 2 * pp - low
+            r2 = pp + (high - low)
+            r3 = high + 2 * (pp - low)
+            
+            # Calculate support levels (same as Classic but using Woody's PP)
+            s1 = 2 * pp - high
+            s2 = pp - (high - low)
+            s3 = low - 2 * (high - pp)
+            
+            return {
+                'pivot': pp,
+                'r1': r1,
+                'r2': r2,
+                'r3': r3,
+                's1': s1,
+                's2': s2,
+                's3': s3
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating woody's pivot: {e}")
+            return None
+    
+    def _get_pivot_points_from_db(self, ticker: str, target_date: date) -> Optional[Dict]:
+        """
+        Fetch cached pivot points from database
+        
+        Args:
+            ticker: Stock ticker symbol
+            target_date: Date for pivot points
+            
+        Returns:
+            Dict with all 4 pivot types or None if not cached
+        """
+        try:
+            conn = self._get_database_connection()
+            if not conn:
+                return None
+            
+            query = f"""
+            SELECT pivot_type, pivot, r1, r2, r3, s1, s2, s3
+            FROM {self.pivot_table}
+            WHERE ticker = ? AND date = ?
+            """
+            
+            date_str = target_date.strftime('%Y-%m-%d')
+            cursor = conn.cursor()
+            cursor.execute(query, (ticker, date_str))
+            results = cursor.fetchall()
+            conn.close()
+            
+            if not results:
+                return None
+            
+            # Organize by pivot type
+            pivots = {}
+            for row in results:
+                pivot_type = row[0]
+                pivots[pivot_type] = {
+                    'pivot': row[1],
+                    'r1': row[2],
+                    'r2': row[3],
+                    'r3': row[4],
+                    's1': row[5],
+                    's2': row[6],
+                    's3': row[7]
+                }
+            
+            logger.info(f"✅ Found cached pivot points for {ticker} on {date_str}")
+            return pivots
+            
+        except Exception as e:
+            logger.error(f"Error fetching pivot points from database: {e}")
+            return None
+    
+    def _save_pivot_points_to_db(self, ticker: str, calc_date: date, pivots_data: Dict) -> bool:
+        """
+        Save all pivot types to pivot_points_daily table
+        
+        Args:
+            ticker: Stock ticker symbol
+            calc_date: Date the pivots were calculated for
+            pivots_data: Dict with all pivot types and their levels
+            
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            conn = self._get_database_connection()
+            if not conn:
+                logger.warning("Database not available for saving pivot points")
+                return False
+            
+            date_str = calc_date.strftime('%Y-%m-%d')
+            cursor = conn.cursor()
+            
+            # Save each pivot type
+            for pivot_type, levels in pivots_data.items():
+                query = f"""
+                INSERT OR REPLACE INTO {self.pivot_table}
+                (ticker, date, pivot_type, pivot, r1, r2, r3, s1, s2, s3)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                
+                cursor.execute(query, (
+                    ticker,
+                    date_str,
+                    pivot_type,
+                    levels['pivot'],
+                    levels['r1'],
+                    levels['r2'],
+                    levels['r3'],
+                    levels['s1'],
+                    levels['s2'],
+                    levels['s3']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"✅ Saved {len(pivots_data)} pivot types to database for {ticker} on {date_str}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving pivot points to database: {e}")
+            return False
+    
+    def calculate_pivot_points(self, ticker: str, target_date: Optional[date] = None, 
+                               save_to_db: bool = True) -> Dict:
+        """
+        Calculate all 4 pivot point types for a ticker
+        
+        Uses previous trading day's OHLC by default. Implements database-first pattern:
+        1. Check database for cached pivots
+        2. If missing, fetch OHLC data (database -> yfinance fallback)
+        3. Calculate all pivot types
+        4. Save to database if enabled
+        
+        Args:
+            ticker: Stock ticker symbol
+            target_date: Date for pivot calculation (default: yesterday's trading day)
+            save_to_db: Whether to save calculated pivots to database
+            
+        Returns:
+            Dict with all 4 pivot types and calculation metadata:
+            {
+                'ticker': str,
+                'calculation_date': str,
+                'ohlc_date': str,
+                'classic': {...},
+                'fibonacci': {...},
+                'camarilla': {...},
+                'woodys': {...},
+                'error': bool
+            }
+        """
+        logger.info(f"📍 Calculating pivot points for {ticker}")
+        
+        try:
+            # Determine target date (previous trading day if not specified)
+            if target_date is None:
+                from .performance import get_last_completed_trading_day
+                last_trading_day = get_last_completed_trading_day()
+                
+                # Use previous trading day (pivots calculated from yesterday's OHLC)
+                target_date = last_trading_day - timedelta(days=1)
+                
+                # Ensure it's a trading day
+                from .performance import is_us_trading_day
+                while not is_us_trading_day(target_date):
+                    target_date -= timedelta(days=1)
+                
+                logger.info(f"Using previous trading day: {target_date}")
+            
+            # Check database cache first
+            cached_pivots = self._get_pivot_points_from_db(ticker, target_date)
+            if cached_pivots:
+                logger.info(f"✅ Using cached pivot points for {ticker}")
+                return {
+                    'ticker': ticker,
+                    'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+                    'ohlc_date': target_date.strftime('%Y-%m-%d'),
+                    'classic': cached_pivots.get('classic'),
+                    'fibonacci': cached_pivots.get('fibonacci'),
+                    'camarilla': cached_pivots.get('camarilla'),
+                    'woodys': cached_pivots.get('woodys'),
+                    'error': False,
+                    'source': 'database_cache'
+                }
+            
+            # Fetch OHLC data for target date
+            ohlc_data = self._get_pivot_ohlc(ticker, target_date)
+            
+            if not ohlc_data:
+                return {
+                    'ticker': ticker,
+                    'error': True,
+                    'message': f'Unable to fetch OHLC data for {ticker} on {target_date}'
+                }
+            
+            # Calculate all pivot types
+            pivots_data = {}
+            
+            # Classic Pivot
+            classic = self._calculate_classic_pivot(
+                ohlc_data['high'], 
+                ohlc_data['low'], 
+                ohlc_data['close']
+            )
+            if classic:
+                pivots_data['classic'] = classic
+            
+            # Fibonacci Pivot
+            fibonacci = self._calculate_fibonacci_pivot(
+                ohlc_data['high'],
+                ohlc_data['low'],
+                ohlc_data['close']
+            )
+            if fibonacci:
+                pivots_data['fibonacci'] = fibonacci
+            
+            # Camarilla Pivot
+            camarilla = self._calculate_camarilla_pivot(
+                ohlc_data['high'],
+                ohlc_data['low'],
+                ohlc_data['close']
+            )
+            if camarilla:
+                pivots_data['camarilla'] = camarilla
+            
+            # Woody's Pivot
+            woodys = self._calculate_woodys_pivot(
+                ohlc_data['high'],
+                ohlc_data['low'],
+                ohlc_data['close'],
+                ohlc_data['open']
+            )
+            if woodys:
+                pivots_data['woodys'] = woodys
+            
+            # Save to database if enabled
+            if save_to_db and pivots_data:
+                self._save_pivot_points_to_db(ticker, target_date, pivots_data)
+            
+            logger.info(f"✅ Calculated {len(pivots_data)} pivot types for {ticker}")
+            
+            return {
+                'ticker': ticker,
+                'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+                'ohlc_date': target_date.strftime('%Y-%m-%d'),
+                'classic': pivots_data.get('classic'),
+                'fibonacci': pivots_data.get('fibonacci'),
+                'camarilla': pivots_data.get('camarilla'),
+                'woodys': pivots_data.get('woodys'),
+                'error': False,
+                'source': 'calculated'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating pivot points for {ticker}: {e}")
+            return {
+                'ticker': ticker,
+                'error': True,
+                'message': str(e)
+            }
 
 
 # Factory function for backward compatibility
