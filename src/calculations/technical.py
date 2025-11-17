@@ -325,8 +325,17 @@ class DatabaseIntegratedTechnicalCalculator:
                 indicators['macd_value'] = macd_data['MACD_12_26_9'].iloc[-1]
                 indicators['macd_signal'] = macd_data['MACDs_12_26_9'].iloc[-1]
                 indicators['macd_histogram'] = macd_data['MACDh_12_26_9'].iloc[-1]
+                
+                # Extract histogram as list for magnitude-filtered signal generation
+                histogram_list = macd_data['MACDh_12_26_9'].tolist()
+                
                 indicators['macd_signal_interpretation'] = self._generate_macd_signal(
-                    indicators['macd_value'], indicators['macd_signal']
+                    macd_value=indicators['macd_value'],
+                    signal_value=indicators['macd_signal'],
+                    fast=12,
+                    slow=26,
+                    signal_period=9,
+                    histogram_data=histogram_list
                 )
             
             # 3. Elder Ray Index (Bull/Bear Power)
@@ -488,14 +497,78 @@ class DatabaseIntegratedTechnicalCalculator:
         
         return {'signal': direction, 'strength': strength, 'description': description}
     
-    def _generate_macd_signal(self, macd_value: float, signal_value: float) -> Dict:
-        """Generate MACD signal interpretation"""
-        if macd_value > signal_value:
-            return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'MACD above signal line'}
-        elif macd_value < signal_value:
-            return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'MACD below signal line'}
+    def _generate_macd_signal(self, macd_value: float, signal_value: float, histogram: float = None, 
+                              fast: int = 12, slow: int = 26, signal_period: int = 9,
+                              histogram_data: list = None) -> Dict:
+        """
+        Generate MACD signal interpretation with magnitude filtering.
+        
+        Uses volatility-normalized magnitude filtering to reduce false signals.
+        Only generates buy/sell signals if the histogram magnitude exceeds the threshold.
+        
+        Args:
+            macd_value: Current MACD value
+            signal_value: Current signal line value
+            histogram: Current MACD histogram (optional for legacy compatibility)
+            fast: Fast EMA period (for threshold lookup)
+            slow: Slow EMA period (for threshold lookup)
+            signal_period: Signal line period (for threshold lookup)
+            histogram_data: List of recent histogram values for std calculation (optional)
+        
+        Returns:
+            Dict with 'signal', 'strength', and 'description' keys
+        """
+        from src.config.signal_thresholds import get_macd_thresholds_by_parameters
+        
+        # Get thresholds for this MACD parameter set
+        thresholds = get_macd_thresholds_by_parameters(fast, slow, signal_period)
+        
+        if thresholds is None:
+            # Fallback for unknown parameter combinations
+            logger.warning(f"⚠️ No thresholds found for MACD({fast},{slow},{signal_period}), using simple crossover")
+            if macd_value > signal_value:
+                return {'signal': 'Buy', 'strength': 'Moderate', 'description': 'MACD above signal line (no magnitude filter available)'}
+            elif macd_value < signal_value:
+                return {'signal': 'Sell', 'strength': 'Moderate', 'description': 'MACD below signal line (no magnitude filter available)'}
+            else:
+                return {'signal': 'Neutral', 'strength': 'Weak', 'description': 'MACD at signal line'}
+        
+        magnitude_multiplier = thresholds.get('magnitude_multiplier', 0.5)
+        std_lookback = thresholds.get('histogram_std_lookback', 20)
+        
+        # Calculate histogram magnitude threshold
+        histogram_magnitude = abs(macd_value - signal_value)
+        
+        if histogram_data is not None and len(histogram_data) >= std_lookback:
+            # Use provided histogram data to calculate std
+            import numpy as np
+            histogram_std = np.std(histogram_data[-std_lookback:])
+            magnitude_threshold = magnitude_multiplier * histogram_std
         else:
-            return {'signal': 'Neutral', 'strength': 'Weak', 'description': 'MACD at signal line'}
+            # Fallback: use simple magnitude if no histogram data provided
+            # This preserves legacy behavior for backward compatibility
+            magnitude_threshold = magnitude_multiplier * 0.01  # Small default threshold
+            logger.debug(f"Using fallback magnitude threshold for MACD({fast},{slow},{signal_period})")
+        
+        # Generate signal based on crossover AND magnitude
+        if macd_value > signal_value and histogram_magnitude >= magnitude_threshold:
+            return {
+                'signal': 'Buy',
+                'strength': 'Strong' if histogram_magnitude >= magnitude_threshold * 1.5 else 'Moderate',
+                'description': f'MACD above signal (magnitude: {histogram_magnitude:.6f})'
+            }
+        elif macd_value < signal_value and histogram_magnitude >= magnitude_threshold:
+            return {
+                'signal': 'Sell',
+                'strength': 'Strong' if histogram_magnitude >= magnitude_threshold * 1.5 else 'Moderate',
+                'description': f'MACD below signal (magnitude: {histogram_magnitude:.6f})'
+            }
+        else:
+            return {
+                'signal': 'Neutral',
+                'strength': 'Weak',
+                'description': f'MACD signal not strong enough (magnitude: {histogram_magnitude:.6f}, threshold: {magnitude_threshold:.6f})'
+            }
     
     def _generate_elder_ray_signal(self, bull_power: float, bear_power: float) -> Dict:
         """Generate Elder Ray Index signal interpretation"""
