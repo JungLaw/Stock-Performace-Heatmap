@@ -14,6 +14,7 @@ wheels/
 _references/
 .vscode/
 notebooks/
+.aim/
 
 # Previous versions of documentation
 docs/planning/PLANNING_071725.md
