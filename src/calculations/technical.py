@@ -11,7 +11,7 @@ import numpy as np
 import sqlite3
 import yfinance as yf
 from datetime import datetime, timedelta, date
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 import logging
 
@@ -26,6 +26,10 @@ from .performance import (
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Feature flag: controls whether calculate_technical_indicators uses the new
+# Option-C TA engine (indicator_preprocessor) or the legacy pandas-ta-classic path. (12/7/25, GPT+) 
+USE_NEW_TA_ENGINE: bool = False
 
 class DatabaseIntegratedTechnicalCalculator:
     """
@@ -271,8 +275,212 @@ class DatabaseIntegratedTechnicalCalculator:
         else:
             logger.error(f"❌ No OHLCV data available for {ticker}")
             return None
-    
-    def calculate_technical_indicators(self, ticker: str, save_to_db: bool = True) -> Optional[Dict]:
+
+    # A private helper that calls the new indicator engine (12/7/25; GPT+)    
+    def _compute_indicators_with_engine(
+        self,
+        df: pd.DataFrame,
+        config: Dict[str, Any] | None = None,
+    ) -> pd.DataFrame:
+        """
+        Enrich an OHLCV DataFrame with Option-C indicator columns using the
+        new TA Rule Engine preprocessor (indicator_preprocessor.compute_all_indicators).
+
+        This is a parallel path that does NOT alter or depend on the legacy
+        pandas-ta-classic logic. It simply returns a new DataFrame with the
+        same index plus additional indicator columns.
+        """
+        # Local import to avoid hard coupling at module import time
+        #from .indicator_preprocessor import compute_all_indicators
+        from _references.ta_rulebook_GPT.ta_rule_engine._convert_for_project.indicator_preprocessor import compute_all_indicators
+
+        return compute_all_indicators(df, config=config)        
+
+    # New public method that fetches OHLCV via the existing DB/yfinance logic, runs the new `compute_all_indicators`, 
+    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)   
+    def calculate_optionc_indicators(
+        self,
+        ticker: str,
+        save_to_db: bool = False,
+        config: Dict[str, Any] | None = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Fetch sufficient OHLCV data for `ticker` and compute Option-C indicators
+        using the new TA Rule Engine preprocessor.
+
+        This method:
+          - Uses the existing DB-first + yfinance-fallback OHLCV pipeline
+          - Enriches the DataFrame with Option-C indicator columns
+          - Does NOT compute legacy text signals
+          - Does NOT change the behavior of calculate_technical_indicators()
+
+        Returns:
+            DataFrame with OHLCV + Option-C indicator columns, or None on failure.
+        """
+        # Re-use the existing helper that knows how much history we need
+        df = self._get_sufficient_ohlcv_data(
+            ticker=ticker,
+            periods_needed=200,      # enough for SMA_200, BB_20_2, etc.
+            save_to_db=save_to_db,
+        )
+
+        if df is None or df.empty:
+            logger.error(f"Unable to retrieve sufficient OHLCV data for {ticker}")
+            return None
+
+        df_ind = self._compute_indicators_with_engine(df, config=config)
+        return df_ind
+
+    # New-engine variant of calculate_technical_indicators(); (12/8/25, GPT+)
+    def _calculate_technical_indicators_optionc(
+        self,
+        ticker: str,
+        save_to_db: bool = False,
+        config: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """
+        New-engine variant of calculate_technical_indicators().
+
+        Uses:
+          - calculate_optionc_indicators() to compute Option-C indicator columns
+          - Existing *_signal helper methods to generate legacy-style signals
+
+        Returns a dict shaped like the legacy implementation: a flat mapping
+        of indicator values and their signals. For now this covers the subset
+        of indicators we currently compute via indicator_preprocessor:
+          - RSI(14)
+          - MACD(12,26,9)
+          - Stochastic (14,3,3)
+          - SMA/EMA (20, 50, 200)
+          - Bollinger (20, 2σ) is computed but not yet used in signals.
+        """
+        logger.info(f"🎯 [NEW ENGINE] Calculating Option-C technical indicators for {ticker}")
+
+        # Use the existing DB-first OHLCV pipeline + preprocessor
+        df_ind = self.calculate_optionc_indicators(
+            ticker=ticker,
+            save_to_db=save_to_db,
+            config=config,
+        )
+
+        if df_ind is None or df_ind.empty or len(df_ind) < 50:
+            logger.error(
+                f"❌ [NEW ENGINE] Insufficient data for {ticker}: "
+                f"{0 if df_ind is None else len(df_ind)} records"
+            )
+            return {
+                "ticker": ticker,
+                "error": True,
+                "error_message": "Insufficient OHLCV data for technical analysis (Option-C engine)",
+                "data_source": "error",
+            }
+
+        indicators: Dict[str, Any] = {}
+
+        latest = df_ind.iloc[-1]
+        # Index is usually DatetimeIndex; be defensive
+        if hasattr(df_ind.index[-1], "date"):
+            latest_date = df_ind.index[-1].date()
+        else:
+            latest_date = None
+
+        # ------------------ RSI (14) ------------------
+        if "RSI_14" in df_ind.columns and not pd.isna(latest["RSI_14"]):
+            rsi_val = float(latest["RSI_14"])
+            indicators["rsi_14"] = rsi_val
+            indicators["rsi_signal"] = self._generate_rsi_signal(rsi_val)
+
+        # ------------------ MACD (12,26,9) ------------------
+        macd_cols = {"MACD_12_26_9_line", "MACD_12_26_9_signal", "MACD_12_26_9_hist"}
+        if macd_cols.issubset(df_ind.columns):
+            macd_line = float(latest["MACD_12_26_9_line"])
+            macd_signal = float(latest["MACD_12_26_9_signal"])
+            macd_hist = float(latest["MACD_12_26_9_hist"])
+
+            indicators["macd_value"] = macd_line
+            indicators["macd_signal"] = macd_signal
+            indicators["macd_histogram"] = macd_hist
+
+            histogram_list = (
+                df_ind["MACD_12_26_9_hist"].dropna().tolist()
+                if "MACD_12_26_9_hist" in df_ind.columns
+                else []
+            )
+
+            indicators["macd_signal_interpretation"] = self._generate_macd_signal(
+                macd_value=macd_line,
+                signal_value=macd_signal,
+                fast=12,
+                slow=26,
+                signal_period=9,
+                histogram_data=histogram_list,
+            )
+
+        # ------------------ Stochastic (14,3,3) ------------------
+        if {"STOCHK_14_3_3", "STOCHD_14_3_3"}.issubset(df_ind.columns):
+            k_val = float(latest["STOCHK_14_3_3"])
+            d_val = float(latest["STOCHD_14_3_3"])
+            indicators["stoch_k"] = k_val
+            indicators["stoch_d"] = d_val
+            indicators["stoch_signal"] = self._generate_stochastic_signal(k_val, d_val)
+
+        # ------------------ Moving Averages (20, 50, 200) ------------------
+        close_latest = float(latest["Close"]) if "Close" in df_ind.columns else None
+        ma_periods = [20, 50, 200]
+
+        for period in ma_periods:
+            sma_col = f"SMA_{period}"
+            ema_col = f"EMA_{period}"
+
+            # SMA
+            if sma_col in df_ind.columns and not pd.isna(latest[sma_col]):
+                sma_val = float(latest[sma_col])
+                indicators[f"sma_{period}"] = sma_val
+                if close_latest is not None:
+                    indicators[f"sma_{period}_signal"] = self._generate_ma_signal(
+                        close_latest, sma_val
+                    )
+
+            # EMA (only for those we actually compute → 20, 50 right now)
+            if ema_col in df_ind.columns and not pd.isna(latest[ema_col]):
+                ema_val = float(latest[ema_col])
+                indicators[f"ema_{period}"] = ema_val
+                if close_latest is not None:
+                    indicators[f"ema_{period}_signal"] = self._generate_ma_signal(
+                        close_latest, ema_val
+                    )
+
+        # ------------------ ADX (14) + DI+/DI- ------------------ (12/8, GPT+)
+        if {"ADX_14", "DIp_14", "DIn_14"}.issubset(df_ind.columns):
+            adx_val = float(latest["ADX_14"])
+            plus_di = float(latest["DIp_14"])
+            minus_di = float(latest["DIn_14"])
+
+            indicators["adx_value"] = adx_val
+            indicators["plus_di"] = plus_di
+            indicators["minus_di"] = minus_di
+            indicators["adx_signal"] = self._generate_adx_signal(
+                adx_value=adx_val,
+                plus_di=plus_di,
+                minus_di=minus_di,
+            )
+
+        # NOTE:
+        #  - ATR, ADX, DI, CCI, Williams %R, Ultimate Oscillator, ROC, etc.
+        #    are still handled only in the legacy path for now. Once we extend
+        #    indicator_preprocessor + DEFAULT_CONFIG to cover them, we can
+        #    add the corresponding mappings here.
+
+        # Save to database if enabled and we have a latest_date
+        if save_to_db and latest_date is not None:
+            self._save_technical_indicators_to_db(ticker, latest_date, indicators)
+
+        return indicators
+
+
+
+
+    def calculate_technical_indicators(self, ticker: str, save_to_db: bool = False) -> Optional[Dict]:
         """
         Calculate all technical indicators for a given ticker
         
@@ -284,7 +492,15 @@ class DatabaseIntegratedTechnicalCalculator:
             Dictionary with technical indicators and signals or None if calculation failed
         """
         logger.info(f"🎯 Calculating technical indicators for {ticker}")
-        
+
+
+        # Optional parallel path: use new Option-C TA engine when enabled. (12/8/25; GPT+)
+        if USE_NEW_TA_ENGINE:
+            return self._calculate_technical_indicators_optionc(
+                ticker=ticker,
+                save_to_db=save_to_db,
+            )
+                
         try:
             # Import pandas-ta-classic
             import pandas_ta_classic as ta
@@ -1912,7 +2128,7 @@ def get_technical_calculator() -> DatabaseIntegratedTechnicalCalculator:
 
 
 # Convenience function for single ticker analysis
-def calculate_technical_analysis(ticker: str, save_to_db: bool = True) -> Dict:
+def calculate_technical_analysis(ticker: str, save_to_db: bool = False) -> Dict:
     """
     Quick function to calculate technical analysis for a single ticker
     
