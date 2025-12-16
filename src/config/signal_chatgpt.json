@@ -1,0 +1,372 @@
+{
+  "ADX": {
+    "short": {
+      "period": 9,
+      "buy": "(+DI - -DI) >= 5 and ADX > 20",
+      "sell": "(-DI - +DI) >= 5 and ADX > 20",
+      "neutral": "ADX <= 20 or abs(+DI - -DI) < 5"
+    },
+    "intermediate": {
+      "period": 14,
+      "buy": "(+DI - -DI) >= 5 and ADX > 20",
+      "sell": "(-DI - +DI) >= 5 and ADX > 20",
+      "neutral": "ADX <= 20 or abs(+DI - -DI) < 5"
+    },
+    "long": {
+      "period": 20,
+      "buy": "(+DI - -DI) >= 5 and ADX > 20",
+      "sell": "(-DI - +DI) >= 5 and ADX > 20",
+      "neutral": "ADX <= 20 or abs(+DI - -DI) < 5"
+    }
+  },
+
+  "ATR": {
+    "short": { "period": 10 },
+    "intermediate": { "period": 14 },
+    "long": { "period": 20 },
+    "band_rules": {
+      "neutral_band_multiplier": {
+        "short": 0.25,
+        "intermediate": 0.5,
+        "long": 1.0
+      },
+      "description": "Neutral zone for any MA/VWMA/BullBear-based signal = ±(m × ATR%)"
+    }
+  },
+
+  "BollingerBands": {
+    "short": {
+      "period": 10,
+      "stdev": 1.5,
+      "buy": "Close > UpperBand",
+      "sell": "Close < LowerBand",
+      "neutral": "abs(Close - MiddleBand) <= 0.25 * stdev"
+    },
+    "intermediate": {
+      "period": 20,
+      "stdev": 2.0,
+      "buy": "Close > UpperBand",
+      "sell": "Close < LowerBand",
+      "neutral": "abs(Close - MiddleBand) <= 0.25 * stdev"
+    },
+    "long": {
+      "period": 50,
+      "stdev": 2.5,
+      "buy": "Close > UpperBand",
+      "sell": "Close < LowerBand",
+      "neutral": "abs(Close - MiddleBand) <= 0.25 * stdev"
+    }
+  }, 
+
+  "CCI": {
+    "short": {
+      "period": 10,
+      "buy": "tanh(CCI / 100) > 0.25",
+      "sell": "tanh(CCI / 100) < -0.25",
+      "neutral": "tanh(CCI / 100) >= -0.25 and tanh(CCI / 100) <= 0.25"
+    },
+    "intermediate": {
+      "period": 14,
+      "buy": "tanh(CCI / 100) > 0.25",
+      "sell": "tanh(CCI / 100) < -0.25",
+      "neutral": "tanh(CCI / 100) >= -0.25 and tanh(CCI / 100) <= 0.25"
+    },
+    "long": {
+      "period": 20,
+      "buy": "tanh(CCI / 100) > 0.25",
+      "sell": "tanh(CCI / 100) < -0.25",
+      "neutral": "tanh(CCI / 100) >= -0.25 and tanh(CCI / 100) <= 0.25"
+    }
+  },
+
+  "CMF": {
+    "short": {
+      "period": 10,
+      "buy": "CMF > 0.1",
+      "sell": "CMF < -0.1",
+      "neutral": "CMF >= -0.1 and CMF <= 0.1"
+    },
+    "intermediate": {
+      "period": 21,
+      "buy": "CMF > 0.1",
+      "sell": "CMF < -0.1",
+      "neutral": "CMF >= -0.1 and CMF <= 0.1"
+    },
+    "long": {
+      "period": 50,
+      "buy": "CMF > 0.1",
+      "sell": "CMF < -0.1",
+      "neutral": "CMF >= -0.1 and CMF <= 0.1"
+    }
+  },
+
+  "HMA": {
+    "short": {
+      "period": 9,
+      "buy": "Close > HMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < HMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - HMA) <= 0.5 * ATR_percent"
+    },
+    "intermediate": {
+      "period": 21,
+      "buy": "Close > HMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < HMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - HMA) <= 0.5 * ATR_percent"
+    },
+    "long": {
+      "period": 50,
+      "buy": "Close > HMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < HMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - HMA) <= 0.5 * ATR_percent"
+    }
+  },
+
+  "MFI": {
+    "short": {
+      "period": 10,
+      "buy": "MFI > 55",
+      "sell": "MFI < 45",
+      "neutral": "MFI >= 45 and MFI <= 55"
+    },
+    "intermediate": {
+      "period": 14,
+      "buy": "MFI > 55",
+      "sell": "MFI < 45",
+      "neutral": "MFI >= 45 and MFI <= 55"
+    },
+    "long": {
+      "period": 30,
+      "buy": "MFI > 55",
+      "sell": "MFI < 45",
+      "neutral": "MFI >= 45 and MFI <= 55"
+    }
+  }, 
+
+  "ROC": {
+    "short": {
+      "period": 9,
+      "buy": "ROC > 0.5",
+      "sell": "ROC < -0.5",
+      "neutral": "ROC >= -0.5 and ROC <= 0.5",
+      "units": "percent"
+    },
+    "intermediate": {
+      "periods": [12, 20],
+      "buy": "ROC > 0.75",
+      "sell": "ROC < -0.75",
+      "neutral": "ROC >= -0.75 and ROC <= 0.75",
+      "units": "percent"
+    },
+    "long": {
+      "period": 50,
+      "buy": "ROC > 1.0",
+      "sell": "ROC < -1.0",
+      "neutral": "ROC >= -1.0 and ROC <= 1.0",
+      "units": "percent"
+    }
+  },
+
+  "RSI": {
+    "short": {
+      "period": 10,
+      "buy": "RSI > 55",
+      "sell": "RSI < 45",
+      "neutral": "RSI >= 45 and RSI <= 55"
+    },
+    "intermediate": {
+      "period": 14,
+      "buy": "RSI > 55",
+      "sell": "RSI < 45",
+      "neutral": "RSI >= 45 and RSI <= 55"
+    },
+    "long": {
+      "periods": [21, 30],
+      "buy": "RSI > 55",
+      "sell": "RSI < 45",
+      "neutral": "RSI >= 45 and RSI <= 55"
+    }
+  },
+
+  "SMA": {
+    "short": {
+      "period": 10,
+      "buy": "Close > SMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < SMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - SMA) <= 0.5 * ATR_percent"
+    },
+    "intermediate": {
+      "period": 50,
+      "buy": "Close > SMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < SMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - SMA) <= 0.5 * ATR_percent"
+    },
+    "long": {
+      "periods": [100, 200],
+      "buy": "Close > SMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < SMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - SMA) <= 0.5 * ATR_percent"
+    }
+  },
+
+  "EMA": {
+    "short": {
+      "periods": [5, 10],
+      "buy": "Close > EMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < EMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - EMA) <= 0.5 * ATR_percent"
+    },
+    "intermediate": {
+      "periods": [20, 50],
+      "buy": "Close > EMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < EMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - EMA) <= 0.5 * ATR_percent"
+    },
+    "long": {
+      "period": 200,
+      "buy": "Close > EMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < EMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - EMA) <= 0.5 * ATR_percent"
+    }
+  }, 
+
+  "VWMA": {
+    "short": {
+      "period": 10,
+      "buy": "Close > VWMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < VWMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - VWMA) <= 0.5 * ATR_percent"
+    },
+    "intermediate": {
+      "period": 20,
+      "buy": "Close > VWMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < VWMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - VWMA) <= 0.5 * ATR_percent"
+    },
+    "long": {
+      "period": 50,
+      "buy": "Close > VWMA * (1 + 0.005 * ATR_percent)",
+      "sell": "Close < VWMA * (1 - 0.005 * ATR_percent)",
+      "neutral": "abs(Close - VWMA) <= 0.5 * ATR_percent"
+    }
+  },
+
+  "MACD": {
+    "short": {
+      "fast": 8,
+      "slow": 17,
+      "signal": 5,
+      "buy": "MACD_line - Signal_line > 0.1 * ATR",
+      "sell": "MACD_line - Signal_line < -0.1 * ATR",
+      "neutral": "abs(MACD_line - Signal_line) <= 0.1 * ATR"
+    },
+    "intermediate": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9,
+      "buy": "MACD_line - Signal_line > 0.2 * ATR",
+      "sell": "MACD_line - Signal_line < -0.2 * ATR",
+      "neutral": "abs(MACD_line - Signal_line) <= 0.2 * ATR"
+    },
+    "long": {
+      "fast": 20,
+      "slow": 50,
+      "signal": 10,
+      "buy": "MACD_line - Signal_line > 0.3 * ATR",
+      "sell": "MACD_line - Signal_line < -0.3 * ATR",
+      "neutral": "abs(MACD_line - Signal_line) <= 0.3 * ATR"
+    }
+  },
+
+  "Stochastic": {
+    "short": {
+      "k": 5,
+      "d": 3,
+      "smooth": 3,
+      "buy": "%K > %D and %K > 55",
+      "sell": "%K < %D and %K < 45",
+      "neutral": "abs(%K - %D) <= 5 or (%K >= 45 and %K <= 55)"
+    },
+    "intermediate": {
+      "k": 14,
+      "d": 3,
+      "smooth": 3,
+      "buy": "%K > %D and %K > 55",
+      "sell": "%K < %D and %K < 45",
+      "neutral": "abs(%K - %D) <= 5 or (%K >= 45 and %K <= 55)"
+    },
+    "long": {
+      "k": 21,
+      "d": 5,
+      "smooth": 5,
+      "buy": "%K > %D and %K > 55",
+      "sell": "%K < %D and %K < 45",
+      "neutral": "abs(%K - %D) <= 5 or (%K >= 45 and %K <= 55)"
+    }
+  },
+
+  "Ultimate_Oscillator": {
+    "short": {
+      "periods": [5, 10, 20],
+      "buy": "UO > 55",
+      "sell": "UO < 45",
+      "neutral": "UO >= 45 and UO <= 55"
+    },
+    "intermediate": {
+      "periods": [7, 14, 28],
+      "buy": "UO > 55",
+      "sell": "UO < 45",
+      "neutral": "UO >= 45 and UO <= 55"
+    },
+    "long": {
+      "periods": [10, 20, 40],
+      "buy": "UO > 55",
+      "sell": "UO < 45",
+      "neutral": "UO >= 45 and UO <= 55"
+    }
+  },
+
+  "Williams_%R": {
+    "short": {
+      "period": 5,
+      "buy": "%R > -55",
+      "sell": "%R < -80",
+      "neutral": "%R <= -45 and %R >= -55"
+    },
+    "intermediate": {
+      "period": 14,
+      "buy": "%R > -55",
+      "sell": "%R < -80",
+      "neutral": "%R <= -45 and %R >= -55"
+    },
+    "long": {
+      "period": 20,
+      "buy": "%R > -55",
+      "sell": "%R < -80",
+      "neutral": "%R <= -45 and %R >= -55"
+    }
+  },
+
+  "BullBearPower": {
+    "short": {
+      "eri_period": 10,
+      "baseline_ema": 10,
+      "buy": "BullPower > 0 and (Price - EMA) > 0.5 * ATR_percent",
+      "sell": "BearPower < 0 and (Price - EMA) < -0.5 * ATR_percent",
+      "neutral": "abs(Price - EMA) <= 0.5 * ATR_percent"
+    },
+    "intermediate": {
+      "eri_period": 13,
+      "baseline_ema": 13,
+      "buy": "BullPower > 0 and (Price - EMA) > 0.5 * ATR_percent",
+      "sell": "BearPower < 0 and (Price - EMA) < -0.5 * ATR_percent",
+      "neutral": "abs(Price - EMA) <= 0.5 * ATR_percent"
+    },
+    "long": {
+      "eri_period": 21,
+      "baseline_ema": 21,
+      "buy": "BullPower > 0 and (Price - EMA) > 0.5 * ATR_percent",
+      "sell": "BearPower < 0 and (Price - EMA) < -0.5 * ATR_percent",
+      "neutral": "abs(Price - EMA) <= 0.5 * ATR_percent"
+    }
+  }
+}

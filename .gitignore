@@ -5,7 +5,9 @@ build/
 dist/
 wheels/
 *.egg-info
-.db
+*.db
+data/stock_data.db
+data/*.db
 
 # Virtual environments
 .venv
@@ -25,3 +27,7 @@ docs/planning/PRD_v2.0_revised.md
 
 # Guidelines/Rules/Continuation Reports
 GEMINI.md
+
+# Other
+start.ps1
+pivot_points_full_diff.txt

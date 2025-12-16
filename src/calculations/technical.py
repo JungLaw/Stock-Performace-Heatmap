@@ -11,7 +11,7 @@ import numpy as np
 import sqlite3
 import yfinance as yf
 from datetime import datetime, timedelta, date
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 import logging
 
@@ -23,9 +23,29 @@ from .performance import (
     get_trading_day_target
 )
 
+# Rule-engine harness: Option-C signals via rulebook + DSL
+try:
+    from .signal_classifier import run_optionc_heatmap, DEFAULT_SIGNAL_SCORES
+except Exception:  # keep broad during migration; narrow later
+    run_optionc_heatmap = None
+    DEFAULT_SIGNAL_SCORES = {"strong_sell": -2, "sell": -1, "neutral": 0, "buy": 1, "strong_buy": 2}
+
+
+try:
+    # package-relative import (when running as part of src.calculations)
+    from .indicator_preprocessor import compute_all_indicators
+except ImportError:  # pragma: no cover
+    # Fallback: absolute import (e.g., when running this file standalone)
+    from src.calculations.indicator_preprocessor import compute_all_indicators
+
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Feature flag: controls whether calculate_technical_indicators uses the new
+# Option-C TA engine (indicator_preprocessor) or the legacy pandas-ta-classic path. (12/7/25, GPT+) 
+USE_NEW_TA_ENGINE: bool = False
 
 class DatabaseIntegratedTechnicalCalculator:
     """
@@ -188,9 +208,27 @@ class DatabaseIntegratedTechnicalCalculator:
             if save_to_db and self.db_available:
                 self._save_ohlcv_data_to_db(ticker, hist_data)
             
+            # Align timezone-awareness between yfinance index and start/end datetimes.
+            # yfinance often returns a tz-aware DatetimeIndex (e.g., America/New_York),
+            # while our start_date/end_date are naive -> comparison raises.
+            idx = hist_data.index
+            start_ts = pd.Timestamp(start_date)
+            end_ts = pd.Timestamp(end_date)
+            if getattr(idx, "tz", None) is not None:
+                # Make bounds tz-aware in the same timezone as the index
+                if start_ts.tzinfo is None:
+                    start_ts = start_ts.tz_localize(idx.tz)
+                else:
+                    start_ts = start_ts.tz_convert(idx.tz)
+                if end_ts.tzinfo is None:
+                    end_ts = end_ts.tz_localize(idx.tz)
+                else:
+                    end_ts = end_ts.tz_convert(idx.tz)
+
             # Filter to requested date range
-            filtered_data = hist_data[(hist_data.index >= start_date) & (hist_data.index <= end_date)]
-            
+            #filtered_data = hist_data[(hist_data.index >= start_date) & (hist_data.index <= end_date)]
+            filtered_data = hist_data[(idx >= start_ts) & (idx <= end_ts)]
+
             logger.info(f"✅ Filtered to {len(filtered_data)} records for {ticker} in requested range")
             return filtered_data
             
@@ -271,8 +309,559 @@ class DatabaseIntegratedTechnicalCalculator:
         else:
             logger.error(f"❌ No OHLCV data available for {ticker}")
             return None
-    
-    def calculate_technical_indicators(self, ticker: str, save_to_db: bool = True) -> Optional[Dict]:
+
+    # A private helper that calls the new indicator engine (12/7/25; GPT+)    
+    def _compute_indicators_with_engine(
+        self,
+        df: pd.DataFrame,
+        config: Dict[str, Any] | None = None,
+    ) -> pd.DataFrame:
+        """
+        Enrich an OHLCV DataFrame with Option-C indicator columns using the
+        new TA Rule Engine preprocessor (indicator_preprocessor.compute_all_indicators).
+
+        This is a parallel path that does NOT alter or depend on the legacy
+        pandas-ta-classic logic. It simply returns a new DataFrame with the
+        same index plus additional indicator columns.
+        """
+
+        return compute_all_indicators(df, config=config)        
+
+    # New public method that fetches OHLCV via the existing DB/yfinance logic, runs the new `compute_all_indicators`, 
+    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)   
+    def calculate_optionc_indicators(
+        self,
+        ticker: str,
+        save_to_db: bool = False,
+        config: Dict[str, Any] | None = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Fetch sufficient OHLCV data for `ticker` and compute Option-C indicators
+        using the new TA Rule Engine preprocessor.
+
+        This method:
+          - Uses the existing DB-first + yfinance-fallback OHLCV pipeline
+          - Enriches the DataFrame with Option-C indicator columns
+          - Does NOT compute legacy text signals
+          - Does NOT change the behavior of calculate_technical_indicators()
+
+        Returns:
+            DataFrame with OHLCV + Option-C indicator columns, or None on failure.
+        """
+        # Re-use the existing helper that knows how much history we need
+        df = self._get_sufficient_ohlcv_data(
+            ticker=ticker,
+            periods_needed=200,      # enough for SMA_200, BB_20_2, etc.
+            save_to_db=save_to_db,
+        )
+
+        if df is None or df.empty:
+            logger.error(f"Unable to retrieve sufficient OHLCV data for {ticker}")
+            return None
+
+        df_ind = self._compute_indicators_with_engine(df, config=config)
+        return df_ind
+
+    # New-engine variant of calculate_technical_indicators(); (12/8/25, GPT+)
+    def _calculate_technical_indicators_optionc(
+        self,
+        ticker: str,
+        save_to_db: bool = False,
+        config: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """
+        New-engine variant of calculate_technical_indicators().
+
+        Uses:
+          - calculate_optionc_indicators() to compute Option-C indicator columns
+          - Existing *_signal helper methods to generate legacy-style signals
+
+        Returns a dict shaped like the legacy implementation: a flat mapping
+        of indicator values and their signals. For now this covers the subset
+        of indicators we currently compute via indicator_preprocessor:
+          - RSI(14)
+          - MACD(12,26,9)
+          - Stochastic (14,3,3)
+          - SMA/EMA (20, 50, 200)
+          - Bollinger (20, 2σ) is computed but not yet used in signals.
+        """
+        logger.info(f"🎯 [NEW ENGINE] Calculating Option-C technical indicators for {ticker}")
+
+        # Use the existing DB-first OHLCV pipeline + preprocessor
+        df_ind = self.calculate_optionc_indicators(
+            ticker=ticker,
+            save_to_db=save_to_db,
+            config=config,
+        )
+
+        if df_ind is None or df_ind.empty or len(df_ind) < 50:
+            logger.error(
+                f"❌ [NEW ENGINE] Insufficient data for {ticker}: "
+                f"{0 if df_ind is None else len(df_ind)} records"
+            )
+            return {
+                "ticker": ticker,
+                "error": True,
+                "error_message": "Insufficient OHLCV data for technical analysis (Option-C engine)",
+                "data_source": "error",
+            }
+
+        indicators: Dict[str, Any] = {}
+
+        latest = df_ind.iloc[-1]
+        # Index is usually DatetimeIndex; be defensive
+        if hasattr(df_ind.index[-1], "date"):
+            latest_date = df_ind.index[-1].date()
+        else:
+            latest_date = None
+
+        # ------------------ RSI (14) ------------------
+        if "RSI_14" in df_ind.columns and not pd.isna(latest["RSI_14"]):
+            rsi_val = float(latest["RSI_14"])
+            indicators["rsi_14"] = rsi_val
+            indicators["rsi_signal"] = self._generate_rsi_signal(rsi_val)
+
+        # ------------------ MACD (12,26,9) ------------------
+        macd_cols = {"MACD_12_26_9_line", "MACD_12_26_9_signal", "MACD_12_26_9_hist"}
+        if macd_cols.issubset(df_ind.columns):
+            macd_line = float(latest["MACD_12_26_9_line"])
+            macd_signal = float(latest["MACD_12_26_9_signal"])
+            macd_hist = float(latest["MACD_12_26_9_hist"])
+
+            indicators["macd_value"] = macd_line
+            indicators["macd_signal"] = macd_signal
+            indicators["macd_histogram"] = macd_hist
+
+            histogram_list = (
+                df_ind["MACD_12_26_9_hist"].dropna().tolist()
+                if "MACD_12_26_9_hist" in df_ind.columns
+                else []
+            )
+
+            indicators["macd_signal_interpretation"] = self._generate_macd_signal(
+                macd_value=macd_line,
+                signal_value=macd_signal,
+                fast=12,
+                slow=26,
+                signal_period=9,
+                histogram_data=histogram_list,
+            )
+
+        # ------------------ Stochastic (14,3,3) ------------------
+        if {"STOCHK_14_3_3", "STOCHD_14_3_3"}.issubset(df_ind.columns):
+            k_val = float(latest["STOCHK_14_3_3"])
+            d_val = float(latest["STOCHD_14_3_3"])
+            indicators["stoch_k"] = k_val
+            indicators["stoch_d"] = d_val
+            indicators["stoch_signal"] = self._generate_stochastic_signal(k_val, d_val)
+
+        # ------------------ Moving Averages (20, 50, 200) ------------------
+        close_latest = float(latest["Close"]) if "Close" in df_ind.columns else None
+        ma_periods = [20, 50, 200]
+
+        for period in ma_periods:
+            sma_col = f"SMA_{period}"
+            ema_col = f"EMA_{period}"
+
+            # SMA
+            if sma_col in df_ind.columns and not pd.isna(latest[sma_col]):
+                sma_val = float(latest[sma_col])
+                indicators[f"sma_{period}"] = sma_val
+                if close_latest is not None:
+                    indicators[f"sma_{period}_signal"] = self._generate_ma_signal(
+                        close_latest, sma_val
+                    )
+
+            # EMA (only for those we actually compute → 20, 50 right now)
+            if ema_col in df_ind.columns and not pd.isna(latest[ema_col]):
+                ema_val = float(latest[ema_col])
+                indicators[f"ema_{period}"] = ema_val
+                if close_latest is not None:
+                    indicators[f"ema_{period}_signal"] = self._generate_ma_signal(
+                        close_latest, ema_val
+                    )
+
+        # ------------------ ADX (14) + DI+/DI- ------------------ (12/8, GPT+)
+        if {"ADX_14", "DIp_14", "DIn_14"}.issubset(df_ind.columns):
+            adx_val = float(latest["ADX_14"])
+            plus_di = float(latest["DIp_14"])
+            minus_di = float(latest["DIn_14"])
+
+            indicators["adx_value"] = adx_val
+            indicators["plus_di"] = plus_di
+            indicators["minus_di"] = minus_di
+            indicators["adx_signal"] = self._generate_adx_signal(
+                adx_value=adx_val,
+                plus_di=plus_di,
+                minus_di=minus_di,
+            )
+
+        # NOTE:
+        #  - This block is building the *legacy-style* `technical_indicators` dict
+        #    (values + *_signal helpers) for the existing Streamlit tables.
+        #  - The Option-C preprocessor now computes additional columns (e.g., ROC_*,
+        #    WILLR_*), and the rule-engine/rolling-heatmap path can consume them.
+        #  - However, we have not yet added legacy-style mappings/signals for those
+        #    indicators in this dict. When/if we want them to appear in the legacy
+        #    tables, we should add explicit mappings here.
+
+        # Save to database if enabled and we have a latest_date
+        if save_to_db and latest_date is not None:
+            self._save_technical_indicators_to_db(ticker, latest_date, indicators)
+
+        return indicators
+
+    def calculate_rule_engine_signals_optionc(
+        self,
+        ticker: str,
+        feature_scope: str = "heatmap",
+        rules_path: Union[str, Path] = "master_rules_normalized.json",
+        save_to_db: bool = False,
+        config: Dict[str, Any] | None = None,
+        indicators: list[str] | None = None,
+        return_type: str = "scores",
+    ) -> Any:     #Dict[str, Dict[str, pd.Series]]:
+        """
+        Run the rulebook/DSL engine on the Option-C indicator DataFrame for `ticker`.
+
+        Returns numeric scores in [-2, 2] for the Option C slice:
+        {
+            "RSI": {"14": Series[int]},
+            "MACD": {"12_26_9": Series[int]},
+            "Stochastic": {"14_3_3": Series[int]},
+            "ADX": {"14": Series[int]},
+        }
+
+        This is a parallel path for the rolling heatmap backend and does not affect
+        legacy calculate_technical_indicators() behavior.
+        """
+        df_ind = self.calculate_optionc_indicators(
+            ticker=ticker,
+            save_to_db=save_to_db,
+            config=config,
+        )
+
+        if df_ind is None or df_ind.empty:
+            logger.warning(
+                "⚠️ [NEW ENGINE] No Option-C indicator data available for rule-engine "
+                f"evaluation on {ticker} (df is None/empty)."
+            )
+            return {}
+
+        # Default indicator set: Option C baseline (non-breaking).
+        # Tests / Option A onboarding can pass an explicit list.
+        if indicators is None:
+            indicators = ["RSI", "MACD", "Stochastic", "ADX"]
+            
+        scores = run_optionc_heatmap(
+            df_ind, 
+            rules_path=rules_path,
+            indicators=indicators)
+
+        if return_type not in ("scores", "rolling"):
+            raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
+
+        if return_type == "rolling":
+            return self._build_optionc_rolling_signals(
+                ticker=ticker,
+                df_ind=df_ind,
+                scores=scores,
+                days=10,
+            )        
+        
+        return scores
+
+
+    def _build_optionc_rolling_signals(
+        self,
+        ticker: str,
+        df_ind: pd.DataFrame,
+        scores: Dict[str, Dict[str, pd.Series]],
+        days: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Build rolling heatmap payload for the *rule-engine* indicator set.
+
+        Historical note:
+          - This started as "Option C only" during the initial vertical slice.
+          - As we onboard additional momentum params (Option A), the same payload
+            contract remains, but the indicator/param coverage expands via metadata.
+        """
+        if df_ind is None or df_ind.empty or not scores:
+            return {
+                "engine": "optionc_rulebook_v1",
+                "status": "empty",
+                "ticker": ticker,
+                "dates": [],
+                "short_term": None,
+                "intermediate_term": None,
+                "long_term": None,
+                "composite_scores": {"short_term": None, "overall": None},
+                "extras": {},
+            }
+
+        df_ind = df_ind.sort_index()
+        last_dates = df_ind.index[-days:]
+
+        date_keys = [
+            d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+            for d in last_dates
+        ]
+
+        score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
+
+        # Rolling metadata:
+        #   This list controls which indicator/param variants are emitted into the rolling
+        #   heatmap payload. The preprocessor may compute more columns than are included
+        #   here; inclusion is controlled deliberately to stage onboarding.
+        optionc_meta = [
+            {
+                "engine_indicator": "RSI",
+                "param_key": "14",
+                "display_key": "RSI_14",
+                "value_col": "RSI_14",
+            },
+            {
+                "engine_indicator": "RSI",
+                "param_key": "10",
+                "display_key": "RSI_10",
+                "value_col": "RSI_10",
+            },
+            {
+                "engine_indicator": "RSI",
+                "param_key": "21",
+                "display_key": "RSI_21",
+                "value_col": "RSI_21",
+            },
+            {
+                "engine_indicator": "RSI",
+                "param_key": "30",
+                "display_key": "RSI_30",
+                "value_col": "RSI_30",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "12_26_9",
+                "display_key": "MACD_12_26_9",
+                "value_col": "MACD_12_26_9_hist",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "5_34_1",
+                "display_key": "MACD_5_34_1",
+                "value_col": "MACD_5_34_1_hist",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "8_17_5",
+                "display_key": "MACD_8_17_5",
+                "value_col": "MACD_8_17_5_hist",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "20_50_10",
+                "display_key": "MACD_20_50_10",
+                "value_col": "MACD_20_50_10_hist",
+            },            
+            {
+                "engine_indicator": "Stochastic",
+                "param_key": "14_3_3",
+                "display_key": "STOCH_14_3_3",
+                "value_col": "STOCHK_14_3_3",
+            },
+            {
+                "engine_indicator": "Stochastic",
+                "param_key": "5_3_3",
+                "display_key": "STOCH_5_3_3",
+                "value_col": "STOCHK_5_3_3",
+            },
+            {
+                "engine_indicator": "Stochastic",
+                "param_key": "21_5_5",
+                "display_key": "STOCH_21_5_5",
+                "value_col": "STOCHK_21_5_5",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "9",
+                "display_key": "ROC_9",
+                "value_col": "ROC_9",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "12",
+                "display_key": "ROC_12",
+                "value_col": "ROC_12",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "20",
+                "display_key": "ROC_20",
+                "value_col": "ROC_20",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "50",
+                "display_key": "ROC_50",
+                "value_col": "ROC_50",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "5",
+                "display_key": "WILLR_5",
+                "value_col": "WILLR_5",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "14",
+                "display_key": "WILLR_14",
+                "value_col": "WILLR_14",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "20",
+                "display_key": "WILLR_20",
+                "value_col": "WILLR_20",
+            },            
+            {
+                "engine_indicator": "ADX",
+                "param_key": "14",
+                "display_key": "ADX_14",
+                "value_col": "ADX_14",
+            },
+        ]
+
+        indicators = [m["display_key"] for m in optionc_meta]
+        data: Dict[str, Dict[str, Any]] = {}
+
+        for idx, dt in enumerate(last_dates):
+            date_key = date_keys[idx]
+            row_cells: Dict[str, Any] = {}
+
+            for meta in optionc_meta:
+                eng_name = meta["engine_indicator"]
+                param_key = meta["param_key"]
+                display_key = meta["display_key"]
+                value_col = meta["value_col"]
+
+                series_dict = scores.get(eng_name, {})
+                score_series = series_dict.get(param_key)
+                if score_series is None or dt not in score_series.index:
+                    continue
+
+                raw_score = score_series.loc[dt]
+                if pd.isna(raw_score):
+                    continue
+
+                try:
+                    score_int = int(raw_score)
+                except (TypeError, ValueError):
+                    continue
+
+                label = score_to_label.get(score_int, "neutral")
+
+                value = None
+                if value_col in df_ind.columns and dt in df_ind.index:
+                    v = df_ind.loc[dt, value_col]
+                    if not pd.isna(v):
+                        value = float(v)
+
+                if value is not None:
+                    hover = f"{display_key} = {value:.2f}, score={score_int} ({label})"
+                else:
+                    hover = f"{display_key}, score={score_int} ({label})"
+
+                row_cells[display_key] = {
+                    "score": score_int,
+                    "signal": label,
+                    "value": value,
+                    "hover": hover,
+                }
+
+            if row_cells:
+                data[date_key] = row_cells
+
+        # Build + cache the MultiIndex score DataFrame for future Plotly heatmap use.
+        # This does not change the returned payload.
+        try:
+            df_scores = self._build_optionc_scores_multiindex_df(
+                scores=scores,
+                optionc_meta=optionc_meta,
+                last_dates=last_dates,
+            )
+            if not hasattr(self, "_rolling_df_cache"):
+                self._rolling_df_cache = {}
+            self._rolling_df_cache[(ticker, "short_term", "optionc_scores")] = df_scores
+        except Exception as e:
+            logger.warning(f"Rolling DF cache build failed for {ticker}: {e}")
+
+        status = "ok" if data else "empty"
+
+        return {
+            "engine": "optionc_rulebook_v1",
+            "status": status,
+            "ticker": ticker,
+            "dates": list(data.keys()),
+            "short_term": {
+                "indicators": indicators,
+                "data": data,
+            } if data else None,
+            "intermediate_term": None,
+            "long_term": None,
+            "composite_scores": {
+                "short_term": {
+                    "momentum": None,
+                    "trend": None,
+                    "volatility": None,
+                    "volume": None,
+                    "overall": None,
+                },
+                "overall": None,
+            },
+            "extras": {},
+        }
+
+    # Patch: MultiIndexDataFrame for Plotly 
+    def _build_optionc_scores_multiindex_df(
+        self,
+        scores: Dict[str, Dict[str, pd.Series]],
+        optionc_meta: List[Dict[str, str]],
+        last_dates: pd.Index,
+    ) -> pd.DataFrame:
+        """
+        Build a MultiIndex DataFrame of numeric scores for Option C.
+
+        Output:
+        index: last_dates
+        columns: MultiIndex (engine_indicator, param_key)
+        values: numeric score in [-2 .. 2]  
+        """
+        cols = []
+        series_list = []
+
+        for meta in optionc_meta:
+            eng = meta["engine_indicator"]
+            param = meta["param_key"]
+
+            s = scores.get(eng, {}).get(param)
+            if s is None:
+                continue
+
+            # align to our rolling window
+            s2 = s.reindex(last_dates)
+
+            cols.append((eng, param))
+            series_list.append(s2)
+
+        if not series_list:
+            return pd.DataFrame(index=last_dates)
+
+        df = pd.concat(series_list, axis=1)
+        df.columns = pd.MultiIndex.from_tuples(cols, names=["indicator", "params"])
+        return df
+
+
+    def calculate_technical_indicators(self, ticker: str, save_to_db: bool = False) -> Optional[Dict]:
         """
         Calculate all technical indicators for a given ticker
         
@@ -284,7 +873,15 @@ class DatabaseIntegratedTechnicalCalculator:
             Dictionary with technical indicators and signals or None if calculation failed
         """
         logger.info(f"🎯 Calculating technical indicators for {ticker}")
-        
+
+
+        # Optional parallel path: use new Option-C TA engine when enabled. (12/8/25; GPT+)
+        if USE_NEW_TA_ENGINE:
+            return self._calculate_technical_indicators_optionc(
+                ticker=ticker,
+                save_to_db=save_to_db,
+            )
+                
         try:
             # Import pandas-ta-classic
             import pandas_ta_classic as ta
@@ -1139,6 +1736,30 @@ class DatabaseIntegratedTechnicalCalculator:
                     'timestamp': datetime.now().isoformat()
                 }
             
+            rolling_signals: Dict[str, Any] = {
+                "status": "not_implemented",
+                "message": "Rolling signal heatmap - Phase 5 (future)",
+            }
+
+            try:
+                df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=save_to_db)
+                if df_ind is not None and not df_ind.empty:
+                    scores = self.calculate_rule_engine_signals_optionc(
+                        ticker=ticker,
+                        feature_scope="heatmap",
+                        save_to_db=save_to_db,
+                    )
+                    if scores:
+                        rolling_signals = self._build_optionc_rolling_signals(
+                            ticker=ticker,
+                            df_ind=df_ind,
+                            scores=scores,
+                            days=10,
+                        )
+            except Exception as e:
+                logger.error(f"Error building rolling signals for {ticker}: {e}")
+                rolling_signals = {"status": "error", "message": str(e)}
+                            
             # Prepare comprehensive analysis structure
             analysis_data = {
                 'ticker': ticker,
@@ -1153,23 +1774,18 @@ class DatabaseIntegratedTechnicalCalculator:
                 # Reformat technical indicators for UI consumption
                 'technical_indicators': self._format_technical_indicators(tech_indicators),
                 
-                # Phase 3: 52-Week High Analysis (placeholder for now)
-                'price_extremes': {
-                    'status': 'not_implemented',
-                    'message': '52-week high analysis - Phase 3'
-                },
-                
+                # Phase 3: 52-Week High Analysis    
+                'price_extremes': self.calculate_52_week_analysis(ticker),           
+                                                
                 # Phase 4: Pivot Points (placeholder for now)
-                'pivot_points': {
-                    'status': 'not_implemented',
-                    'message': 'Pivot points analysis - Phase 4'
-                },
-                
-                # Phase 5: Rolling Signals (placeholder for future)
-                'rolling_signals': {
-                    'status': 'not_implemented',
-                    'message': 'Rolling signal heatmap - Phase 5 (future)'
-                }
+                'pivot_points': self.calculate_pivot_points(
+                    ticker=ticker,
+                    target_date=None,
+                    save_to_db=save_to_db,
+                    ),
+
+                # Phase 5: Rolling Signals 
+                'rolling_signals': rolling_signals
             }
             
             logger.info(f"✅ Comprehensive analysis complete for {ticker}")
@@ -1912,7 +2528,7 @@ def get_technical_calculator() -> DatabaseIntegratedTechnicalCalculator:
 
 
 # Convenience function for single ticker analysis
-def calculate_technical_analysis(ticker: str, save_to_db: bool = True) -> Dict:
+def calculate_technical_analysis(ticker: str, save_to_db: bool = False) -> Dict:
     """
     Quick function to calculate technical analysis for a single ticker
     

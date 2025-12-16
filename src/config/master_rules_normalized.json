@@ -1,0 +1,1349 @@
+{
+  "version": "0.2.0",
+  "generated_by": "ChatGPT - Step A fixed",
+  "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
+  "categories": {
+    "Trend": {
+      "ADX": {
+        "params": [
+          [
+            9
+          ],
+          [
+            14
+          ],
+          [
+            20
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "9": {
+              "strong_buy": "ADX_9 > 25 and (DIp_9 - DIn_9) >= 10",
+              "buy": "ADX_9 > 20 and (DIp_9 - DIn_9) >= 5",
+              "neutral": "ADX_9 <= 20 or abs(DIp_9 - DIn_9) < 5",
+              "sell": "ADX_9 > 20 and (DIn_9 - DIp_9) >= 5",
+              "strong_sell": "ADX_9 > 25 and (DIn_9 - DIp_9) >= 10",
+              "type": "trend_strength",
+              "notes": "Strong uses larger DI gap (>=10) and higher ADX (>25). Variables: ADX, +DI, -DI."
+            },
+            "14": {
+              "strong_buy": "ADX_14 > 25 and (DIp_14 - DIn_14) >= 10",
+              "buy": "ADX_14 > 20 and (DIp_14 - DIn_14) >= 5",
+              "neutral": "ADX_14 <= 20 or abs(DIp_14 - DIn_14) < 5",
+              "sell": "ADX_14 > 20 and (DIn_14 - DIp_14) >= 5",
+              "strong_sell": "ADX_14 > 25 and (DIn_14 - DIp_14) >= 10",
+              "type": "trend_strength",
+              "notes": "Standard ADX(14); DI gap and ADX thresholds identical across TFs for consistency."
+            },
+            "20": {
+              "strong_buy": "ADX_20 > 25 and (DIp_20 - DIn_20) >= 10",
+              "buy": "ADX_20 > 20 and (DIp_20 - DIn_20) >= 5",
+              "neutral": "ADX_20 <= 20 or abs(DIp_20 - DIn_20) < 5",
+              "sell": "ADX_20 > 20 and (DIn_20 - DIp_20) >= 5",
+              "strong_sell": "ADX_20 > 25 and (DIn_20 - DIp_20) >= 10",
+              "type": "trend_strength",
+              "notes": "Longer smoothing but same decision thresholds to keep signals comparable."
+            }
+          },
+          "overlay": {
+            "9": {
+              "example_rule": "ADX(9) > 20 -> trend_strength"
+            }
+          },
+          "alerts": {
+            "9": {
+              "example_rule": "ADX(9) crosses above 20"
+            }
+          },
+          "custom": {
+            "9": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "trend",
+          "description": "Average Directional Index - trend strength",
+          "source": "internal_spec",
+          "default_timeframes": [
+            14
+          ]
+        }
+      },
+      "SMA": {
+        "params": [
+          [
+            10
+          ],
+          [
+            20
+          ],
+          [
+            50
+          ],
+          [
+            100
+          ],
+          [
+            200
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "Close > SMA_10 and SMA_10_slope > 0.002 and rising_2bar(SMA_10)",
+              "buy": "Close > SMA_10 and SMA_10_slope > 0",
+              "neutral": "abs(Close/SMA_10 - 1) <= 0.25 * ATRP_10",
+              "sell": "Close < SMA_10 and SMA_10_slope < 0",
+              "strong_sell": "Close < SMA_10 and SMA_10_slope < -0.002 and falling_2bar(SMA_10)",
+              "k": 0.25,
+              "notes": "Loose slope confirmation; ATR-scaled neutral zone."
+            },
+            "20": {
+              "strong_buy": "Close > SMA_20 and SMA_20_slope > 0.0015 and rising_2bar(SMA_20)",
+              "buy": "Close > SMA_20 and SMA_20_slope > 0",
+              "neutral": "abs(Close/SMA_20 - 1) <= 0.50 * ATRP_20",
+              "sell": "Close < SMA_20 and SMA_20_slope < 0",
+              "strong_sell": "Close < SMA_20 and SMA_20_slope < -0.0015 and falling_2bar(SMA_20)",
+              "k": 0.15,
+              "notes": "Thresholds scale with smoothing."
+            },
+            "50": {
+              "strong_buy": "Close > SMA_50 and SMA_50_slope > 0.0015 and rising_2bar(SMA_50)",
+              "buy": "Close > SMA_50 and SMA_50_slope > 0",
+              "neutral": "abs(Close/SMA_50 - 1) <= 0.5 * ATRP_50",
+              "sell": "Close < SMA_50 and SMA_50_slope < 0",
+              "strong_sell": "Close < SMA_50 and SMA_50_slope < -0.0015 and falling_2bar(SMA_50)",
+              "k": 0.15,
+              "notes": "Thresholds scale with smoothing."
+            },
+            "100": {
+              "strong_buy": "Close > SMA_100 and SMA_100_slope > 0.001 and rising_2bar(SMA_100)",
+              "buy": "Close > SMA_100 and SMA_100_slope > 0",
+              "neutral": "abs(Close/SMA_100 - 1) <= 1.0 * ATRP_100",
+              "sell": "Close < SMA_100 and SMA_100_slope < 0",
+              "strong_sell": "Close < SMA_100 and SMA_100_slope < -0.001 and falling_2bar(SMA_100)",
+              "k": 0.1,
+              "notes": "Long SMA rarely accelerates; thresholds lowered."
+            },
+            "200": {
+              "strong_buy": "Close > SMA_200 and SMA_200_slope > 0.001 and rising_2bar(SMA_200)",
+              "buy": "Close > SMA_200 and SMA_200_slope > 0",
+              "neutral": "abs(Close/SMA_200 - 1) <= 1.0 * ATRP_200",
+              "sell": "Close < SMA_200 and SMA_200_slope < 0",
+              "strong_sell": "Close < SMA_200 and SMA_200_slope < -0.001 and falling_2bar(SMA_200)",
+              "k": 0.1,
+              "notes": "Long SMA rarely accelerates; thresholds lowered."
+            }
+          },
+          "overlay": {
+            "50": {
+              "example_rule": "Close > SMA(50) -> bullish_bias"
+            }
+          },
+          "alerts": {
+            "50": {
+              "example_rule": "price_crosses_SMA(50)"
+            }
+          },
+          "custom": {
+            "50": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "trend",
+          "description": "Simple Moving Average",
+          "source": "internal_spec"
+        }
+      },
+      "EMA": {
+        "params": [
+          [
+            5
+          ],
+          [
+            10
+          ],
+          [
+            13
+          ],
+          [
+            20
+          ],
+          [
+            50
+          ],
+          [
+            100
+          ],
+          [
+            200
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "5": {
+              "strong_buy": "Close > EMA_5 and EMA_5_slope > 0.0025 and rising_2bar(EMA_5)",
+              "buy": "Close > EMA_5 and EMA_5_slope > 0",
+              "neutral": "abs(Close/EMA_5 - 1) <= 0.25 * ATRP_5",
+              "sell": "Close < EMA_5 and EMA_5_slope < 0",
+              "strong_sell": "Close < EMA_5 and EMA_5_slope < -0.0025 and falling_2bar(EMA_5)",
+              "k": 0.25,
+              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+            },
+            "10": {
+              "strong_buy": "Close > EMA_10 and EMA_10_slope > 0.0025 and rising_2bar(EMA_10)",
+              "buy": "Close > EMA_10 and EMA_10_slope > 0",
+              "neutral": "abs(Close/EMA_10 - 1) <= 0.25 * ATRP_10",
+              "sell": "Close < EMA_10 and EMA_10_slope < 0",
+              "strong_sell": "Close < EMA_10 and EMA_10_slope < -0.0025 and falling_2bar(EMA_10)",
+              "k": 0.25,
+              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+            },
+            "13": {
+              "strong_buy": "Close > EMA_13 and EMA_13_slope > 0.0025 and rising_2bar(EMA_13)",
+              "buy": "Close > EMA_13 and EMA_13_slope > 0",
+              "neutral": "abs(Close/EMA_13 - 1) <= 0.25 * ATRP_13",
+              "sell": "Close < EMA_13 and EMA_13_slope < 0",
+              "strong_sell": "Close < EMA_13 and EMA_13_slope < -0.0025 and falling_2bar(EMA_13)",
+              "k": 0.25,
+              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+            },
+            "20": {
+              "strong_buy": "Close > EMA_20 and EMA_20_slope > 0.002 and rising_2bar(EMA_20)",
+              "buy": "Close > EMA_20 and EMA_20_slope > 0",
+              "neutral": "abs(Close/EMA_20 - 1) <= 0.50 * ATRP_20",
+              "sell": "Close < EMA_20 and EMA_20_slope < 0",
+              "strong_sell": "Close < EMA_20 and EMA_20_slope < -0.002 and falling_2bar(EMA_20)",
+              "k": 0.2,
+              "notes": "EMA retains quicker reaction vs. SMA."
+            },
+            "50": {
+              "strong_buy": "Close > EMA_50 and EMA_50_slope > 0.002 and rising_2bar(EMA_50)",
+              "buy": "Close > EMA_50 and EMA_50_slope > 0",
+              "neutral": "abs(Close/EMA_50 - 1) <= 0.50 * ATRP_50",
+              "sell": "Close < EMA_50 and EMA_50_slope < 0",
+              "strong_sell": "Close < EMA_50 and EMA_50_slope < -0.002 and falling_2bar(EMA_50)",
+              "k": 0.2,
+              "notes": "EMA retains quicker reaction vs. SMA."
+            },
+            "100": {
+              "strong_buy": "Close > EMA_100 and EMA_100_slope > 0.0015 and rising_2bar(EMA_100)",
+              "buy": "Close > EMA_100 and EMA_100_slope > 0",
+              "neutral": "abs(Close/EMA_100 - 1) <= 1.0 * ATRP_100",
+              "sell": "Close < EMA_100 and EMA_100_slope < 0",
+              "strong_sell": "Close < EMA_100 and EMA_100_slope < -0.0015 and falling_2bar(EMA_100)",
+              "k": 0.15,
+              "notes": "Long EMAs smooth heavily; scaled slope thresholds."
+            },
+            "200": {
+              "strong_buy": "Close > EMA_200 and EMA_200_slope > 0.0015 and rising_2bar(EMA_200)",
+              "buy": "Close > EMA_200 and EMA_200_slope > 0",
+              "neutral": "abs(Close/EMA_200 - 1) <= 1.0 * ATRP_200",
+              "sell": "Close < EMA_200 and EMA_200_slope < 0",
+              "strong_sell": "Close < EMA_200 and EMA_200_slope < -0.0015 and falling_2bar(EMA_200)",
+              "k": 0.15,
+              "notes": "Long EMAs smooth heavily; scaled slope thresholds."
+            }
+          },
+          "overlay": {
+            "20_13": {
+              "description": "Overlay example using EMA(20) and EMA(13)",
+              "rule_example": "EMA(13) > EMA(20) -> bullish_cross"
+            }
+          },
+          "alerts": {
+            "20": {
+              "example_rule": "EMA(20) slope negative -> alert_hint"
+            }
+          },
+          "custom": {
+            "20": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "trend",
+          "description": "Exponential Moving Average",
+          "source": "internal_spec"
+        }
+      },
+      "VWMA": {
+        "params": [
+          [
+            10
+          ],
+          [
+            20
+          ],
+          [
+            50
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "Close > VWMA_10 and VWMA_slope > 0.002 and rising_2bar(VWMA_10)",
+              "buy": "Close > VWMA_10 and VWMA_slope > 0",
+              "neutral": "abs(Close/VWMA_10 - 1) <= 0.25 * ATRP_10",
+              "sell": "Close < VWMA_10 and VWMA_slope < 0",
+              "strong_sell": "Close < VWMA_10 and VWMA_slope < -0.002 and falling_2bar(VWMA_10)",
+              "k": 0.25,
+              "notes": "VWMA uses 0.25\u00c3\u2014ATR% band (k-value). Volume-weighted slope gives cleaner trend view."
+            },
+            "20": {
+              "strong_buy": "Close > VWMA_20 and VWMA_slope > 0.0015 and rising_2bar(VWMA_20)",
+              "buy": "Close > VWMA_20 and VWMA_slope > 0",
+              "neutral": "abs(Close/VWMA_20 - 1) <= 0.5 * ATRP_20",
+              "sell": "Close < VWMA_20 and VWMA_slope < 0",
+              "strong_sell": "Close < VWMA_20 and VWMA_slope < -0.0015 and falling_2bar(VWMA_20)",
+              "k": 0.5,
+              "notes": "VWMA uses 0.50\u00c3\u2014ATR% band (k-value)."
+            },
+            "50": {
+              "strong_buy": "Close > VWMA_50 and VWMA_slope > 0.001 and rising_2bar(VWMA_50)",
+              "buy": "Close > VWMA_50 and VWMA_slope > 0",
+              "neutral": "abs(Close/VWMA_50 - 1) <= 1.0 * ATRP_50",
+              "sell": "Close < VWMA_50 and VWMA_slope < 0",
+              "strong_sell": "Close < VWMA_50 and VWMA_slope < -0.001 and falling_2bar(VWMA_50)",
+              "k": 1.0,
+              "notes": "Neutral band: 1.0\u00c3\u2014ATR% band (k-value); slope threshold scaled for long-term."
+            }
+          },
+          "overlay": {
+            "20": {
+              "example_rule": "VWMA(20) alignment check"
+            }
+          },
+          "alerts": {
+            "20": {
+              "example_rule": "volume_anomaly_vwma"
+            }
+          },
+          "custom": {
+            "20": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "trend",
+          "description": "Volume Weighted Moving Average",
+          "source": "internal_spec"
+        }
+      },
+      "HMA": {
+        "params": [
+          [
+            9
+          ],
+          [
+            21
+          ],
+          [
+            50
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "9": {
+              "strong_buy": "Close > HMA_9 and HMA_slope > 0.002 and rising_2bar(HMA_9)",
+              "buy": "Close > HMA_9 and HMA_slope > 0",
+              "neutral": "abs(Close/HMA_9 - 1) <= 0.25 * ATRP_9",
+              "sell": "Close < HMA_9 and HMA_slope < 0",
+              "strong_sell": "Close < HMA_9 and HMA_slope < -0.002 and falling_2bar(HMA_9)",
+              "notes": "HMA is very reactive; slope matters more than price crossover."
+            },
+            "21": {
+              "strong_buy": "Close > HMA_21 and HMA_slope > 0.0015 and rising_2bar(HMA_21)",
+              "buy": "Close > HMA_21 and HMA_slope > 0",
+              "neutral": "abs(Close/HMA_21 - 1) <= 0.50 * ATRP_21",
+              "sell": "Close < HMA_21 and HMA_slope < 0",
+              "strong_sell": "Close < HMA_21 and HMA_slope < -0.0015 and falling_2bar(HMA_21)",
+              "notes": "Intermediate HMA = smoother, so thresholds lower."
+            },
+            "50": {
+              "strong_buy": "Close > HMA_50 and HMA_slope > 0.001 and rising_2bar(HMA_50)",
+              "buy": "Close > HMA_50 and HMA_slope > 0",
+              "neutral": "abs(Close/HMA_50 - 1) <= 1.0 * ATRP_50",
+              "sell": "Close < HMA_50 and HMA_slope < 0",
+              "strong_sell": "Close < HMA_50 and HMA_slope < -0.001 and falling_2bar(HMA_50)",
+              "notes": "Long-term HMA reacts slowly; slope thresholds adjust accordingly."
+            }
+          },
+          "overlay": {
+            "21": {
+              "example_rule": "HMA(21) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "30": {
+              "example_rule": "HMA(30) placeholder"
+            }
+          },
+          "custom": {
+            "21": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "trend",
+          "description": "Hull Moving Average",
+          "source": "internal_spec"
+        }
+      }
+    },
+    "Momentum": {
+      "RSI": {
+        "params": [
+          [
+            10
+          ],
+          [
+            14
+          ],
+          [
+            21
+          ],
+          [
+            30
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "RSI_10 > 60 and rising_2bar(RSI_10)",
+              "buy": "RSI_10 > 55",
+              "neutral": "45 <= RSI_10 <= 55",
+              "sell": "RSI_10 < 45",
+              "strong_sell": "RSI_10 < 40 and falling_2bar(RSI_10)",
+              "notes": "Loose 2-bar slope for strong signals; neutral band fixed across timeframes."
+            },
+            "14": {
+              "strong_buy": "RSI_14 > 60 and rising_2bar(RSI_14)",
+              "buy": "RSI_14 > 55",
+              "neutral": "45 <= RSI_14 <= 55",
+              "sell": "RSI_14 < 45",
+              "strong_sell": "RSI_14 < 40 and falling_2bar(RSI_14)",
+              "notes": "Same thresholds maintain consistency across charts."
+            },
+            "21": {
+              "strong_buy": "RSI_21 > 60 and rising_2bar(RSI_21)",
+              "buy": "RSI_21 > 55",
+              "neutral": "45 <= RSI_21 <= 55",
+              "sell": "RSI_21 < 45",
+              "strong_sell": "RSI_21 < 40 and falling_2bar(RSI_21)",
+              "notes": "RSI smoothed more heavily but thresholds remain stable."
+            },
+            "30": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": ""
+            }
+          },
+          "overlay": {
+            "30": {
+              "rule_example": "RSI(30) overlay placeholder (e.g., show RSI(30) band)"
+            }
+          },
+          "alerts": {
+            "14": {
+              "example_rule": "RSI crosses thresholds"
+            }
+          },
+          "custom": {
+            "14": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Relative Strength Index",
+          "source": "internal_spec"
+        }
+      },
+      "Stochastic": {
+        "params": [
+          [
+            5,
+            3,
+            3
+          ],
+          [
+            14,
+            3,
+            3
+          ],
+          [
+            21,
+            5,
+            5
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "5_3_3": {
+              "strong_buy": "STOCHK_5_3_3 > STOCHD_5_3_3 and rising_2bar(STOCHK_5_3_3) and STOCHK_5_3_3 > 60",
+              "buy": "STOCHK_5_3_3 > STOCHD_5_3_3",
+              "neutral": "abs(STOCHK_5_3_3 - STOCHD_5_3_3) <= 5 or (45 <= STOCHK_5_3_3 <= 55)",
+              "sell": "STOCHK_5_3_3 < STOCHD_5_3_3",
+              "strong_sell": "STOCHK_5_3_3 < STOCHD_5_3_3 and falling_2bar(STOCHK_5_3_3) and STOCHK_5_3_3 < 40",
+              "notes": "Loose slope confirmation; \u00c2\u00b15 tick micro-cross filter hugely reduces noise."
+            },
+            "14_3_3": {
+              "strong_buy": "STOCHK_14_3_3 > STOCHD_14_3_3 and rising_2bar(STOCHK_14_3_3) and STOCHK_14_3_3 > 60",
+              "buy": "STOCHK_14_3_3 > STOCHD_14_3_3",
+              "neutral": "abs(STOCHK_14_3_3 - STOCHD_14_3_3) <= 5 or (45 <= STOCHK_14_3_3 <= 55)",
+              "sell": "STOCHK_14_3_3 < STOCHD_14_3_3",
+              "strong_sell": "STOCHK_14_3_3 < STOCHD_14_3_3 and falling_2bar(STOCHK_14_3_3) and STOCHK_14_3_3 < 40",
+              "notes": "Intermediate window = classic stoch behavior."
+            },
+            "21_5_5": {
+              "strong_buy": "STOCHK_21_5_5 > STOCHD_21_5_5 and rising_2bar(STOCHK_21_5_5) and STOCHK_21_5_5 > 60",
+              "buy": "STOCHK_21_5_5 > STOCHD_21_5_5",
+              "neutral": "abs(STOCHK_21_5_5 - STOCHD_21_5_5) <= 5 or (45 <= STOCHK_21_5_5 <= 55)",
+              "sell": "STOCHK_21_5_5 < STOCHD_21_5_5",
+              "strong_sell": "STOCHK_21_5_5 < STOCHD_21_5_5 and falling_2bar(STOCHK_21_5_5) and STOCHK_21_5_5 < 40",
+              "notes": "Longer periods reduce noise; same logic applies."
+            }
+          },
+          "overlay": {
+            "14_3_3": {
+              "example_rule": "Stoch(14,3,3) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "14_3_3": {
+              "example_rule": "stoch_extreme_alert"
+            }
+          },
+          "custom": {
+            "14_3_3": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Stochastic Oscillator",
+          "source": "internal_spec"
+        }
+      },
+      "MACD": {
+        "params": [
+          [
+            8,
+            17,
+            5
+          ],
+          [
+            12,
+            26,
+            9
+          ],
+          [
+            20,
+            50,
+            10
+          ],
+          [
+            5,
+            34,
+            1
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "8_17_5": {
+              "strong_buy": "MACD_8_17_5 > MACD_8_17_5_signal and rising_2bar(MACD_8_17_5_hist, 2) and MACD_8_17_5_hist > 0",
+              "buy": "MACD_8_17_5 > MACD_8_17_5_signal",
+              "neutral": "abs(MACD_8_17_5_hist) <= 0.1 * ATR_8",
+              "sell": "MACD_8_17_5 < MACD_8_17_5_signal",
+              "strong_sell": "MACD_8_17_5 < MACD_8_17_5_signal and falling_2bar(MACD_8_17_5_hist, 2) and MACD_8_17_5_hist < 0",
+              "notes": ""
+            },
+            "12_26_9": {
+              "strong_buy": "MACD_12_26_9 > MACD_12_26_9_signal and rising_2bar(MACD_12_26_9_hist, 2) and MACD_12_26_9_hist > 0",
+              "buy": "MACD_12_26_9 > MACD_12_26_9_signal",
+              "neutral": "abs(MACD_12_26_9_hist) <= 0.2 * ATR_12",
+              "sell": "MACD_12_26_9 < MACD_12_26_9_signal",
+              "strong_sell": "MACD_12_26_9 < MACD_12_26_9_signal and falling_2bar(MACD_12_26_9_hist, 2) and MACD_12_26_9_hist < 0",
+              "notes": "Histogram slope gives clean \u00e2\u20ac\u02dcstrength\u00e2\u20ac\u2122 confirmation; loose 2-bar slope."
+            },
+            "20_50_10": {
+              "strong_buy": "MACD_20_50_10 > MACD_20_50_10_signal and rising_2bar(MACD_20_50_10_hist, 2) and MACD_20_50_10_hist > 0",
+              "buy": "MACD_20_50_10 > MACD_20_50_10_signal",
+              "neutral": "abs(MACD_20_50_10_hist) <= 0.3 * ATR_20",
+              "sell": "MACD_20_50_10 < MACD_20_50_10_signal",
+              "strong_sell": "MACD_20_50_10 < MACD_20_50_10_signal and falling_2bar(MACD_20_50_10_hist, 2) and MACD_20_50_10_hist < 0",
+              "notes": ""
+            },
+            "5_34_1": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": ""
+            }
+          },
+          "overlay": {
+            "12_26_9": {
+              "example_rule": "MACD(12,26,9) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "12_26_9": {
+              "example_rule": "MACD histogram cross alert"
+            }
+          },
+          "custom": {
+            "5_34_1": {
+              "description": "Custom MACD placeholder",
+              "rule_example": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "MACD - Moving Average Convergence Divergence",
+          "source": "internal_spec"
+        }
+      },
+      "Williams_R": {    
+        "params": [
+          [
+            5
+          ],
+          [
+            14
+          ],
+          [
+            20
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "5": {
+              "strong_buy": "WILLR_5 > -40 and rising_2bar(WILLR_5)",
+              "buy": "WILLR_5 > -55",
+              "neutral": "-55 <= WILLR_5 <= -45",
+              "sell": "WILLR_5 < -45",
+              "strong_sell": "WILLR_5 < -60 and falling_2bar(WILLR_5)",
+              "notes": "Inverse of Stoch logic. Neutral = \u00e2\u02c6\u201955 to \u00e2\u02c6\u201945."
+            },
+            "14": {
+              "strong_buy": "WILLR_14 > -40 and rising_2bar(WILLR_14)",
+              "buy": "WILLR_14 > -55",
+              "neutral": "-55 <= WILLR_14 <= -45",
+              "sell": "WILLR_14 < -45",
+              "strong_sell": "WILLR_14 < -60 and falling_2bar(WILLR_14)",
+              "notes": "Most stable version of %R."
+            },
+            "20": {
+              "strong_buy": "WILLR_20 > -40 and rising_2bar(WILLR_20)",
+              "buy": "WILLR_20 > -55",
+              "neutral": "-55 <= WILLR_20 <= -45",
+              "sell": "WILLR_20 < -45",
+              "strong_sell": "WILLR_20 < -60 and falling_2bar(WILLR_20)",
+              "notes": "Longer smoothing reduces noise significantly."
+            }
+          },
+          "overlay": {
+            "14": {
+              "example_rule": "Williams %R overlay placeholder"
+            }
+          },
+          "alerts": {
+            "14": {
+              "example_rule": "williams_extreme_alert"
+            }
+          },
+          "custom": {
+            "14": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Williams %R",
+          "source": "internal_spec"
+        }
+      },
+      "ROC": {
+        "params": [
+          [
+            9
+          ],
+          [
+            12
+          ],
+          [
+            20
+          ],
+          [
+            50
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "9": {
+              "strong_buy": "ROC_9 > 0.05",
+              "buy": "ROC_9 > 0.02",
+              "neutral": "-0.02 <= ROC_9 <= 0.02",
+              "sell": "ROC_9 < -0.02",
+              "strong_sell": "ROC_9 < -0.05",
+              "notes": "Symmetric thresholds; ROC strong zones represent meaningful momentum."
+            },
+            "12": {
+              "strong_buy": "ROC_12 > 0.07",
+              "buy": "ROC_12 > 0.03",
+              "neutral": "-0.03 <= ROC_12 <= 0.03",
+              "sell": "ROC_12 < -0.03",
+              "strong_sell": "ROC_12 < -0.07",
+              "notes": "Longer ROC \u00e2\u2020\u2019 slightly larger thresholds."
+            },
+            "20": {
+              "strong_buy": "ROC_20 > 0.07",
+              "buy": "ROC_20 > 0.03",
+              "neutral": "-0.03 <= ROC_20 <= 0.03",
+              "sell": "ROC_20 < -0.03",
+              "strong_sell": "ROC_20 < -0.07",
+              "notes": "Longer ROC \u00e2\u2020\u2019 slightly larger thresholds."
+            },
+            "50": {
+              "strong_buy": "ROC_50 > 0.10",
+              "buy": "ROC_50 > 0.05",
+              "neutral": "-0.05 <= ROC_50 <= 0.05",
+              "sell": "ROC_50 < -0.05",
+              "strong_sell": "ROC_50 < -0.10",
+              "notes": "Long ROC smooths momentum \u00e2\u2020\u2019 widen bands."
+            }
+          },
+          "overlay": {
+            "20": {
+              "example_rule": "ROC(20) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "9": {
+              "example_rule": "roc_threshold_alert"
+            }
+          },
+          "custom": {
+            "20": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Rate of Change",
+          "source": "internal_spec"
+        }
+      },
+      "CCI": {
+        "params": [
+          [
+            10
+          ],
+          [
+            14
+          ],
+          [
+            20
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "CCI_10 > 150",
+              "buy": "CCI_10 > 100",
+              "neutral": "-100 <= CCI_10 <= 100",
+              "sell": "CCI_10 < -100",
+              "strong_sell": "CCI_10 < -150",
+              "normalization": "tanh(CCI/100)",
+              "notes": "Loose slope logic not used; CCI already measures deviation. \u00c2\u00b1150 = strong trending extremes."
+            },
+            "14": {
+              "strong_buy": "CCI_14 > 150",
+              "buy": "CCI_14 > 100",
+              "neutral": "-100 <= CCI_14 <= 100",
+              "sell": "CCI_14 < -100",
+              "strong_sell": "CCI_14 < -150",
+              "normalization": "tanh(CCI/100)",
+              "notes": "Classic CCI(14) definitions."
+            },
+            "20": {
+              "strong_buy": "CCI_20 > 150",
+              "buy": "CCI_20 > 100",
+              "neutral": "-100 <= CCI_20 <= 100",
+              "sell": "CCI_20 < -100",
+              "strong_sell": "CCI_20 < -150",
+              "normalization": "tanh(CCI/100)",
+              "notes": "Longer period reduces whipsaws (smoother) but uses same levels for comparability (threshold logic)."
+            }
+          },
+          "overlay": {
+            "14": {
+              "example_rule": "CCI(14) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "14": {
+              "example_rule": "cci_extreme_alert"
+            }
+          },
+          "custom": {
+            "14": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Commodity Channel Index",
+          "source": "internal_spec"
+        }
+      },
+      "Ultimate_Oscillator": {
+        "params": [
+          [
+            5,
+            10,
+            15
+          ],
+          [
+            7,
+            14,
+            28
+          ],
+          [
+            10,
+            20,
+            40
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "5_10_15": {
+              "strong_buy": "UO > 60 and rising_2bar(UO)",
+              "buy": "UO > 55",
+              "neutral": "45 <= UO <= 55",
+              "sell": "UO < 45",
+              "strong_sell": "UO < 40 and falling_2bar(UO)",
+              "notes": "45\u00e2\u20ac\u201c55 neutral stable. Slope confirmation benefits UO strongly."
+            },
+            "7_14_28": {
+              "strong_buy": "UO > 60 and rising_2bar(UO)",
+              "buy": "UO > 55",
+              "neutral": "45 <= UO <= 55",
+              "sell": "UO < 45",
+              "strong_sell": "UO < 40 and falling_2bar(UO)",
+              "notes": "Intermediate UO = standard form."
+            },
+            "10_20_40": {
+              "strong_buy": "UO > 60 and rising_2bar(UO)",
+              "buy": "UO > 55",
+              "neutral": "45 <= UO <= 55",
+              "sell": "UO < 45",
+              "strong_sell": "UO < 40 and falling_2bar(UO)",
+              "notes": "Long UO smooths oscillations, strong-signal slope remains acceptable."
+            }
+          },
+          "overlay": {
+            "7_14_28": {
+              "example_rule": "UO overlay placeholder"
+            }
+          },
+          "alerts": {
+            "7_14_28": {
+              "example_rule": "uo_alert_placeholder"
+            }
+          },
+          "custom": {
+            "7_14_28": {
+              "description": "Custom UO placeholder",
+              "rule_example": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Ultimate Oscillator",
+          "source": "internal_spec"
+        }
+      }
+    },
+    "Volatility": {
+      "ATR": {
+        "params": [
+          [
+            10
+          ],
+          [
+            14
+          ],
+          [
+            20
+          ],
+          [
+            50
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": "",
+              "notes": "ATR is volatility only; no directional signals. Use 'atr' (price units) and 'atr_pct = atr/close' for band sizing"
+            },
+            "14": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": "",
+              "notes": "ATR is volatility only; no directional signals. ATR used to set MA/VWMA/HMA neutral bands."
+            },
+            "20": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": ""
+            },
+            "50": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": "",
+              "notes": "ATR is volatility only; no directional signals. See band_rules for default multipliers."
+            }
+          },
+          "overlay": {
+            "14": {
+              "example_rule": "ATR(14) overlay placeholder (display band)"
+            }
+          },
+          "alerts": {
+            "14": {
+              "example_rule": "atr_spike_alert"
+            }
+          },
+          "custom": {
+            "50": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volatility",
+          "description": "Average True Range",
+          "source": "internal_spec",
+          "band_rules": {
+            "short": {
+              "neutral_multiplier": 0.25
+            },
+            "intermediate": {
+              "neutral_multiplier": 0.5
+            },
+            "long": {
+              "neutral_multiplier": 1.0
+            },
+            "notes": "Used for ATR%-based neutral-zone scaling in heatmap classification."
+          }
+        }
+      },
+      "Bollinger": {
+        "params": [
+          [
+            10,
+            1.5
+          ],
+          [
+            20,
+            2.0
+          ],
+          [
+            50,
+            2.5
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10_1.5": {
+              "strong_buy": "close > mid + 1.0*std",
+              "buy": "close > mid + 0.5*std",
+              "neutral": "abs(close-mid) <= 0.5*std",
+              "sell": "close < mid - 0.5*std",
+              "strong_sell": "close < mid - 1.0*std",
+              "notes": "Neutral band uses \u00c2\u00b10.5\u00cf\u0192. Strong = \u00c2\u00b11.0\u00cf\u0192."
+            },
+            "20_2.0": {
+              "strong_buy": "close > mid + 1.0*std",
+              "buy": "close > mid + 0.5*std",
+              "neutral": "abs(close-mid) <= 0.5*std",
+              "sell": "close < mid - 0.5*std",
+              "strong_sell": "close < mid - 1.0*std",
+              "notes": "StdDev parameter is the Bollinger sigma; neutral uses 0.5*StdDev for consistency."
+            },
+            "50_2.5": {
+              "strong_buy": "close > mid + 1.0*std",
+              "buy": "close > mid + 0.5*std",
+              "neutral": "abs(close-mid) <= 0.5*std",
+              "sell": "close < mid - 0.5*std",
+              "strong_sell": "close < mid - 1.0*std",
+              "notes": "Longer BB uses wider sigma but same neutral multiplier convention."
+            }
+          },
+          "overlay": {
+            "20_2.0": {
+              "example_rule": "Bollinger(20,2) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "20_2.0": {
+              "example_rule": "bb_breakout_alert"
+            }
+          },
+          "custom": {
+            "20_2.0": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volatility",
+          "description": "Bollinger Bands",
+          "source": "internal_spec"
+        }
+      }
+    },
+    "Volume": {
+      "MFI": {
+        "params": [
+          [
+            10
+          ],
+          [
+            14
+          ],
+          [
+            30
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
+              "buy": "MFI > 65",
+              "neutral": "35 <= MFI <= 65",
+              "sell": "MFI < 35",
+              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "notes": "Loose slope logic = only 2-bar confirmation. Strong zones use 75/25 instead of extreme 80/20 for responsiveness."
+            },
+            "14": {
+              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
+              "buy": "MFI > 65",
+              "neutral": "35 <= MFI <= 65",
+              "sell": "MFI < 35",
+              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "notes": "MFI(14) standard; retain same levels for intuitive read-across."
+            },
+            "30": {
+              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
+              "buy": "MFI > 65",
+              "neutral": "35 <= MFI <= 65",
+              "sell": "MFI < 35",
+              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "notes": "Longer window smooths noise; thresholds unchanged for consistency."
+            }
+          },
+          "overlay": {
+            "14": {
+              "example_rule": "MFI(14) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "30": {
+              "example_rule": "mfi_extreme_alert"
+            }
+          },
+          "custom": {
+            "14": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volume",
+          "description": "Money Flow Index",
+          "source": "internal_spec"
+        }
+      },
+      "CMF": {
+        "params": [
+          [
+            10
+          ],
+          [
+            21
+          ],
+          [
+            50
+          ],
+          [
+            30
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "CMF_10 > 0.20 and rising_2bar(CMF_10)",
+              "buy": "CMF_10 > 0.10",
+              "neutral": "-0.10 <= CMF_10 <= 0.10",
+              "sell": "CMF_10 < -0.10",
+              "strong_sell": "CMF_10 < -0.20 and falling_2bar(CMF_10)",
+              "notes": "Volume\u00e2\u20ac\u201cprice confirmation. \u00c2\u00b10.1 zone is robust."
+            },
+            "21": {
+              "strong_buy": "CMF_21 > 0.20 and rising_2bar(CMF_21)",
+              "buy": "CMF_21 > 0.10",
+              "neutral": "-0.10 <= CMF_21 <= 0.10",
+              "sell": "CMF_21 < -0.10",
+              "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)",
+              "notes": "Default CMF window used industry-wide."
+            },
+            "50": {
+              "strong_buy": "CMF_50 > 0.20 and rising_2bar(CMF_50)",
+              "buy": "CMF_50 > 0.10",
+              "neutral": "-0.10 <= CMF_50 <= 0.10",
+              "sell": "CMF_50 < -0.10",
+              "strong_sell": "CMF_50 < -0.20 and falling_2bar(CMF_50)",
+              "notes": "Long smoothing reduces volatility of CMF."
+            },
+            "30": {
+              "strong_buy": "",
+              "buy": "",
+              "neutral": "",
+              "sell": "",
+              "strong_sell": ""
+            }
+          },
+          "overlay": {
+            "21": {
+              "example_rule": "CMF(21) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "30": {
+              "example_rule": "CMF(30) alert placeholder (requested)"
+            }
+          },
+          "custom": {
+            "21": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volume",
+          "description": "Chaikin Money Flow",
+          "source": "internal_spec"
+        }
+      },
+      "BullBearPower": {
+        "params": [
+          [
+            10
+          ],
+          [
+            13
+          ],
+          [
+            21
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "(High - EMA_10_10) > 0.75*ATR_10 and rising_2bar(EMA_10, 2)",
+              "buy": "(High - EMA_10_10) > 0",
+              "neutral": "abs(Close - EMA_10) <= 0.5 * ATRP_10",
+              "sell": "(Low - EMA_10_10) < 0",
+              "strong_sell": "(Low - EMA_10_10) < -0.75*ATR_10 and falling_2bar(EMA_10, 2)",
+              "notes": "Uses EMA baseline; strong signals require deviation AND slope confirmation."
+            },
+            "13": {
+              "strong_buy": "(High - EMA_13_13) > 0.75*ATR_13 and rising_2bar(EMA_13, 2)",
+              "buy": "(High - EMA_13_13) > 0",
+              "neutral": "abs(Close - EMA_13) <= 0.5 * ATRP_13",
+              "sell": "(Low - EMA_13_13) < 0",
+              "strong_sell": "(Low - EMA_13_13) < -0.75*ATR_13 and falling_2bar(EMA_13, 2)",
+              "notes": "Intermediate = classic ERI(13). Neutral zone derived from ATR%."
+            },
+            "21": {
+              "strong_buy": "(High - EMA_21_21) > 0.75*ATR_21 and rising_2bar(EMA_21, 2)",
+              "buy": "(High - EMA_21_21) > 0",
+              "neutral": "abs(Close - EMA_21) <= 0.5 * ATRP_21",
+              "sell": "(Low - EMA_21_21) < 0",
+              "strong_sell": "(Low - EMA_21_21) < -0.75*ATR_21 and falling_2bar(EMA_21, 2)",
+              "notes": "Long-term baseline smooths volatility; deviations still ATR-based."
+            }
+          },
+          "overlay": {
+            "13": {
+              "example_rule": "BullBearPower(13) overlay placeholder"
+            }
+          },
+          "alerts": {
+            "13": {
+              "example_rule": "bullbear_power_alert"
+            }
+          },
+          "custom": {
+            "13": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volume",
+          "description": "Bull/Bear Power (ERIs)",
+          "source": "internal_spec"
+        }
+      },
+      "OBV": {
+        "params": [
+          [
+            0
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "0": {
+              "strong_buy": "OBV > OBV_smooth and rising_2bar(OBV, 2)",
+              "buy": "OBV > OBV_smooth",
+              "neutral": "abs(OBV - OBV_smooth_20) <= 0.005 * abs(OBV)",
+              "sell": "OBV < OBV_smooth",
+              "strong_sell": "OBV < OBV_smooth and falling_2bar(OBV, 2)",
+              "notes": "OBV_smooth = EMA(20) of OBV. Slope = 2-bar loose slope logic."
+            }
+          },
+          "overlay": {},
+          "alerts": {},
+          "custom": {
+            "0": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "volume",
+          "description": "On-Balance Volume",
+          "source": "internal_spec"
+        }
+      }
+    },
+    "Composite": {}
+  },
+  "schema_requirements": {
+    "category_names": [
+      "Trend",
+      "Momentum",
+      "Volatility",
+      "Volume",
+      "Composite"
+    ],
+    "indicator_fields": [
+      "params",
+      "feature_scopes",
+      "metadata"
+    ],
+    "feature_scope_keys": [
+      "heatmap",
+      "overlay",
+      "alerts",
+      "custom",
+      "tiles",
+      "MVA",
+      "basic_signals"
+    ],
+    "rule_block_fields": [
+      "strong_buy",
+      "buy",
+      "neutral",
+      "sell",
+      "strong_sell"
+    ],
+    "expression_type": "string_expected"
+  },
+  "notes": "This is a repaired shell (Step A). Heatmap rule blocks are intentionally empty stubs. Overlay/alerts/custom include requested placeholders. Extra scopes are defined as empty containers by default."
+}

@@ -221,22 +221,38 @@ SIGNAL_THRESHOLDS = {
         },
         
         'macd': {
-            'description': 'Moving Average Convergence Divergence - Trend following momentum indicator',
+            'description': 'Moving Average Convergence Divergence - Trend following momentum indicator with volatility-normalized magnitude filtering',
             'scale': '-∞ to +∞',
-            'thresholds': {
-                'crossover': None,      # MACD crosses signal line
-                'zero_cross': None,     # MACD crosses zero
-            },
-            'parameters': {
-                'short_term': (8, 17, 5),       # (fast, slow, signal)
-                'intermediate_term': (12, 26, 9),
-                'long_term': (20, 50, 10),
+            'rationale': 'Magnitude filtering reduces false signals by requiring histogram movement to exceed noise level (std-normalized)',
+            'parameters_and_thresholds': {
+                (8, 17, 5): {
+                    'description': 'Fast MACD for short-term momentum',
+                    'used_in_timeframes': ['short_term'],
+                    'magnitude_multiplier': 0.5,
+                    'histogram_std_lookback': 20,
+                    'rationale': 'Faster EMAs produce noisier histogram; tighter threshold (0.5×) filters whipsaw',
+                },
+                (12, 26, 9): {
+                    'description': 'Standard MACD for intermediate-term momentum',
+                    'used_in_timeframes': ['intermediate_term'],
+                    'magnitude_multiplier': 0.5,
+                    'histogram_std_lookback': 20,
+                    'rationale': 'Balanced sensitivity; same multiplier as fast variant',
+                },
+                (20, 50, 10): {
+                    'description': 'Slow MACD for long-term trend confirmation',
+                    'used_in_timeframes': ['long_term'],
+                    'magnitude_multiplier': 1.0,
+                    'histogram_std_lookback': 20,
+                    'rationale': 'Slower EMAs produce smoother histogram; wider threshold (1.0×) maintains signal sensitivity',
+                },
             },
             'signal_logic': {
-                'buy': 'macd_value > macd_signal',
-                'sell': 'macd_value < macd_signal',
-                'neutral': 'macd_value == macd_signal',
-                'histogram': 'positive histogram = bullish, negative = bearish',
+                'buy': 'macd > signal AND abs(macd - signal) >= magnitude_multiplier * std(histogram, histogram_std_lookback)',
+                'sell': 'macd < signal AND abs(macd - signal) >= magnitude_multiplier * std(histogram, histogram_std_lookback)',
+                'neutral': 'abs(macd - signal) < magnitude_multiplier * std(histogram, histogram_std_lookback)',
+                'histogram_interpretation': 'positive histogram = bullish momentum, negative = bearish momentum',
+                'zero_cross': 'MACD crossing zero = momentum direction reversal (secondary signal)',
             }
         },
         
@@ -394,6 +410,37 @@ def get_threshold(indicator_type: str, indicator_name: str, parameter_key: str =
                 if 'parameters' in threshold_config and parameter_key in threshold_config['parameters']:
                     return threshold_config['parameters'][parameter_key]
             return threshold_config
+    return None
+
+
+def get_macd_thresholds_by_parameters(fast: int, slow: int, signal: int) -> dict:
+    """
+    Retrieve MACD threshold configuration by parameter tuple.
+    
+    This is the primary lookup for MACD thresholds, as features will reference
+    MACD by its parameter tuple (e.g., (8,17,5)) rather than by timeframe.
+    
+    Args:
+        fast: Fast EMA period
+        slow: Slow EMA period
+        signal: Signal line EMA period
+    
+    Returns:
+        Dict with 'magnitude_multiplier', 'histogram_std_lookback', and metadata
+        Returns None if parameter tuple not found in config
+    
+    Example:
+        >>> thresholds = get_macd_thresholds_by_parameters(8, 17, 5)
+        >>> thresholds['magnitude_multiplier']
+        0.5
+    """
+    param_tuple = (fast, slow, signal)
+    macd_config = SIGNAL_THRESHOLDS.get('trend', {}).get('macd', {})
+    params_and_thresholds = macd_config.get('parameters_and_thresholds', {})
+    
+    if param_tuple in params_and_thresholds:
+        return params_and_thresholds[param_tuple]
+    
     return None
 
 
