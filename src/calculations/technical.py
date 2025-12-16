@@ -497,10 +497,13 @@ class DatabaseIntegratedTechnicalCalculator:
             )
 
         # NOTE:
-        #  - ATR, ADX, DI, CCI, Williams %R, Ultimate Oscillator, ROC, etc.
-        #    are still handled only in the legacy path for now. Once we extend
-        #    indicator_preprocessor + DEFAULT_CONFIG to cover them, we can
-        #    add the corresponding mappings here.
+        #  - This block is building the *legacy-style* `technical_indicators` dict
+        #    (values + *_signal helpers) for the existing Streamlit tables.
+        #  - The Option-C preprocessor now computes additional columns (e.g., ROC_*,
+        #    WILLR_*), and the rule-engine/rolling-heatmap path can consume them.
+        #  - However, we have not yet added legacy-style mappings/signals for those
+        #    indicators in this dict. When/if we want them to appear in the legacy
+        #    tables, we should add explicit mappings here.
 
         # Save to database if enabled and we have a latest_date
         if save_to_db and latest_date is not None:
@@ -515,7 +518,9 @@ class DatabaseIntegratedTechnicalCalculator:
         rules_path: Union[str, Path] = "master_rules_normalized.json",
         save_to_db: bool = False,
         config: Dict[str, Any] | None = None,
-    ) -> Dict[str, Dict[str, pd.Series]]:
+        indicators: list[str] | None = None,
+        return_type: str = "scores",
+    ) -> Any:     #Dict[str, Dict[str, pd.Series]]:
         """
         Run the rulebook/DSL engine on the Option-C indicator DataFrame for `ticker`.
 
@@ -543,7 +548,27 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             return {}
 
-        scores = run_optionc_heatmap(df_ind, rules_path=rules_path)
+        # Default indicator set: Option C baseline (non-breaking).
+        # Tests / Option A onboarding can pass an explicit list.
+        if indicators is None:
+            indicators = ["RSI", "MACD", "Stochastic", "ADX"]
+            
+        scores = run_optionc_heatmap(
+            df_ind, 
+            rules_path=rules_path,
+            indicators=indicators)
+
+        if return_type not in ("scores", "rolling"):
+            raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
+
+        if return_type == "rolling":
+            return self._build_optionc_rolling_signals(
+                ticker=ticker,
+                df_ind=df_ind,
+                scores=scores,
+                days=10,
+            )        
+        
         return scores
 
 
@@ -555,7 +580,12 @@ class DatabaseIntegratedTechnicalCalculator:
         days: int = 10,
     ) -> Dict[str, Any]:
         """
-        Build rolling_signals payload for Option C (short-term only for now).
+        Build rolling heatmap payload for the *rule-engine* indicator set.
+
+        Historical note:
+          - This started as "Option C only" during the initial vertical slice.
+          - As we onboard additional momentum params (Option A), the same payload
+            contract remains, but the indicator/param coverage expands via metadata.
         """
         if df_ind is None or df_ind.empty or not scores:
             return {
@@ -580,6 +610,10 @@ class DatabaseIntegratedTechnicalCalculator:
 
         score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
 
+        # Rolling metadata:
+        #   This list controls which indicator/param variants are emitted into the rolling
+        #   heatmap payload. The preprocessor may compute more columns than are included
+        #   here; inclusion is controlled deliberately to stage onboarding.
         optionc_meta = [
             {
                 "engine_indicator": "RSI",
@@ -588,17 +622,107 @@ class DatabaseIntegratedTechnicalCalculator:
                 "value_col": "RSI_14",
             },
             {
+                "engine_indicator": "RSI",
+                "param_key": "10",
+                "display_key": "RSI_10",
+                "value_col": "RSI_10",
+            },
+            {
+                "engine_indicator": "RSI",
+                "param_key": "21",
+                "display_key": "RSI_21",
+                "value_col": "RSI_21",
+            },
+            {
+                "engine_indicator": "RSI",
+                "param_key": "30",
+                "display_key": "RSI_30",
+                "value_col": "RSI_30",
+            },
+            {
                 "engine_indicator": "MACD",
                 "param_key": "12_26_9",
                 "display_key": "MACD_12_26_9",
                 "value_col": "MACD_12_26_9_hist",
             },
             {
+                "engine_indicator": "MACD",
+                "param_key": "5_34_1",
+                "display_key": "MACD_5_34_1",
+                "value_col": "MACD_5_34_1_hist",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "8_17_5",
+                "display_key": "MACD_8_17_5",
+                "value_col": "MACD_8_17_5_hist",
+            },
+            {
+                "engine_indicator": "MACD",
+                "param_key": "20_50_10",
+                "display_key": "MACD_20_50_10",
+                "value_col": "MACD_20_50_10_hist",
+            },            
+            {
                 "engine_indicator": "Stochastic",
                 "param_key": "14_3_3",
                 "display_key": "STOCH_14_3_3",
                 "value_col": "STOCHK_14_3_3",
             },
+            {
+                "engine_indicator": "Stochastic",
+                "param_key": "5_3_3",
+                "display_key": "STOCH_5_3_3",
+                "value_col": "STOCHK_5_3_3",
+            },
+            {
+                "engine_indicator": "Stochastic",
+                "param_key": "21_5_5",
+                "display_key": "STOCH_21_5_5",
+                "value_col": "STOCHK_21_5_5",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "9",
+                "display_key": "ROC_9",
+                "value_col": "ROC_9",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "12",
+                "display_key": "ROC_12",
+                "value_col": "ROC_12",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "20",
+                "display_key": "ROC_20",
+                "value_col": "ROC_20",
+            },
+            {
+                "engine_indicator": "ROC",
+                "param_key": "50",
+                "display_key": "ROC_50",
+                "value_col": "ROC_50",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "5",
+                "display_key": "WILLR_5",
+                "value_col": "WILLR_5",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "14",
+                "display_key": "WILLR_14",
+                "value_col": "WILLR_14",
+            },
+            {
+                "engine_indicator": "Williams_R",
+                "param_key": "20",
+                "display_key": "WILLR_20",
+                "value_col": "WILLR_20",
+            },            
             {
                 "engine_indicator": "ADX",
                 "param_key": "14",

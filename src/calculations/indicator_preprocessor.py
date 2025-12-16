@@ -11,16 +11,20 @@ import pandas_ta_classic as ta
 # Default indicator configuration (single source of parameter truth)
 # ----------------------------------------------------------------------
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "RSI": [14],  # later we can add 30, etc.
+    "RSI": [10, 14, 21, 30],  
     "MACD": [
         (12, 26, 9),
-        # later: (5, 34, 1), (8, 17, 5), (20, 50, 10), ...
+        (5, 34, 1), 
+        (8, 17, 5), 
+        (20, 50, 10), 
     ],
     "STOCH": [
         (14, 3, 3),
+        (5, 3, 3),
+        (21, 5, 5),
     ],
-    "SMA": [20, 50, 200],
-    "EMA": [20, 50],
+    "SMA": [10, 20, 50, 100, 200],
+    "EMA": [20, 50],   # [5, 10, 13, 20, 50, 100, 200]
     "BB": [
         (20, 2.0),
     ],
@@ -30,7 +34,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ATRP": [12, 14],  # ATRP_12, ATRP_14 (ATR% vs price)
     # Momentum / oscillators
     "CCI": [20],   # CCI_20 (window 20)
-    "ROC": [10],   # ROC_10 (10-period ROC) - can be adjusted to rulebook later
+    "ROC": [9, 12, 20, 50],   
+    "WILLR": [5, 14, 20],
 }
 
 
@@ -327,5 +332,37 @@ def compute_all_indicators(
         )
         # pandas-ta names this ROC_<length>; we mirror that in Option C.
         df[f"ROC_{l_i}"] = roc_series
+
+    # ====================================================
+    # Williams %R (WILLR) - pandas_ta_classic.willr
+    # ====================================================
+    high_col = "High" if "High" in df.columns else "high"
+    low_col = "Low" if "Low" in df.columns else "low"
+
+    if high_col in df.columns and low_col in df.columns:
+        high = df[high_col]
+        low = df[low_col]
+
+        for length in cfg.get("WILLR", []):
+            l_i = int(length)
+            # pandas_ta_classic function name may differ by version
+            if hasattr(ta, "willr"):
+                willr_series = ta.willr(
+                    high=high,
+                    low=low,
+                    close=price,
+                    length=l_i,
+                )
+            else:
+                willr_series = ta.williams_r(
+                    high=high,
+                    low=low,
+                    close=price,
+                    length=l_i,
+                )
+
+            df[f"WILLR_{l_i}"] = willr_series
+    else:
+        logger.warning("WILLR skipped: High/Low columns not present")
 
     return df
