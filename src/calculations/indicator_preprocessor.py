@@ -24,18 +24,33 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         (21, 5, 5),
     ],
     "SMA": [10, 20, 50, 100, 200],
-    "EMA": [20, 50],   # [5, 10, 13, 20, 50, 100, 200]
+    # Expanded to satisfy BullBearPower(10/13/21) dependencies (EMA_10/13/21)
+    "EMA": [10, 13, 20, 21, 50],   # [5, 10, 13, 20, 50, 100, 200]
+    
     "BB": [
         (20, 2.0),
     ],
     # Trend / volatility
     "ADX": [14],   # ADX_14, DIp_14, DIn_14
-    "ATR": [12, 14],   # ATR_12, ATR_14
-    "ATRP": [12, 14],  # ATRP_12, ATRP_14 (ATR% vs price)
+
+    # Expanded to satisfy BullBearPower(10/13/21) dependencies (ATR/ATRP_10/13/21)
+    "ATR": [10, 12, 13, 14, 21],   # add 10/13/21; keep 12/14
+    "ATRP": [10, 12, 13, 14, 21],  # (ATR% vs price); add 10/13/21; keep 12/14 
+    
     # Momentum / oscillators
     "CCI": [20],   # CCI_20 (window 20)
     "ROC": [9, 12, 20, 50],   
     "WILLR": [5, 14, 20],
+
+    # Option B (Volume + ERI)
+    # B1 — Core Volume
+    "MFI": [10, 14, 30],
+    # CMF "30" is now activated per your direction; keep alongside rulebook params
+    "CMF": [10, 21, 30, 50],
+    # OBV has a param key "0" in the rulebook, but computation is single-series
+    "OBV": [0],
+    # Required aliases by rulebook: OBV_smooth and OBV_smooth_20
+    "OBV_SMOOTH": [20],
 }
 
 
@@ -192,6 +207,54 @@ def compute_all_indicators(
         s_i = int(span)
         ema_series = ta.ema(price, length=s_i)
         df[f"EMA_{s_i}"] = ema_series
+
+    # BullBearPower rules reference redundant EMA_<len>_<len> names (e.g., EMA_13_13)
+    # Create *only the required* aliases (no extra computation), to keep the DF lean.
+    for s_i in (10, 13, 21):
+        base = f"EMA_{s_i}"
+        alias = f"EMA_{s_i}_{s_i}"
+        if base in df.columns and alias not in df.columns:
+            df[alias] = df[base]
+
+    # ====================================================
+    # Bull/Bear Power (Elder Ray style components) + BBP composite
+    # ====================================================
+    # We compute:
+    #   BullPower_<len> = High - EMA_<len>
+    #   BearPower_<len> = Low  - EMA_<len>
+    #   BBP_<len>       = BullPower_<len> + BearPower_<len>
+    #
+    # For rulebook/rolling compatibility, also alias:
+    #   BullBearPower_<len> = BBP_<len>
+    #
+    # Note: This is intentionally minimal: no ATR normalization, no slopes.
+    if {"High", "Low"}.issubset(df.columns):
+        for s_i in (10, 13, 21):
+            ema_col = f"EMA_{s_i}"
+            if ema_col not in df.columns:
+                # If config changes, ensure the columns still exist (avoid KeyError)
+                df[f"BullPower_{s_i}"] = pd.NA
+                df[f"BearPower_{s_i}"] = pd.NA
+                df[f"BBP_{s_i}"] = pd.NA
+                df[f"BullBearPower_{s_i}"] = pd.NA
+                continue
+
+            bull = df["High"] - df[ema_col]
+            bear = df["Low"] - df[ema_col]
+            bbp = bull + bear
+
+            df[f"BullPower_{s_i}"] = bull
+            df[f"BearPower_{s_i}"] = bear
+            df[f"BBP_{s_i}"] = bbp
+
+            # Alias used by rolling meta / rulebook variable naming
+            df[f"BullBearPower_{s_i}"] = df[f"BBP_{s_i}"]
+    else:
+        for s_i in (10, 13, 21):
+            df[f"BullPower_{s_i}"] = pd.NA
+            df[f"BearPower_{s_i}"] = pd.NA
+            df[f"BBP_{s_i}"] = pd.NA
+            df[f"BullBearPower_{s_i}"] = pd.NA
 
     # ====================================================
     # Bollinger Bands (pandas_ta_classic.bbands)
@@ -364,5 +427,90 @@ def compute_all_indicators(
             df[f"WILLR_{l_i}"] = willr_series
     else:
         logger.warning("WILLR skipped: High/Low columns not present")
+
+    # ====================================================
+    # Option B — Core Volume Indicators (MFI / CMF / OBV)
+    # ====================================================
+    # NOTE: Daily-only volume semantics are enforced at the data-fetch layer;
+    # here we just require Volume to exist. If missing, create NA outputs.
+
+    vol_col = "Volume" if "Volume" in df.columns else ("volume" if "volume" in df.columns else None)
+
+    # --- MFI ---
+    # Requires High/Low and Volume.
+    if {"High", "Low"}.issubset(df.columns) and vol_col is not None:
+        for length in cfg.get("MFI", []):
+            l_i = int(length)
+            if hasattr(ta, "mfi"):
+                mfi_series = ta.mfi(
+                    high=df["High"],
+                    low=df["Low"],
+                    close=price,
+                    volume=df[vol_col],
+                    length=l_i,
+                )
+            else:
+                # If classic build differs, fail soft with NA series (keeps app stable)
+                mfi_series = pd.Series(pd.NA, index=df.index)
+            df[f"MFI_{l_i}"] = mfi_series
+    else:
+        for length in cfg.get("MFI", []):
+            l_i = int(length)
+            df[f"MFI_{l_i}"] = pd.NA
+
+    # --- CMF ---
+    # Requires High/Low and Volume.
+    if {"High", "Low"}.issubset(df.columns) and vol_col is not None:
+        for length in cfg.get("CMF", []):
+            l_i = int(length)
+            if hasattr(ta, "cmf"):
+                cmf_series = ta.cmf(
+                    high=df["High"],
+                    low=df["Low"],
+                    close=price,
+                    volume=df[vol_col],
+                    length=l_i,
+                )
+            else:
+                cmf_series = pd.Series(pd.NA, index=df.index)
+            df[f"CMF_{l_i}"] = cmf_series
+    else:
+        for length in cfg.get("CMF", []):
+            l_i = int(length)
+            df[f"CMF_{l_i}"] = pd.NA
+
+    # --- OBV ---
+    # OBV is single-series; rulebook param key is "0".
+    if vol_col is not None:
+        if hasattr(ta, "obv"):
+            obv_series = ta.obv(close=price, volume=df[vol_col])
+        else:
+            obv_series = pd.Series(pd.NA, index=df.index)
+        # Ensure OBV lands in a float-capable column to avoid pandas dtype warnings
+        if "OBV" in df.columns:
+            df["OBV"] = pd.to_numeric(df["OBV"], errors="coerce").astype("float64")
+        obv_series = pd.to_numeric(obv_series, errors="coerce").astype("float64")
+        df["OBV"] = obv_series
+
+        # Required OBV smoothing aliases: OBV_smooth and OBV_smooth_20
+        smooth_periods = cfg.get("OBV_SMOOTH", [20])
+        # Canonical: OBV_smooth_20 is EMA(20) of OBV, and OBV_smooth aliases to it.
+        for sp in smooth_periods:
+            sp_i = int(sp)
+            if df["OBV"].isna().all():
+                df[f"OBV_smooth_{sp_i}"] = pd.NA
+            else:
+                df[f"OBV_smooth_{sp_i}"] = ta.ema(df["OBV"], length=sp_i)
+        if "OBV_smooth_20" in df.columns:
+            df["OBV_smooth"] = df["OBV_smooth_20"]
+        else:
+            # if config changed, still ensure OBV_smooth exists
+            first = int(smooth_periods[0]) if smooth_periods else 20
+            alias_col = f"OBV_smooth_{first}"
+            df["OBV_smooth"] = df[alias_col] if alias_col in df.columns else pd.NA
+    else:
+        df["OBV"] = pd.NA
+        df["OBV_smooth_20"] = pd.NA
+        df["OBV_smooth"] = pd.NA
 
     return df

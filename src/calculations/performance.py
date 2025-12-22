@@ -631,11 +631,44 @@ class DatabaseIntegratedPerformanceCalculator:
                     # Convert new records back to DataFrame for insertion
                     new_df = pd.DataFrame(new_records)
                     
+                    # Defensive: never attempt to insert duplicate (Ticker, Date) rows in one batch
+                    if 'Ticker' in new_df.columns and 'Date' in new_df.columns:
+                        new_df = new_df.drop_duplicates(subset=['Ticker', 'Date'], keep='last')
+
                     logger.info(f"💾 DIAGNOSTIC: Inserting {len(new_df)} new records for {ticker} (skipped {skipped_count} existing)")
                     
-                    # Insert only the new records
-                    new_df.to_sql(self.table_name, conn, if_exists='append', index=False, method='multi')
-                    
+                    # v1. Insert only the new records
+                    #new_df.to_sql(self.table_name, conn, if_exists='append', index=False, method='multi')
+                    # v2. Robust insert: ignore duplicates at the database level (idempotent)
+                    # Ensure only expected columns are inserted (stable column order)
+                    #cols = list(new_df.columns)
+                    # v3.
+                    cols = expected_columns
+                    new_df = new_df[cols].copy()
+
+                    # Final dedupe before DB write
+                    if 'Ticker' in new_df.columns and 'Date' in new_df.columns:
+                        new_df = new_df.drop_duplicates(subset=['Ticker', 'Date'], keep='last')
+
+                    # v1. Original 
+                    #placeholders = ",".join(["?"] * len(cols))
+                    #sql = f"INSERT OR IGNORE INTO {self.table_name} ({','.join(cols)}) VALUES ({placeholders})"
+
+                    #conn.executemany(sql, new_df.itertuples(index=False, name=None))
+                    #conn.commit()
+
+                    # v2. 12/22/25 314P Update
+                    placeholders = ",".join(["?"] * len(cols))
+
+                    # Quote identifiers to handle spaces (e.g., "Adj Close") and avoid reserved-word issues
+                    cols_sql = ",".join([f'"{c}"' for c in cols])
+                    table_sql = f'"{self.table_name}"'
+
+                    sql = f"INSERT OR IGNORE INTO {table_sql} ({cols_sql}) VALUES ({placeholders})"
+
+                    conn.executemany(sql, new_df.itertuples(index=False, name=None))
+                    conn.commit()
+                    # v2. - END
                     logger.info(f"✅ SUCCESS: Saved {len(new_df)} new historical records for {ticker} to database")
                 else:
                     logger.info(f"ℹ️ No new records to save for {ticker} - all {skipped_count} records already exist")

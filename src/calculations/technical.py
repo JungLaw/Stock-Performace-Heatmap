@@ -519,7 +519,8 @@ class DatabaseIntegratedTechnicalCalculator:
         save_to_db: bool = False,
         config: Dict[str, Any] | None = None,
         indicators: list[str] | None = None,
-        return_type: str = "scores",
+        use_meta_coverage: bool = False,
+        return_type: str = "scores",     # "rolling", "both"
     ) -> Any:     #Dict[str, Dict[str, pd.Series]]:
         """
         Run the rulebook/DSL engine on the Option-C indicator DataFrame for `ticker`.
@@ -550,13 +551,25 @@ class DatabaseIntegratedTechnicalCalculator:
 
         # Default indicator set: Option C baseline (non-breaking).
         # Tests / Option A onboarding can pass an explicit list.
+        # Coverage policy:
+        #  - By default, keep the Option C baseline list (non-breaking).
+        #  - If use_meta_coverage=True, derive indicator families from `optionc_meta`
+        #    so scoring coverage always matches rolling payload coverage.
         if indicators is None:
-            indicators = ["RSI", "MACD", "Stochastic", "ADX"]
+            if use_meta_coverage:
+                # Keep `optionc_meta` as the single source of truth for rolling coverage.
+                optionc_meta = self._get_optionc_meta()
+                indicators = sorted({m["engine_indicator"] for m in optionc_meta})
+            else:
+                indicators = ["RSI", "MACD", "Stochastic", "ADX"]
             
         scores = run_optionc_heatmap(
             df_ind, 
             rules_path=rules_path,
             indicators=indicators)
+
+#        # DELETE
+#        print("SCORES DEBUG families present:", sorted(scores.keys()))
 
         if return_type not in ("scores", "rolling"):
             raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
@@ -571,50 +584,15 @@ class DatabaseIntegratedTechnicalCalculator:
         
         return scores
 
-
-    def _build_optionc_rolling_signals(
-        self,
-        ticker: str,
-        df_ind: pd.DataFrame,
-        scores: Dict[str, Dict[str, pd.Series]],
-        days: int = 10,
-    ) -> Dict[str, Any]:
+    def _get_optionc_meta(self) -> list[dict[str, str]]:
         """
-        Build rolling heatmap payload for the *rule-engine* indicator set.
-
-        Historical note:
-          - This started as "Option C only" during the initial vertical slice.
-          - As we onboard additional momentum params (Option A), the same payload
-            contract remains, but the indicator/param coverage expands via metadata.
+        Single source of truth for rolling heatmap indicator/param inclusion.
+        Used by:
+          - _build_optionc_rolling_signals() to emit payload cells
+          - calculate_rule_engine_signals_optionc(use_meta_coverage=True) to ensure
+            we score exactly what we emit
         """
-        if df_ind is None or df_ind.empty or not scores:
-            return {
-                "engine": "optionc_rulebook_v1",
-                "status": "empty",
-                "ticker": ticker,
-                "dates": [],
-                "short_term": None,
-                "intermediate_term": None,
-                "long_term": None,
-                "composite_scores": {"short_term": None, "overall": None},
-                "extras": {},
-            }
-
-        df_ind = df_ind.sort_index()
-        last_dates = df_ind.index[-days:]
-
-        date_keys = [
-            d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
-            for d in last_dates
-        ]
-
-        score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
-
-        # Rolling metadata:
-        #   This list controls which indicator/param variants are emitted into the rolling
-        #   heatmap payload. The preprocessor may compute more columns than are included
-        #   here; inclusion is controlled deliberately to stage onboarding.
-        optionc_meta = [
+        return [
             {
                 "engine_indicator": "RSI",
                 "param_key": "14",
@@ -662,7 +640,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "20_50_10",
                 "display_key": "MACD_20_50_10",
                 "value_col": "MACD_20_50_10_hist",
-            },            
+            },
             {
                 "engine_indicator": "Stochastic",
                 "param_key": "14_3_3",
@@ -722,14 +700,151 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "20",
                 "display_key": "WILLR_20",
                 "value_col": "WILLR_20",
-            },            
+            },
             {
                 "engine_indicator": "ADX",
                 "param_key": "14",
                 "display_key": "ADX_14",
                 "value_col": "ADX_14",
             },
+
+            # -------------------------
+            # Option B — Core Volume
+            # -------------------------
+            {
+                "engine_indicator": "MFI",
+                "param_key": "10",
+                "display_key": "MFI_10",
+                "value_col": "MFI_10",
+            },
+            {
+                "engine_indicator": "MFI",
+                "param_key": "14",
+                "display_key": "MFI_14",
+                "value_col": "MFI_14",
+            },
+            {
+                "engine_indicator": "MFI",
+                "param_key": "30",
+                "display_key": "MFI_30",
+                "value_col": "MFI_30",
+            },
+            {
+                "engine_indicator": "CMF",
+                "param_key": "10",
+                "display_key": "CMF_10",
+                "value_col": "CMF_10",
+            },
+            {
+                "engine_indicator": "CMF",
+                "param_key": "21",
+                "display_key": "CMF_21",
+                "value_col": "CMF_21",
+            },
+            {
+                "engine_indicator": "CMF",
+                "param_key": "30",
+                "display_key": "CMF_30",
+                "value_col": "CMF_30",
+            },
+            {
+                "engine_indicator": "CMF",
+                "param_key": "50",
+                "display_key": "CMF_50",
+                "value_col": "CMF_50",
+            },
+            {
+                "engine_indicator": "OBV",
+                "param_key": "0",
+                "display_key": "OBV",
+                "value_col": "OBV",
+            },
+
+            # -------------------------
+            # Option B — ERI / BullBearPower
+            # -------------------------
+            {
+                "engine_indicator": "BullBearPower",
+                "param_key": "10",
+                "display_key": "BullBearPower_10",
+                "value_col": "BullBearPower_10",   # primary numeric (alias of BBP_10)
+                "extra_value_cols": {
+                    "BullPower": "BullPower_10",
+                    "BearPower": "BearPower_10",
+                    "BBP": "BBP_10",
+                }
+            },
+            {
+                "engine_indicator": "BullBearPower",
+                "param_key": "13",
+                "display_key": "BullBearPower_13",
+                "value_col": "BullBearPower_13",   # primary numeric (alias of BBP_13)
+                "extra_value_cols": {
+                    "BullPower": "BullPower_13",
+                    "BearPower": "BearPower_13",
+                    "BBP": "BBP_13",
+                }
+            },
+            {
+                "engine_indicator": "BullBearPower",
+                "param_key": "21",
+                "display_key": "BullBearPower_21",
+                "value_col": "BullBearPower_21",   # primary numeric (alias of BBP_21)
+                "extra_value_cols": {
+                    "BullPower": "BullPower_21",
+                    "BearPower": "BearPower_21",
+                    "BBP": "BBP_21",
+                }
+            },
         ]
+
+    def _build_optionc_rolling_signals(
+        self,
+        ticker: str,
+        df_ind: pd.DataFrame,
+        scores: Dict[str, Dict[str, pd.Series]],
+        days: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Build rolling heatmap payload for the *rule-engine* indicator set.
+
+        Historical note:
+          - This started as "Option C only" during the initial vertical slice.
+          - As we onboard additional momentum params (Option A), the same payload
+            contract remains, but the indicator/param coverage expands via metadata.
+        """
+        if df_ind is None or df_ind.empty or not scores:
+            return {
+                "engine": "optionc_rulebook_v1",
+                "status": "empty",
+                "ticker": ticker,
+                "dates": [],
+                "short_term": None,
+                "intermediate_term": None,
+                "long_term": None,
+                "composite_scores": {"short_term": None, "overall": None},
+                "extras": {},
+            }
+
+        df_ind = df_ind.sort_index()
+        last_dates = df_ind.index[-days:]
+
+        date_keys = [
+            d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+            for d in last_dates
+        ]
+
+        score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
+
+        # Rolling metadata:
+        #   This list controls which indicator/param variants are emitted into the rolling
+        #   heatmap payload. The preprocessor may compute more columns than are included
+        #   here; inclusion is controlled deliberately to stage onboarding.
+        optionc_meta = self._get_optionc_meta()
+
+#        # DELETE
+#        print("META DEBUG indicator families:", sorted({m["engine_indicator"] for m in optionc_meta}))
+#        print("META DEBUG last 8 display_keys:", [m["display_key"] for m in optionc_meta[-8:]])
 
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
@@ -759,24 +874,47 @@ class DatabaseIntegratedTechnicalCalculator:
                     continue
 
                 label = score_to_label.get(score_int, "neutral")
-
+                # MARKER
                 value = None
                 if value_col in df_ind.columns and dt in df_ind.index:
                     v = df_ind.loc[dt, value_col]
                     if not pd.isna(v):
                         value = float(v)
 
+                # Optional extra numeric fields for richer hover / future UI
+                extras: Dict[str, float] = {}
+                extra_value_cols = meta.get("extra_value_cols") if isinstance(meta, dict) else None
+                if isinstance(extra_value_cols, dict) and dt in df_ind.index:
+                    for k, col in extra_value_cols.items():
+                        if col in df_ind.columns:
+                            ev = df_ind.loc[dt, col]
+                            if not pd.isna(ev):
+                                try:
+                                    extras[k] = float(ev)
+                                except (TypeError, ValueError):
+                                    pass
+                                
                 if value is not None:
                     hover = f"{display_key} = {value:.2f}, score={score_int} ({label})"
                 else:
                     hover = f"{display_key}, score={score_int} ({label})"
 
-                row_cells[display_key] = {
+                # If extras exist, append them (still readable, no UI changes required)
+                if extras:
+                    # Example: BullPower=1.23, BearPower=-0.45, BBP=0.78
+                    extras_str = ", ".join([f"{k}={v:.2f}" for k, v in extras.items()])
+                    hover = f"{hover} | {extras_str}"
+                    
+                cell = {
                     "score": score_int,
                     "signal": label,
                     "value": value,
                     "hover": hover,
                 }
+                if extras:
+                    cell["extras"] = extras
+                
+                row_cells[display_key] = cell
 
             if row_cells:
                 data[date_key] = row_cells
@@ -796,6 +934,24 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.warning(f"Rolling DF cache build failed for {ticker}: {e}")
 
         status = "ok" if data else "empty"
+
+#        # DELETE: DEBUG: verify rolling payload (short_term)
+#        import json
+#
+#        try:
+#            debug_short_term = {
+#                "ticker": ticker,
+#                "status": status,
+#                "indicator_count": len(indicators),
+#                "day_count": len(data),
+#                "first_day": next(iter(data.keys()), None),
+#                # Print only the first day's cells to keep output manageable
+#                "first_day_cells": data.get(next(iter(data.keys()), ""), {}) if data else {},
+#            }
+#            print("ROLLING DEBUG:", json.dumps(debug_short_term, indent=2, default=str))
+#        except Exception as _dbg_e:
+#            print(f"ROLLING DEBUG FAILED for {ticker}: {_dbg_e}")
+
 
         return {
             "engine": "optionc_rulebook_v1",
@@ -1498,7 +1654,13 @@ class DatabaseIntegratedTechnicalCalculator:
             # Check staleness
             updated_at = datetime.strptime(result[9], '%Y-%m-%d %H:%M:%S').date()
             last_complete_day = get_last_completed_trading_day()
-            
+
+            # Normalize to date for a safe comparison (get_last_completed_trading_day may return datetime)
+            if isinstance(last_complete_day, datetime):
+                last_complete_day = last_complete_day.date()
+            elif isinstance(last_complete_day, pd.Timestamp):
+                last_complete_day = last_complete_day.date()
+
             if updated_at < last_complete_day:
                 logger.info(f"Cached {period} extremes for {ticker} are stale (updated: {updated_at})")
                 return None
@@ -1531,9 +1693,24 @@ class DatabaseIntegratedTechnicalCalculator:
             
             # Filter data from start_date to present
             ohlcv_data.index = pd.to_datetime(ohlcv_data.index)
-            start_datetime = pd.Timestamp(start_date)
-            period_data = ohlcv_data[ohlcv_data.index >= start_datetime].copy()
-            
+
+            # Align tz-awareness between index and bound
+            idx = ohlcv_data.index
+            start_ts = pd.Timestamp(start_date)
+
+            # Align tz-awareness between index and bound (yfinance often returns tz-aware index)
+            if getattr(idx, "tz", None) is not None:
+                if start_ts.tzinfo is None:
+                    start_ts = start_ts.tz_localize(idx.tz)
+                else:
+                    start_ts = start_ts.tz_convert(idx.tz)
+            else:
+                # Index is tz-naive; ensure bound is tz-naive
+                if start_ts.tzinfo is not None:
+                    start_ts = start_ts.tz_convert(None).tz_localize(None)
+
+            period_data = ohlcv_data[idx >= start_ts].copy()
+
             if period_data.empty:
                 logger.warning(f"No data available for {ticker} from {start_date}")
                 return None
@@ -1747,6 +1924,7 @@ class DatabaseIntegratedTechnicalCalculator:
                     scores = self.calculate_rule_engine_signals_optionc(
                         ticker=ticker,
                         feature_scope="heatmap",
+                        use_meta_coverage=True,   # use the meta-derived list (not "indicators" baseline)
                         save_to_db=save_to_db,
                     )
                     if scores:

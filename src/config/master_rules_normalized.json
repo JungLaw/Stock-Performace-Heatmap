@@ -1090,27 +1090,27 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
-              "buy": "MFI > 65",
-              "neutral": "35 <= MFI <= 65",
-              "sell": "MFI < 35",
-              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "strong_buy": "MFI_10 > 75 and rising_2bar(MFI_10)",
+              "buy": "MFI_10 > 65",
+              "neutral": "35 <= MFI_10 <= 65",
+              "sell": "MFI_10 < 35",
+              "strong_sell": "MFI_10 < 25 and falling_2bar(MFI_10)",
               "notes": "Loose slope logic = only 2-bar confirmation. Strong zones use 75/25 instead of extreme 80/20 for responsiveness."
             },
             "14": {
-              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
-              "buy": "MFI > 65",
-              "neutral": "35 <= MFI <= 65",
-              "sell": "MFI < 35",
-              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "strong_buy": "MFI_14 > 75 and rising_2bar(MFI_14)",
+              "buy": "MFI_14 > 65",
+              "neutral": "35 <= MFI_14 <= 65",
+              "sell": "MFI_14 < 35",
+              "strong_sell": "MFI_14 < 25 and falling_2bar(MFI_14)",
               "notes": "MFI(14) standard; retain same levels for intuitive read-across."
             },
             "30": {
-              "strong_buy": "MFI > 75 and rising_2bar(MFI)",
-              "buy": "MFI > 65",
-              "neutral": "35 <= MFI <= 65",
-              "sell": "MFI < 35",
-              "strong_sell": "MFI < 25 and falling_2bar(MFI)",
+              "strong_buy": "MFI_30 > 75 and rising_2bar(MFI_30)",
+              "buy": "MFI_30 > 65",
+              "neutral": "35 <= MFI_30 <= 65",
+              "sell": "MFI_30 < 35",
+              "strong_sell": "MFI_30 < 25 and falling_2bar(MFI_30)",
               "notes": "Longer window smooths noise; thresholds unchanged for consistency."
             }
           },
@@ -1181,12 +1181,12 @@
               "notes": "Long smoothing reduces volatility of CMF."
             },
             "30": {
-              "strong_buy": "",
-              "buy": "",
-              "neutral": "",
-              "sell": "",
-              "strong_sell": ""
-            }
+              "strong_buy": "CMF_30 > 0.20 and rising_2bar(CMF_30)",
+              "buy": "CMF_30 > 0.10",
+              "neutral": "-0.10 <= CMF_30 <= 0.10",
+              "sell": "CMF_30 < -0.10",
+              "strong_sell": "CMF_30 < -0.20 and falling_2bar(CMF_30)",
+              "notes": "Volume–price confirmation. ±0.1 zone is robust."            }
           },
           "overlay": {
             "21": {
