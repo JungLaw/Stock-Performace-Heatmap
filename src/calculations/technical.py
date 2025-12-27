@@ -39,6 +39,14 @@ except ImportError:  # pragma: no cover
     from src.calculations.indicator_preprocessor import compute_all_indicators
 
 
+# Rulebook repository + compute-config builder
+try:
+    from .signals_loader import RulesRepository, build_compute_config
+except Exception:  # pragma: no cover
+    RulesRepository = None
+    build_compute_config = None
+
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +54,9 @@ logger = logging.getLogger(__name__)
 # Feature flag: controls whether calculate_technical_indicators uses the new
 # Option-C TA engine (indicator_preprocessor) or the legacy pandas-ta-classic path. (12/7/25, GPT+) 
 USE_NEW_TA_ENGINE: bool = False
+# New primary flag (preferred): enables rulebook-driven computation + DSL evaluation
+TA_RULES_ENGINE: bool = USE_NEW_TA_ENGINE
+
 
 class DatabaseIntegratedTechnicalCalculator:
     """
@@ -328,7 +339,8 @@ class DatabaseIntegratedTechnicalCalculator:
         return compute_all_indicators(df, config=config)        
 
     # New public method that fetches OHLCV via the existing DB/yfinance logic, runs the new `compute_all_indicators`, 
-    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)   
+    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)
+        
     def calculate_optionc_indicators(
         self,
         ticker: str,
