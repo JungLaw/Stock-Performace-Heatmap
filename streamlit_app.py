@@ -1045,6 +1045,11 @@ def _display_indicator_card(indicator_key, config, indicator_data):
     elif indicator_key == 'elder_ray':
         bull_power = indicator_data.get('bull_power', 0)
         bear_power = indicator_data.get('bear_power', 0)
+        # UPDATE 12/29
+        #bull_power = indicator_data.get('bull_power')
+        #bear_power = indicator_data.get('bear_power')
+        #bull_power = 0.0 if bull_power is None else float(bull_power)
+        #bear_power = 0.0 if bear_power is None else float(bear_power)
         display_value = f"Bull: {bull_power:.3f}, Bear: {bear_power:.3f}"
     else:
         value = indicator_data.get('value', 0)
@@ -1136,6 +1141,11 @@ def _generate_indicator_comment(indicator_key, indicator_data, signal_info):
     elif indicator_key == 'elder_ray':
         bull_power = indicator_data.get('bull_power', 0)
         bear_power = indicator_data.get('bear_power', 0)
+        # UPDATE 12/29
+        #bull_power = indicator_data.get('bull_power')
+        #bear_power = indicator_data.get('bear_power')
+        #bull_power = 0.0 if bull_power is None else float(bull_power)
+        #bear_power = 0.0 if bear_power is None else float(bear_power)
         base_comment = description or f"Elder Ray signal: {signal}"
         return f"Bull Power: {bull_power:.3f}, Bear Power: {bear_power:.3f}. {base_comment}"
     

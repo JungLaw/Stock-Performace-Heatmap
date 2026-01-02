@@ -5,7 +5,8 @@ import numpy as np
 from typing import Dict, Any, List, Tuple
 
 import pandas_ta_classic as ta
-
+import logging
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # Default indicator configuration (single source of parameter truth)
@@ -53,6 +54,69 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "OBV_SMOOTH": [20],
 }
 
+import numpy as np
+import pandas as pd
+
+def _mfi_local(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    volume: pd.Series,
+    length: int,
+) -> pd.Series:
+    """
+    Local Money Flow Index (MFI) implementation.
+
+    Why this exists:
+    - pandas-ta-classic's `mfi()` can trigger pandas FutureWarnings / errors because it
+      performs internal `.loc[...] = ...` assignments into columns that may be int-typed.
+    - This implementation computes the same indicator using vectorized operations only,
+      ensuring all intermediate arrays are float64 and avoiding dtype-setting warnings.
+
+    Definition:
+    1) Typical Price (TP) = (High + Low + Close) / 3
+    2) Raw Money Flow (RMF) = TP * Volume
+    3) Positive RMF where TP increases; Negative RMF where TP decreases
+    4) Money Flow Ratio (MFR) = rolling_sum(pos) / rolling_sum(neg)
+    5) MFI = 100 - (100 / (1 + MFR))
+
+    Notes on edge cases:
+    - If rolling negative sum is 0 while positive sum > 0, MFI -> 100.
+    - If rolling positive sum is 0 while negative sum > 0, MFI -> 0.
+    - If both are 0, MFI is set to NaN (undefined); adjust to 50 if you prefer neutrality.
+    """
+    # Ensure float64 inputs (prevents dtype surprises)
+    h = pd.to_numeric(high, errors="coerce").astype("float64")
+    l = pd.to_numeric(low, errors="coerce").astype("float64")
+    c = pd.to_numeric(close, errors="coerce").astype("float64")
+    v = pd.to_numeric(volume, errors="coerce").astype("float64")
+
+    tp = (h + l + c) / 3.0
+    rmf = tp * v
+    delta = tp.diff()
+
+    # Positive / negative money flow (float64, no NA extension types)
+    pos_mf = rmf.where(delta > 0.0, 0.0)
+    neg_mf = rmf.where(delta < 0.0, 0.0).abs()
+
+    pos_sum = pos_mf.rolling(length, min_periods=length).sum()
+    neg_sum = neg_mf.rolling(length, min_periods=length).sum()
+
+    # Compute ratio safely: avoid pd.NA; use NaN and explicit edge handling
+    mfr = pos_sum / neg_sum.replace(0.0, np.nan)
+
+    mfi = 100.0 - (100.0 / (1.0 + mfr))
+
+    # Optional: explicit edges for readability / determinism
+    # Where neg_sum==0 and pos_sum>0 => MFI=100
+    mfi = mfi.where(~((neg_sum == 0.0) & (pos_sum > 0.0)), 100.0)
+    # Where pos_sum==0 and neg_sum>0 => MFI=0
+    mfi = mfi.where(~((pos_sum == 0.0) & (neg_sum > 0.0)), 0.0)
+    # Where both 0 => NaN (undefined)
+    mfi = mfi.where(~((pos_sum == 0.0) & (neg_sum == 0.0)), np.nan)
+
+    return pd.to_numeric(mfi, errors="coerce").astype("float64")
+
 
 # ----------------------------------------------------------------------
 # Canonical price series helper (Adj Close preferred)
@@ -68,6 +132,72 @@ def _get_price_series(df: pd.DataFrame) -> pd.Series:
     if "Adj Close" in df.columns:
         return df["Adj Close"]
     return df["Close"]
+
+
+# ----------------------------------------------------------------------
+# Rolling math helpers (local implementations for portability)
+# ----------------------------------------------------------------------
+def _rolling_wma(series: pd.Series, length: int) -> pd.Series:
+    """Weighted moving average with weights 1..length."""
+    length = int(length)
+    if length <= 0:
+        return pd.Series(pd.NA, index=series.index)
+    weights = np.arange(1, length + 1, dtype="float64")
+    denom = float(weights.sum())
+
+    def _wma_window(x):
+        x = np.asarray(x, dtype='float64')
+        if np.any(np.isnan(x)):
+            return float('nan')
+        return float(np.dot(x, weights) / denom)
+
+    return series.rolling(length, min_periods=length).apply(_wma_window, raw=True)
+
+
+def _rolling_vwma(price: pd.Series, volume: pd.Series, length: int) -> pd.Series:
+    """Volume-weighted moving average over `length`."""
+    length = int(length)
+    if length <= 0:
+        return pd.Series(pd.NA, index=price.index)
+    pv = price * volume
+    denom = volume.rolling(length, min_periods=length).sum()
+    num = pv.rolling(length, min_periods=length).sum()
+    vwma = num / denom
+    return vwma.replace([np.inf, -np.inf], np.nan)
+
+
+def _rolling_hma(series: pd.Series, length: int) -> pd.Series:
+    """Hull Moving Average: HMA(n) = WMA(2*WMA(price, n/2) - WMA(price, n), sqrt(n))."""
+    length = int(length)
+    if length <= 0:
+        return pd.Series(pd.NA, index=series.index)
+    half = max(1, length // 2)
+    sqrt_n = max(1, int(np.sqrt(length)))
+    wma_half = _rolling_wma(series, half)
+    wma_full = _rolling_wma(series, length)
+    raw = (2.0 * wma_half) - wma_full
+    return _rolling_wma(raw, sqrt_n)
+
+
+def _rolling_linreg_slope(series: pd.Series, window: int) -> pd.Series:
+    """Linear-regression slope over `window` bars (units: value per bar)."""
+    window = int(window)
+    if window <= 1:
+        return pd.Series(pd.NA, index=series.index)
+
+    x = np.arange(window, dtype="float64")
+    x_mean = x.mean()
+    x_demean = x - x_mean
+    denom = float(np.dot(x_demean, x_demean))
+
+    def _slope_window(y):
+        y = np.asarray(y, dtype='float64')
+        if np.any(np.isnan(y)):
+            return float('nan')
+        y_mean = y.mean()
+        return float(np.dot(x_demean, (y - y_mean)) / denom)
+
+    return series.rolling(window, min_periods=window).apply(_slope_window, raw=True)
 
 
 # ----------------------------------------------------------------------
@@ -216,8 +346,83 @@ def compute_all_indicators(
         if base in df.columns and alias not in df.columns:
             df[alias] = df[base]
 
+
     # ====================================================
-    # Bull/Bear Power (Elder Ray style components) + BBP composite
+    # VWMA (Volume Weighted Moving Average)
+    # ====================================================
+    vwma_periods = [int(x) for x in cfg.get("VWMA", [])]
+    if vwma_periods:
+        if "Volume" in df.columns:
+            vol = df["Volume"].astype("float64")
+            for p_i in vwma_periods:
+                df[f"VWMA_{p_i}"] = _rolling_vwma(price.astype("float64"), vol, p_i)
+        else:
+            for p_i in vwma_periods:
+                df[f"VWMA_{p_i}"] = pd.NA
+
+    # ====================================================
+    # HMA (Hull Moving Average)
+    # ====================================================
+    hma_periods = [int(x) for x in cfg.get("HMA", [])]
+    if hma_periods:
+        for p_i in hma_periods:
+            df[f"HMA_{p_i}"] = _rolling_hma(price.astype("float64"), p_i)
+
+    # ====================================================
+    # Option E: Derived numeric transformations (slopes)
+    #
+    # Canonical (parameterized) slope primitives:
+    #   {BASECOL}_slope__linreg_{W}
+    #
+    # Legacy compatibility aliases (rulebook tokens):
+    #   EMA_{n}_slope, SMA_{n}_slope, VWMA_slope, HMA_slope
+    # ====================================================
+    slope_cfg = cfg.get("SLOPE", None)
+    if isinstance(slope_cfg, dict):
+        window = int(slope_cfg.get("window", 14))
+        method = str(slope_cfg.get("method", "linreg")).lower()
+        emit_aliases = bool(slope_cfg.get("emit_aliases", True))
+
+        if method not in {"linreg"}:
+            # For now, only linreg is contractually supported.
+            method = "linreg"
+
+        def _canonical_slope_name(base_col: str) -> str:
+            return f"{base_col}_slope__{method}_{window}"
+
+        # Determine which base columns should have slopes
+        base_cols: list[str] = []
+        for fam in ("EMA", "SMA", "VWMA", "HMA"):
+            for n in (cfg.get(fam, []) or []):
+                base_cols.append(f"{fam}_{int(n)}")
+
+        # Compute slopes where base series exists
+        for base_col in base_cols:
+            if base_col not in df.columns:
+                continue
+            canon = _canonical_slope_name(base_col)
+            df[canon] = _rolling_linreg_slope(df[base_col].astype("float64"), window)
+
+            if emit_aliases and (base_col.startswith("EMA_") or base_col.startswith("SMA_")):
+                df[f"{base_col}_slope"] = df[canon]
+
+        if emit_aliases:
+            # Unparameterized legacy aliases: resolve deterministically
+            vwma_anchor = int(slope_cfg.get("vwma_anchor", 20))
+            hma_anchor = int(slope_cfg.get("hma_anchor", 21))
+
+            vwma_base = f"VWMA_{vwma_anchor}"
+            hma_base = f"HMA_{hma_anchor}"
+
+            vwma_canon = _canonical_slope_name(vwma_base)
+            hma_canon = _canonical_slope_name(hma_base)
+
+            if vwma_canon in df.columns:
+                df["VWMA_slope"] = df[vwma_canon]
+            if hma_canon in df.columns:
+                df["HMA_slope"] = df[hma_canon]
+    # ====================================================
+    # Bull/Bear Power
     # ====================================================
     # We compute:
     #   BullPower_<len> = High - EMA_<len>
@@ -436,31 +641,47 @@ def compute_all_indicators(
 
     vol_col = "Volume" if "Volume" in df.columns else ("volume" if "volume" in df.columns else None)
 
+    # Build a stable float64 volume series once (avoids pandas dtype / extension dtype issues
+    # and prevents pandas-ta from tripping FutureWarnings when it manipulates the input).
+    vol = None
+    if vol_col is not None:
+        # to_numpy(float64) ensures pandas-ta-classic doesn't hit dtype-setting warnings
+        # when it performs internal .loc assignments.
+        vol = pd.Series(
+            df[vol_col].to_numpy(dtype="float64", copy=True),
+            index=df.index,
+            name=vol_col,
+        )
+
     # --- MFI ---
     # Requires High/Low and Volume.
-    if {"High", "Low"}.issubset(df.columns) and vol_col is not None:
+    if {"High", "Low"}.issubset(df.columns) and vol is not None:    
         for length in cfg.get("MFI", []):
             l_i = int(length)
             if hasattr(ta, "mfi"):
-                mfi_series = ta.mfi(
-                    high=df["High"],
-                    low=df["Low"],
-                    close=price,
-                    volume=df[vol_col],
-                    length=l_i,
-                )
+                # UPDATED 12/31
+                mfi_series = _mfi_local(
+                    df["High"], 
+                    df["Low"], 
+                    price, 
+                    vol, l_i
+                    )
+                # original version
+                # mfi_series = ta.mfi(high=df["High"],low=df["Low"],close=price,
+                #    volume=vol,   # volume=df[vol_col],
+                #    length=l_i,)
             else:
-                # If classic build differs, fail soft with NA series (keeps app stable)
-                mfi_series = pd.Series(pd.NA, index=df.index)
-            df[f"MFI_{l_i}"] = mfi_series
+                mfi_series = pd.Series(np.nan, index=df.index, dtype="float64")
+
+            df[f"MFI_{l_i}"] = pd.to_numeric(mfi_series, errors="coerce").astype("float64")
     else:
         for length in cfg.get("MFI", []):
-            l_i = int(length)
-            df[f"MFI_{l_i}"] = pd.NA
+            df[f"MFI_{int(length)}"] = np.nan
 
     # --- CMF ---
     # Requires High/Low and Volume.
-    if {"High", "Low"}.issubset(df.columns) and vol_col is not None:
+    #if {"High", "Low"}.issubset(df.columns) and vol_col is not None:
+    if {"High", "Low"}.issubset(df.columns) and vol is not None:
         for length in cfg.get("CMF", []):
             l_i = int(length)
             if hasattr(ta, "cmf"):
@@ -468,29 +689,27 @@ def compute_all_indicators(
                     high=df["High"],
                     low=df["Low"],
                     close=price,
-                    volume=df[vol_col],
+                    volume=vol,   # volume=df[vol_col],
                     length=l_i,
                 )
             else:
-                cmf_series = pd.Series(pd.NA, index=df.index)
-            df[f"CMF_{l_i}"] = cmf_series
+                cmf_series = pd.Series(np.nan, index=df.index, dtype="float64")
+            # Normalize to float64 for downstream numeric consumers
+            df[f"CMF_{l_i}"] = pd.to_numeric(cmf_series, errors="coerce").astype("float64")  
     else:
         for length in cfg.get("CMF", []):
             l_i = int(length)
-            df[f"CMF_{l_i}"] = pd.NA
+            df[f"CMF_{l_i}"] = np.nan
 
     # --- OBV ---
     # OBV is single-series; rulebook param key is "0".
-    if vol_col is not None:
+    if vol is not None:
         if hasattr(ta, "obv"):
-            obv_series = ta.obv(close=price, volume=df[vol_col])
+            obv_series = ta.obv(close=price, volume=vol)
         else:
-            obv_series = pd.Series(pd.NA, index=df.index)
-        # Ensure OBV lands in a float-capable column to avoid pandas dtype warnings
-        if "OBV" in df.columns:
-            df["OBV"] = pd.to_numeric(df["OBV"], errors="coerce").astype("float64")
-        obv_series = pd.to_numeric(obv_series, errors="coerce").astype("float64")
-        df["OBV"] = obv_series
+            obv_series = pd.Series(np.nan, index=df.index, dtype="float64")
+        # Force numeric float64 (keeps OBV and its EMA smoothers consistent)
+        df["OBV"] = pd.to_numeric(obv_series, errors="coerce").astype("float64")
 
         # Required OBV smoothing aliases: OBV_smooth and OBV_smooth_20
         smooth_periods = cfg.get("OBV_SMOOTH", [20])
@@ -498,19 +717,19 @@ def compute_all_indicators(
         for sp in smooth_periods:
             sp_i = int(sp)
             if df["OBV"].isna().all():
-                df[f"OBV_smooth_{sp_i}"] = pd.NA
+                df[f"OBV_smooth_{sp_i}"] = np.nan
             else:
-                df[f"OBV_smooth_{sp_i}"] = ta.ema(df["OBV"], length=sp_i)
+                df[f"OBV_smooth_{sp_i}"] = pd.to_numeric(ta.ema(df["OBV"], length=sp_i), errors="coerce").astype("float64")  # Updated 12/30 609P: df[f"OBV_smooth_{sp_i}"] = ta.ema(df["OBV"], length=sp_i)
         if "OBV_smooth_20" in df.columns:
             df["OBV_smooth"] = df["OBV_smooth_20"]
         else:
             # if config changed, still ensure OBV_smooth exists
             first = int(smooth_periods[0]) if smooth_periods else 20
             alias_col = f"OBV_smooth_{first}"
-            df["OBV_smooth"] = df[alias_col] if alias_col in df.columns else pd.NA
+            df["OBV_smooth"] = df[alias_col] if alias_col in df.columns else np.nan
     else:
-        df["OBV"] = pd.NA
-        df["OBV_smooth_20"] = pd.NA
-        df["OBV_smooth"] = pd.NA
+        df["OBV"] = np.nan
+        df["OBV_smooth_20"] = np.nan
+        df["OBV_smooth"] = np.nan
 
     return df

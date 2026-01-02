@@ -125,3 +125,114 @@ class RulesRepository:
             key = "_".join(str(x) for x in p)
             keys.append(key)
         return keys
+
+# ----------------------------------------------------------------------
+# Compute-config builder (rulebook → indicator_preprocessor config)
+# ----------------------------------------------------------------------
+_RULEBOOK_TO_PREPROCESSOR_KEYS = {
+    # Momentum
+    "RSI": "RSI",
+    "MACD": "MACD",
+    "Stochastic": "STOCH",
+    "Williams_R": "WILLR",
+    "ROC": "ROC",
+    "CCI": "CCI",
+    # Trend
+    "SMA": "SMA",
+    "EMA": "EMA",
+    "VWMA": "VWMA",
+    "HMA": "HMA",
+    "ADX": "ADX",
+    # Volatility
+    "ATR": "ATR",
+    "Bollinger": "BB",
+    # Volume
+    "MFI": "MFI",
+    "CMF": "CMF",
+    "OBV": "OBV",
+    # BullBearPower is a derived family computed off EMA + High/Low
+    "BullBearPower": None,
+}
+
+
+def build_compute_config(
+    repo: RulesRepository,
+    *,
+    include_slope: bool = True,
+    slope_window: int = 14,
+    slope_method: str = "linreg",
+    emit_slope_aliases: bool = True,
+    vwma_slope_anchor: int = 20,
+    hma_slope_anchor: int = 21,
+) -> Dict[str, Any]:
+    """Build an `indicator_preprocessor.compute_all_indicators` config dict from the normalized rulebook.
+
+    Design goals:
+      - Rulebook is the single source of truth for parameter inventory.
+      - Keep this builder numeric-only (Option E): no thresholds, no signals.
+      - Ensure derived prerequisites are present (e.g., ATRP periods).
+
+    Returns a dict compatible with `indicator_preprocessor.DEFAULT_CONFIG` shape.
+    """
+
+    cfg: Dict[str, Any] = {}
+
+    # For each indicator family present in the rulebook, translate params
+    for rulebook_name, pre_key in _RULEBOOK_TO_PREPROCESSOR_KEYS.items():
+        if pre_key is None:
+            continue
+        ind = repo.get_indicator(rulebook_name)
+        if not ind:
+            continue
+        params = ind.get("params", [])
+
+        # Convert param rows to the shape used by indicator_preprocessor
+        if pre_key in {"MACD", "STOCH"}:
+            tuples = []
+            for row in params:
+                if not isinstance(row, list) or len(row) < 3:
+                    continue
+                tuples.append(tuple(int(x) for x in row[:3]))
+            cfg[pre_key] = tuples
+
+        elif pre_key == "BB":
+            bb = []
+            for row in params:
+                if not isinstance(row, list) or len(row) < 2:
+                    continue
+                period = int(row[0])
+                std = float(row[1])
+                bb.append((period, std))
+            cfg[pre_key] = bb
+
+        else:
+            # Most families are single-parameter (list[int]) inventories.
+            values = []
+            for row in params:
+                if not isinstance(row, list) or len(row) < 1:
+                    continue
+                try:
+                    values.append(int(row[0]))
+                except Exception:
+                    # Skip malformed param entries.
+                    continue
+            if values:
+                cfg[pre_key] = sorted(set(values))
+
+    # --- Derived prerequisites ---
+    # ATRP is a derived series but must be computed explicitly in the preprocessor.
+    # Contract policy: cfg["ATRP"] mirrors cfg["ATR"] unless explicitly overridden.
+    if "ATR" in cfg:
+        cfg["ATRP"] = list(cfg["ATR"])  # keep ordering stable
+
+    # Option E slope emission configuration.
+    if include_slope:
+        cfg["SLOPE"] = {
+            "window": int(slope_window),
+            "method": str(slope_method),
+            "emit_aliases": bool(emit_slope_aliases),
+            "vwma_anchor": int(vwma_slope_anchor),
+            "hma_anchor": int(hma_slope_anchor),
+        }
+
+    return cfg

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 import logging
+from src.config.settings import USE_NEW_TA_ENGINE, TA_RULES_ENGINE, DEBUG_DF_COLUMNS, TI_TILES_USE_RULE_ENGINE
 
 # Import trading day logic from performance module
 from .performance import (
@@ -51,11 +52,21 @@ except Exception:  # pragma: no cover
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Feature flag: controls whether calculate_technical_indicators uses the new
-# Option-C TA engine (indicator_preprocessor) or the legacy pandas-ta-classic path. (12/7/25, GPT+) 
-USE_NEW_TA_ENGINE: bool = False
-# New primary flag (preferred): enables rulebook-driven computation + DSL evaluation
-TA_RULES_ENGINE: bool = USE_NEW_TA_ENGINE
+# Helper: to direct to path for 'master_rules_normalized.json'
+def _resolve_rulebook_path(rules_path: Union[str, Path]) -> str:
+    rp = Path(rules_path)
+
+    # 1) As-given (absolute or relative)
+    if rp.exists():
+        return str(rp)
+
+    # 2) Common repo layout fallback
+    candidate = Path("src/config") / rp
+    if candidate.exists():
+        return str(candidate)
+
+    # 3) Return original string (so caller logs the meaningful path)
+    return str(rp)
 
 
 class DatabaseIntegratedTechnicalCalculator:
@@ -339,31 +350,29 @@ class DatabaseIntegratedTechnicalCalculator:
         return compute_all_indicators(df, config=config)        
 
     # New public method that fetches OHLCV via the existing DB/yfinance logic, runs the new `compute_all_indicators`, 
-    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)
-        
+    # returns a DataFrame enriched with Option C indicator columns. (12/7/25; GPT+)   
+
     def calculate_optionc_indicators(
         self,
         ticker: str,
         save_to_db: bool = False,
         config: Dict[str, Any] | None = None,
+        rules_path: Union[str, Path] = "master_rules_normalized.json",
     ) -> Optional[pd.DataFrame]:
         """
         Fetch sufficient OHLCV data for `ticker` and compute Option-C indicators
-        using the new TA Rule Engine preprocessor.
+        using the TA Rule Engine preprocessor.
 
-        This method:
-          - Uses the existing DB-first + yfinance-fallback OHLCV pipeline
-          - Enriches the DataFrame with Option-C indicator columns
-          - Does NOT compute legacy text signals
-          - Does NOT change the behavior of calculate_technical_indicators()
+        - If `TA_RULES_ENGINE` is enabled and `config` is None, we will build a
+          rulebook-driven compute config from `master_rules_normalized.json`.
+        - Otherwise we use the provided `config` (or fall back to the preprocessor default).
 
         Returns:
-            DataFrame with OHLCV + Option-C indicator columns, or None on failure.
+            DataFrame with OHLCV + indicator columns, or None on failure.
         """
-        # Re-use the existing helper that knows how much history we need
         df = self._get_sufficient_ohlcv_data(
             ticker=ticker,
-            periods_needed=200,      # enough for SMA_200, BB_20_2, etc.
+            periods_needed=200,
             save_to_db=save_to_db,
         )
 
@@ -371,10 +380,62 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.error(f"Unable to retrieve sufficient OHLCV data for {ticker}")
             return None
 
+        # When TA_RULES_ENGINE is enabled, prefer a rulebook-driven compute config.
+        # This eliminates drift against indicator_preprocessor.DEFAULT_CONFIG.
+        if (
+            config is None
+            and TA_RULES_ENGINE
+            and RulesRepository is not None
+            and build_compute_config is not None
+        ):
+            try:
+                repo = RulesRepository.from_file(_resolve_rulebook_path(rules_path)) #repo = RulesRepository.from_file(rules_path)
+                config = build_compute_config(repo)
+            except Exception as e:
+                logger.warning(
+                    f"[TA_RULES_ENGINE] Unable to build rulebook-driven compute config: {e}"
+                )
+
+        if DEBUG_DF_COLUMNS:
+            # ---- DEBUG: confirm which config path we’re using ----
+            logger.info("=== DEBUG CONFIG PATH MARKER v1 ===")
+            logger.info(f"[TA_RULES_ENGINE] enabled={TA_RULES_ENGINE} config_type={type(config)} config_is_none={config is None}")
+
+            # Show only the Bollinger config slice if present
+            try:
+                if isinstance(config, dict):
+                    bb = config.get("BB")
+                    logger.info(f"[TA_RULES_ENGINE] BB config slice: {bb}")
+                else:
+                    logger.info("[TA_RULES_ENGINE] No config dict passed to preprocessor (will use preprocessor defaults).")
+            except Exception as e:
+                logger.warning(f"[TA_RULES_ENGINE] Unable to log Bollinger config slice: {e}")       
+
         df_ind = self._compute_indicators_with_engine(df, config=config)
+
+        # ---- DEBUG: inspect emitted columns for alias wiring ----
+        #logger.info("=== Option-C indicator DF columns (sample) ===")
+        #logger.info(sorted(df_ind.columns))
+
+        # Or (recommended) filtered view:
+        if DEBUG_DF_COLUMNS:
+            logger.info("=== Columns containing BB/MACD/CCI/UO/Ultimate ===")
+            logger.info(
+                sorted(
+                    c for c in df_ind.columns
+                    if (
+                        "BB" in c
+                        or "MACD" in c
+                        or "CCI" in c
+                        or "UO" in c
+                        or "Ultimate" in c
+                    )
+                )
+            )
+            logger.info("=== END columns ===")
         return df_ind
 
-    # New-engine variant of calculate_technical_indicators(); (12/8/25, GPT+)
+
     def _calculate_technical_indicators_optionc(
         self,
         ticker: str,
@@ -577,7 +638,7 @@ class DatabaseIntegratedTechnicalCalculator:
             
         scores = run_optionc_heatmap(
             df_ind, 
-            rules_path=rules_path,
+            rules_path=_resolve_rulebook_path(rules_path),
             indicators=indicators)
 
 #        # DELETE
@@ -1044,7 +1105,7 @@ class DatabaseIntegratedTechnicalCalculator:
 
 
         # Optional parallel path: use new Option-C TA engine when enabled. (12/8/25; GPT+)
-        if USE_NEW_TA_ENGINE:
+        if TI_TILES_USE_RULE_ENGINE:     #if TA_RULES_ENGINE:
             return self._calculate_technical_indicators_optionc(
                 ticker=ticker,
                 save_to_db=save_to_db,

@@ -32,3 +32,14 @@ PERFORMANCE_THRESHOLDS = {
     "moderate": 1.0,    # ±1%
     "slight": 0.1,      # ±0.1%
 }
+
+# Logging & Verfification
+# Feature flag: controls whether calculate_technical_indicators uses the new
+USE_NEW_TA_ENGINE: bool = True
+TA_RULES_ENGINE: bool = USE_NEW_TA_ENGINE
+# "Don't use 'rule book' for tiles in the 'Technical Indicators' feature"
+TI_TILES_USE_RULE_ENGINE: bool = False
+# print 'debug ' statements
+DEBUG_DF_COLUMNS: bool = True
+
+
