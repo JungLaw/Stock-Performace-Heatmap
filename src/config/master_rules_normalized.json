@@ -736,7 +736,7 @@
               "neutral": "-0.03 <= ROC_12 <= 0.03",
               "sell": "ROC_12 < -0.03",
               "strong_sell": "ROC_12 < -0.07",
-              "notes": "Longer ROC \u00e2\u2020\u2019 slightly larger thresholds."
+              "notes": "Longer ROC slightly larger thresholds."
             },
             "20": {
               "strong_buy": "ROC_20 > 0.07",
@@ -744,7 +744,7 @@
               "neutral": "-0.03 <= ROC_20 <= 0.03",
               "sell": "ROC_20 < -0.03",
               "strong_sell": "ROC_20 < -0.07",
-              "notes": "Longer ROC \u00e2\u2020\u2019 slightly larger thresholds."
+              "notes": "Longer ROC slightly larger thresholds."
             },
             "50": {
               "strong_buy": "ROC_50 > 0.10",
@@ -752,7 +752,7 @@
               "neutral": "-0.05 <= ROC_50 <= 0.05",
               "sell": "ROC_50 < -0.05",
               "strong_sell": "ROC_50 < -0.10",
-              "notes": "Long ROC smooths momentum \u00e2\u2020\u2019 widen bands."
+              "notes": "Long ROC smooths momentum widen bands."
             }
           },
           "overlay": {
@@ -873,7 +873,7 @@
               "neutral": "45 <= UO <= 55",
               "sell": "UO < 45",
               "strong_sell": "UO < 40 and falling_2bar(UO)",
-              "notes": "45\u00e2\u20ac\u201c55 neutral stable. Slope confirmation benefits UO strongly."
+              "notes": "45-55 neutral stable. Slope confirmation benefits UO strongly."
             },
             "7_14_28": {
               "strong_buy": "UO > 60 and rising_2bar(UO)",

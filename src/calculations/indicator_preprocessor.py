@@ -33,16 +33,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     ],
     # Trend / volatility
     "ADX": [14],   # ADX_14, DIp_14, DIn_14
-
+    "HMA": [21],
     # Expanded to satisfy BullBearPower(10/13/21) dependencies (ATR/ATRP_10/13/21)
     "ATR": [10, 12, 13, 14, 21],   # add 10/13/21; keep 12/14
     "ATRP": [10, 12, 13, 14, 21],  # (ATR% vs price); add 10/13/21; keep 12/14 
     
     # Momentum / oscillators
-    "CCI": [20],   # CCI_20 (window 20)
+    "CCI": [14, 20],   # CCI_20 (window 20)
     "ROC": [9, 12, 20, 50],   
     "WILLR": [5, 14, 20],
-
+    "UO": [(7, 14, 28)],
     # Option B (Volume + ERI)
     # B1 — Core Volume
     "MFI": [10, 14, 30],
@@ -366,7 +366,7 @@ def compute_all_indicators(
     hma_periods = [int(x) for x in cfg.get("HMA", [])]
     if hma_periods:
         for p_i in hma_periods:
-            df[f"HMA_{p_i}"] = _rolling_hma(price.astype("float64"), p_i)
+            df[f"HMA_{p_i}"] = pd.to_numeric(_rolling_hma(price.astype("float64"), p_i), errors="coerce").astype("float64")     #df[f"HMA_{p_i}"] = _rolling_hma(price.astype("float64"), p_i)
 
     # ====================================================
     # Option E: Derived numeric transformations (slopes)
@@ -632,6 +632,54 @@ def compute_all_indicators(
             df[f"WILLR_{l_i}"] = willr_series
     else:
         logger.warning("WILLR skipped: High/Low columns not present")
+
+    # ====================================================
+    # Ultimate Oscillator (UO)
+    # ====================================================
+    # Canonical naming: UO_<fast>_<medium>_<slow>
+    # Uses canonical price series (`price`) for close.
+    if {"High", "Low"}.issubset(df.columns) and cfg.get("UO"):
+        for triplet in cfg.get("UO", []):
+            if not isinstance(triplet, (list, tuple)) or len(triplet) < 3:
+                continue
+
+            s_i, m_i, l_i = (int(triplet[0]), int(triplet[1]), int(triplet[2]))
+
+            if hasattr(ta, "uo"):
+                uo_series = ta.uo(
+                    high=df["High"],
+                    low=df["Low"],
+                    close=price,
+                    fast=s_i,
+                    medium=m_i,
+                    slow=l_i,
+                )
+            else:
+                uo_series = pd.Series(np.nan, index=df.index, dtype="float64")
+
+            df[f"UO_{s_i}_{m_i}_{l_i}"] = pd.to_numeric(uo_series, errors="coerce").astype("float64")
+    else:
+        # If config requests UO but data is missing, ensure the columns exist as NaN
+        for triplet in cfg.get("UO", []):
+            if not isinstance(triplet, (list, tuple)) or len(triplet) < 3:
+                continue
+            s_i, m_i, l_i = (int(triplet[0]), int(triplet[1]), int(triplet[2]))
+            df[f"UO_{s_i}_{m_i}_{l_i}"] = np.nan     
+
+#    # ====================================================
+#    # Ultimate Oscillator (UO)
+#    # ====================================================
+#    for s, m, l in cfg.get("UO", []):
+#        s_i, m_i, l_i = int(s), int(m), int(l)
+#        uo_series = ta.uo(
+#            high=df["High"],
+#            low=df["Low"],
+#            close=df["Close"],
+#            fast=s_i,
+#            medium=m_i,
+#            slow=l_i,
+#        )
+#        df[f"UO_{s_i}_{m_i}_{l_i}"] = uo_series
 
     # ====================================================
     # Option B — Core Volume Indicators (MFI / CMF / OBV)

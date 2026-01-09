@@ -45,6 +45,30 @@ DEFAULT_SIGNAL_SCORES: Dict[str, int] = {
     "strong_buy": 2,
 }
 
+# src/calculations/signal_classifier.py
+
+# ============================================================
+# Option D — Rule-engine instance binding
+# Maps rulebook variable names → concrete df column names
+# ============================================================
+INSTANCE_BINDINGS = {
+    # Ultimate Oscillator rules reference `UO`
+    # DataFrame column is UO_<fast>_<medium>_<slow>
+    "Ultimate_Oscillator": {
+        "UO": "UO_{param_key}",
+    },
+
+    # (Future examples — DO NOT enable until confirmed in rulebook)
+    # "CCI": {
+    #     "CCI": "CCI_{param_key}",
+    # },
+    # "MFI": {
+    #     "MFI": "MFI_{param_key}",
+    # },
+    # "Williams_R": {
+    #     "WILLR": "WILLR_{param_key}",
+    # },
+}
 
 class SignalEngine:
     """
@@ -191,6 +215,27 @@ class SignalEngine:
         if "Close" in context and "close" not in context:
             context["close"] = context["Close"]
 
+        # ------------------------------------------------------------
+        # Option D: instance binding (rulebook variable → df column)
+        # ------------------------------------------------------------
+        bindings = INSTANCE_BINDINGS.get(indicator_name)
+        if bindings:
+            for var_name, col_template in bindings.items():
+                col_name = col_template.format(param_key=param_key)
+                if col_name in df.columns:
+                    context[var_name] = df[col_name]
+
+#        # ------------------------------------------------------------
+#        # Instance binding (Option D concept): bind rulebook variables
+#        # like "UO" to the correct param-specific df column like
+#        # "UO_7_14_28" for Ultimate_Oscillator(7_14_28).
+#        # ------------------------------------------------------------
+#        if indicator_name == "Ultimate_Oscillator":
+#            # Rulebook expressions reference "UO" (not "UO_7_14_28")
+#            uo_col = f"UO_{param_key}"
+#            if uo_col in df.columns:
+#                context["UO"] = df[uo_col]
+#
         for label in self.signal_priority:
             expr = rule_block.get(label, "")
             if not isinstance(expr, str) or expr.strip() == "":

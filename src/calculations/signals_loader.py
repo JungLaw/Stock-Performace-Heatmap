@@ -137,6 +137,7 @@ _RULEBOOK_TO_PREPROCESSOR_KEYS = {
     "Williams_R": "WILLR",
     "ROC": "ROC",
     "CCI": "CCI",
+    "Ultimate_Oscillator": "UO",
     # Trend
     "SMA": "SMA",
     "EMA": "EMA",
@@ -187,7 +188,8 @@ def build_compute_config(
         params = ind.get("params", [])
 
         # Convert param rows to the shape used by indicator_preprocessor
-        if pre_key in {"MACD", "STOCH"}:
+        # Multi-parameter families
+        if pre_key in {"MACD", "STOCH", "UO"}:
             tuples = []
             for row in params:
                 if not isinstance(row, list) or len(row) < 3:

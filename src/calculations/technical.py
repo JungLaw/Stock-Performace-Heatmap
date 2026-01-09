@@ -642,7 +642,7 @@ class DatabaseIntegratedTechnicalCalculator:
             indicators=indicators)
 
 #        # DELETE
-#        print("SCORES DEBUG families present:", sorted(scores.keys()))
+        print("SCORES DEBUG families present:", sorted(scores.keys()))
 
         if return_type not in ("scores", "rolling"):
             raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
@@ -776,11 +776,22 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "ADX",
+                "param_key": "9",
+                "display_key": "ADX_9",
+                "value_col": "ADX_9",
+            },
+            {
+                "engine_indicator": "ADX",
                 "param_key": "14",
                 "display_key": "ADX_14",
                 "value_col": "ADX_14",
             },
-
+            {
+                "engine_indicator": "ADX",
+                "param_key": "20",
+                "display_key": "ADX_20",
+                "value_col": "ADX_20",
+            },            
             # -------------------------
             # Option B — Core Volume
             # -------------------------
@@ -868,6 +879,108 @@ class DatabaseIntegratedTechnicalCalculator:
                     "BearPower": "BearPower_21",
                     "BBP": "BBP_21",
                 }
+            },
+            # -------------------------
+            # Additions for UI mock (v1 expansion)
+            # -------------------------
+            {
+                "engine_indicator": "EMA",
+                "param_key": "5",
+                "display_key": "EMA_5",
+                "value_col": "EMA_5",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "10",
+                "display_key": "EMA_10",
+                "value_col": "EMA_10",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "13",
+                "display_key": "EMA_13",
+                "value_col": "EMA_13",
+            },            
+            {
+                "engine_indicator": "EMA",
+                "param_key": "20",
+                "display_key": "EMA_20",
+                "value_col": "EMA_20",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "50",
+                "display_key": "EMA_50",
+                "value_col": "EMA_50",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "100",
+                "display_key": "EMA_100",
+                "value_col": "EMA_100",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "200",
+                "display_key": "EMA_200",
+                "value_col": "EMA_200",
+            },
+            {
+                "engine_indicator": "HMA",
+                "param_key": "9",
+                "display_key": "HMA_9",
+                "value_col": "HMA_9",
+            },
+            {
+                "engine_indicator": "HMA",
+                "param_key": "21",
+                "display_key": "HMA_21",
+                "value_col": "HMA_21",
+            }, 
+            {
+                "engine_indicator": "HMA",
+                "param_key": "50",
+                "display_key": "HMA_50",
+                "value_col": "HMA_50",
+            },                       
+            {
+                "engine_indicator": "CCI",
+                "param_key": "10",
+                "display_key": "CCI_10",
+                "value_col": "CCI_10",
+            },
+            {
+                "engine_indicator": "CCI",
+                "param_key": "14",
+                "display_key": "CCI_14",
+                "value_col": "CCI_14",
+            },
+            {
+                "engine_indicator": "CCI",
+                "param_key": "20",
+                "display_key": "CCI_20",
+                "value_col": "CCI_20",
+            },
+
+            # Ultimate Oscillator: family name matches rulebook ("Ultimate_Oscillator"),
+            # instance variables in expressions bind to UO_<fast>_<medium>_<slow>
+            {
+                "engine_indicator": "Ultimate_Oscillator",
+                "param_key": "5_10_15",
+                "display_key": "UO_5_10_15",
+                "value_col": "UO_5_10_15",
+            },
+            {
+                "engine_indicator": "Ultimate_Oscillator",
+                "param_key": "7_14_28",
+                "display_key": "UO_7_14_28",
+                "value_col": "UO_7_14_28",
+            },
+            {
+                "engine_indicator": "Ultimate_Oscillator",
+                "param_key": "10_20_40",
+                "display_key": "UO_10_20_40",
+                "value_col": "UO_10_20_40",
             },
         ]
 

@@ -14,7 +14,7 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Any
 
 # Add src to path for imports
 src_path = Path(__file__).parent / "src"
@@ -1423,6 +1423,69 @@ def display_data_table(performance_data):
         hide_index=True
     )
 
+def _extract_rolling_signals_from_data(data: dict) -> dict:
+    rs = data.get("rolling_signals") or {}
+    meta = {k: rs.get(k) for k in ("engine", "status", "ticker") if k in rs}
+
+    # A) Already close to contract: rs has 'dates' and 'rows'
+    if isinstance(rs.get("dates"), list) and isinstance(rs.get("rows"), dict):
+        return {"meta": meta, "dates": rs["dates"], "rows": rs["rows"]}
+
+    # B) Term-block style: rs has {short_term: {...}, intermediate_term: {...}, long_term: {...}}
+    for term_key in ("short_term", "intermediate_term", "long_term"):
+        block = rs.get(term_key)
+        if isinstance(block, dict):
+            dates = block.get("dates")
+            rows = block.get("rows")
+            if isinstance(dates, list) and isinstance(rows, dict):
+                return {"meta": meta, "dates": dates, "rows": rows}
+
+    # C) Current engine shape: top-level dates + term-block data dict
+    # short_term: { indicators: [...], data: {date: {indicator_key: {value, score, hover}}}}
+    if isinstance(rs.get("dates"), list):
+        rs_dates = rs["dates"]
+
+        for term_key in ("short_term", "intermediate_term", "long_term"):
+            block = rs.get(term_key)
+            if not isinstance(block, dict):
+                continue
+
+            data_by_date = block.get("data")
+            if not isinstance(data_by_date, dict):
+                continue
+
+            indicators = block.get("indicators")
+            if not isinstance(indicators, list):
+                first_day = next(iter(data_by_date.values()), {})
+                indicators = list(first_day.keys()) if isinstance(first_day, dict) else []
+
+            rows: dict = {}
+            for ind_key in indicators:
+                vals, scores, hovers = [], [], []
+
+                for d in rs_dates:
+                    cell = (data_by_date.get(d, {}) or {}).get(ind_key, {}) or {}
+                    vals.append(cell.get("value"))
+                    scores.append(cell.get("score"))
+                    hovers.append(cell.get("hover"))
+
+                # Skip rows that contain nothing (prevents blank/ghost rows)
+                has_any = any(v is not None for v in vals) or any(s is not None for s in scores)
+                if not has_any:
+                    continue
+
+                rows[ind_key] = {
+                    "display_name": ind_key,
+                    "values": vals,
+                    "scores": scores,
+                    "hover": hovers,
+                }
+
+            return {"meta": meta, "dates": rs_dates, "rows": rows}
+
+    # Fallback: empty
+    return {"meta": meta, "dates": [], "rows": {}}
+
 def show_technical_analysis_dashboard():
     """Dashboard 1: Single Stock Technical Analysis"""
     st.title("🎯 Technical Analysis Dashboard")
@@ -1684,11 +1747,52 @@ def show_technical_analysis_dashboard():
         
         # Rolling Heatmap
         st.subheader("🔥 Rolling Signal Heatmap")
-        if 'rolling_signals' in data:
-            # TODO: Implement 10-day rolling heatmap
-            st.info("Rolling signal heatmap coming soon...")
-            with st.expander("Raw Rolling Signals Data", expanded=False):
-                st.json(data['rolling_signals'])
+        if "rolling_signals" in data:
+            from src.ui.rolling_heatmap_adapter import (
+                INDICATOR_DEFS,
+                build_plotly_heatmap_inputs,
+                make_rolling_heatmap_figure,
+            )
+
+            available_keys = list(INDICATOR_DEFS.keys())
+
+            # v1 defaults (edit this list freely; any missing keys are ignored safely)
+            DEFAULT_KEYS = [
+                "RSI_14",
+                "WILLR_14",
+                "CMF_21",
+                "MFI_14",
+                "ROC_12",
+                "ROC_20",
+                "ADX_14",
+                "OBV",
+                # If you want to include the UI-mock expansion, uncomment these:
+                # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14",
+            ]
+            default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
+
+            selected_keys = st.multiselect(
+                "Indicators to display",
+                options=available_keys,
+                default=default_keys,
+                help="v1: controls which indicators are shown; defaults are a stable starter set.",
+            )
+
+            rolling_payload = _extract_rolling_signals_from_data(data)
+
+            hm = build_plotly_heatmap_inputs(
+                rolling_payload=rolling_payload,
+                indicator_keys=selected_keys,
+            )
+            fig = make_rolling_heatmap_figure(hm, title="Rolling Signal Heatmap")
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Optional debug view (safe to keep, collapsed)
+            with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
+                st.json(data.get("rolling_signals", {}))
+        else:
+            st.info("No rolling signals available yet for this ticker.")
     
     elif ticker:
         st.info(f"👆 Click 'Analyze Stock' to get technical analysis for {ticker}")
