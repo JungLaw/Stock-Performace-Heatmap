@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
+from datetime import datetime
 
 
 # ----------------------------
@@ -100,12 +101,12 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
     },
     "UO_5_10_15": {
-        "display_name": "Ultimate Oscillator (5,10,15)",
+        "display_name": "UO(5,10,15)",
         "definition": "Ultimate Oscillator blends short/medium/long buying pressure into one momentum oscillator.",
         "how_to_read": "Higher = stronger momentum; 45–55 often treated as neutral depending on your rules.",
     },    
     "UO_7_14_28": {
-        "display_name": "Ultimate Osc (7,14,28)",
+        "display_name": "UO(7,14,28)",
         "definition": "Blends short/medium/long lookbacks into one momentum oscillator.",
         "how_to_read": "Higher suggests stronger buying pressure; lower suggests selling pressure.",
     },
@@ -179,6 +180,17 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
 # ----------------------------
 # Formatting helpers (v1)
 # ----------------------------
+def format_date_label(date_key: str) -> str:
+    """
+    Convert 'YYYY-MM-DD' -> 'M/D' for x-axis display.
+    Falls back to the raw string if parsing fails.
+    """
+    try:
+        dt = datetime.strptime(date_key, "%Y-%m-%d")
+        return f"{dt.month}/{dt.day}"
+    except Exception:
+        return date_key
+    
 def _abbr(n: float) -> str:
     """Human-friendly abbreviation for large magnitudes (e.g., 1532000 -> 1.53M)."""
     if n is None or (isinstance(n, float) and np.isnan(n)):
@@ -253,17 +265,69 @@ def build_plotly_heatmap_inputs(
 
     dates: List[str] = list(rolling_payload.get("dates", []))
     rows: Dict[str, dict] = dict(rolling_payload.get("rows", {}))
-
-    x = dates
+    extras = rolling_payload.get("extras") if isinstance(rolling_payload.get("extras"), dict) else {}
+    price_block = extras.get("price") if isinstance(extras.get("price"), dict) else None
+    raw_dates = dates   #x = dates    
+    x = [format_date_label(d) for d in raw_dates]
+    
+    # Inititalize variables
     row_keys: List[str] = []
     y: List[str] = []
     z: List[List[float]] = []
     text: List[List[str]] = []
     customdata: List[List[dict]] = []
 
+    # ----------------------------
+    # Phase III (UI-only): Display-Only Price row
+    # ----------------------------
+    if price_block and isinstance(price_block.get("values"), list):
+        price_vals = price_block.get("values", [])
+        # Ensure length alignment to raw_dates
+        if len(price_vals) == len(raw_dates):
+            row_keys.append("__PRICE__")
+            y.append("Price")
+
+            z_row = [float("nan")] * len(raw_dates)  # NaN => no score color semantics
+            text_row = []
+            cd_row = []
+
+            for d_raw, v in zip(raw_dates, price_vals):
+                if v is None:
+                    text_row.append("")  # blank cell
+                else:
+                    try:
+                        text_row.append(f"${float(v):,.2f}")
+                    except (TypeError, ValueError):
+                        text_row.append("")
+
+                cd_row.append(
+                    {
+                        "indicator_key": "__PRICE__",
+                        "display_name": "Price",
+                        "date": d_raw,
+                        "raw_value": v,
+                        "score": None,
+                        "meta": rolling_payload.get("meta", {}),
+                    }
+                )
+
+            z.append(z_row)
+            text.append(text_row)
+            customdata.append(cd_row)
+
     for key in indicator_keys:
         row = rows.get(key) or {}
-        display_name = row.get("display_name") or defs.get(key, {}).get("display_name") or key
+        
+        # display reader-friendly TI names
+        #display_name = row.get("display_name") or defs.get(key, {}).get("display_name") or key
+        row_display = row.get("display_name")
+        defs_display = defs.get(key, {}).get("display_name")
+
+        # Prefer payload label unless it looks like a raw indicator key (e.g., "RSI_14").
+        if row_display and defs_display and row_display.strip() == key:
+            display_name = defs_display
+        else:
+            display_name = row_display or defs_display or key        
 
         values = list(row.get("values", []))
         scores = list(row.get("scores", []))
@@ -281,7 +345,7 @@ def build_plotly_heatmap_inputs(
         text_row: List[str] = []
         cd_row: List[dict] = []
 
-        for d, v, s in zip(x, values, scores):
+        for d_raw, v, s in zip(raw_dates, values, scores):  #for d, v, s in zip(x, values, scores):
             # z must be numeric; use NaN for missing
             z_row.append(float(s) if s is not None else float("nan"))
             text_row.append(format_cell_value(key, v))
@@ -289,7 +353,7 @@ def build_plotly_heatmap_inputs(
                 {
                     "indicator_key": key,
                     "display_name": display_name,
-                    "date": d,
+                    "date": d_raw,    #d,
                     "raw_value": v,
                     "score": s,
                     "meta": rolling_payload.get("meta", {}),
@@ -354,6 +418,8 @@ def make_rolling_heatmap_figure(
         margin=dict(l=20, r=20, t=50, b=20),
         height=450,
     )
+
+    fig.update_xaxes(side="top", type="category")    # Move date to top of heatmap
     fig.update_yaxes(autorange="reversed")
 
     return fig

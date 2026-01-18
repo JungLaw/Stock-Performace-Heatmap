@@ -1014,6 +1014,29 @@ class DatabaseIntegratedTechnicalCalculator:
 
         df_ind = df_ind.sort_index()
         last_dates = df_ind.index[-days:]
+        # ----------------------------
+        # Phase III (UI-only): Price series for display row
+        # Classification: Display-Only Row (never enters scoring)
+        # ----------------------------
+        try:
+            # Prefer canonical helper when available
+            from calculations.indicator_preprocessor import _get_price_series  # adjust import if needed
+            price_series = _get_price_series(df_ind)
+        except Exception:
+            # Fallback: keep semantics aligned with canonical rule (Adj Close preferred)
+            price_series = df_ind["Adj Close"] if "Adj Close" in df_ind.columns else df_ind.get("Close")
+
+        price_values: List[Optional[float]] = []
+        if price_series is not None:
+            price_slice = price_series.reindex(last_dates)
+            for v in price_slice.tolist():
+                if v is None or (isinstance(v, float) and np.isnan(v)):  # np already used in codebase elsewhere
+                    price_values.append(None)
+                else:
+                    try:
+                        price_values.append(float(v))
+                    except (TypeError, ValueError):
+                        price_values.append(None)
 
         date_keys = [
             d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
@@ -1143,7 +1166,7 @@ class DatabaseIntegratedTechnicalCalculator:
             "engine": "optionc_rulebook_v1",
             "status": status,
             "ticker": ticker,
-            "dates": list(data.keys()),
+            "dates": date_keys, #list(data.keys()),
             "short_term": {
                 "indicators": indicators,
                 "data": data,
@@ -1160,7 +1183,14 @@ class DatabaseIntegratedTechnicalCalculator:
                 },
                 "overall": None,
             },
-            "extras": {},
+            #"extras": {},
+            "extras": {
+                "price": {
+                    "label": ticker,
+                    "values": price_values,
+                    "dates": date_keys,  # optional but useful for debugging; safe to include
+                }
+            },            
         }
 
     # Patch: MultiIndexDataFrame for Plotly 

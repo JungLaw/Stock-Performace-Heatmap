@@ -1429,7 +1429,8 @@ def _extract_rolling_signals_from_data(data: dict) -> dict:
 
     # A) Already close to contract: rs has 'dates' and 'rows'
     if isinstance(rs.get("dates"), list) and isinstance(rs.get("rows"), dict):
-        return {"meta": meta, "dates": rs["dates"], "rows": rs["rows"]}
+        extras = rs.get("extras") if isinstance(rs.get("extras"), dict) else {}
+        return {"meta": meta, "dates": rs["dates"], "rows": rs["rows"], "extras": extras}
 
     # B) Term-block style: rs has {short_term: {...}, intermediate_term: {...}, long_term: {...}}
     for term_key in ("short_term", "intermediate_term", "long_term"):
@@ -1438,7 +1439,8 @@ def _extract_rolling_signals_from_data(data: dict) -> dict:
             dates = block.get("dates")
             rows = block.get("rows")
             if isinstance(dates, list) and isinstance(rows, dict):
-                return {"meta": meta, "dates": dates, "rows": rows}
+                extras = block.get("extras") if isinstance(block.get("extras"), dict) else {}
+                return {"meta": meta, "dates": dates, "rows": rows, "extras": extras}
 
     # C) Current engine shape: top-level dates + term-block data dict
     # short_term: { indicators: [...], data: {date: {indicator_key: {value, score, hover}}}}
@@ -1481,10 +1483,11 @@ def _extract_rolling_signals_from_data(data: dict) -> dict:
                     "hover": hovers,
                 }
 
-            return {"meta": meta, "dates": rs_dates, "rows": rows}
+            extras = rs.get("extras") if isinstance(rs.get("extras"), dict) else {}
+            return {"meta": meta, "dates": rs_dates, "rows": rows, "extras": extras}
 
     # Fallback: empty
-    return {"meta": meta, "dates": [], "rows": {}}
+    return {"meta": meta, "dates": [], "rows": {}, "extras": {}}
 
 def show_technical_analysis_dashboard():
     """Dashboard 1: Single Stock Technical Analysis"""
@@ -1758,16 +1761,34 @@ def show_technical_analysis_dashboard():
 
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
             DEFAULT_KEYS = [
+                #"EMA_5",
+                #"EMA_10",
+                #"EMA_13",
+                "EMA_20", 
+                "EMA_50",
+                #"EMA_100",
+                #"EMA_200",
+                #"HMA_9",
+                "HMA_21",
+                #"HMA_50",
                 "RSI_14",
                 "WILLR_14",
                 "CMF_21",
+                #"UO_5_10_15",
+                "UO_7_14_28",
+                #"UO_10_20_40",
+                #"CCI_10"
+                "CCI_14",
+                #"CCI_20"
                 "MFI_14",
                 "ROC_12",
                 "ROC_20",
+                #"ADX_19",
                 "ADX_14",
-                "OBV",
+                #"ADX_20",
+                #"OBV",
                 # If you want to include the UI-mock expansion, uncomment these:
-                # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14",
+                # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
             ]
             default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
 
