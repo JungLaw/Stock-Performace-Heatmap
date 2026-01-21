@@ -415,7 +415,7 @@ def make_rolling_heatmap_figure(
 
     fig.update_layout(
         title=title,
-        margin=dict(l=20, r=20, t=50, b=20),
+        margin=dict(l=20, r=20, t=80, b=20),   # 't': use to add padding btwn plotly icons & heatmap
         height=450,
     )
 

@@ -1511,6 +1511,10 @@ def show_technical_analysis_dashboard():
             placeholder="e.g., AAPL, MSFT, GOOGL",
             help="Enter any valid stock ticker symbol"
         ).upper().strip()
+
+    # Ensure rolling days selector state exists before any compute gating reads it.
+    if "rh_days_selector" not in st.session_state:
+        st.session_state.rh_days_selector = int(st.session_state.get("technical_analysis_rolling_days", 10))
     
     with col2:
         # Save to database checkbox (only for non-bucket tickers)
@@ -1527,55 +1531,78 @@ def show_technical_analysis_dashboard():
             type="primary",
             use_container_width=True
         )
-    
-    if ticker and (analyze_button or 'current_ticker' not in st.session_state or st.session_state.current_ticker != ticker):
-        # Store current ticker for persistence
-        st.session_state.current_ticker = ticker
-        
-        # Determine if we should save to database
+
+    # --- Phase III (UI-only): Rolling window selector drives rolling heatmap length ---
+    # Selector must render whenever ticker is present (not only during Analyze).
+    if ticker:
+        # Persistence policy (UI-level resolution for the overall dashboard run)
         is_bucket = is_bucket_ticker(ticker)
-        
-        # Bucket tickers always save, non-bucket tickers respect checkbox
-        should_save_to_db = is_bucket or save_to_db_checkbox
-        
-        # Show info message about save behavior
-        if is_bucket:
-            st.info(f"ℹ️ {ticker} is a bucket ticker and will be automatically tracked with daily updates.")
-        elif save_to_db_checkbox:
-            st.info(f"ℹ️ {ticker} will be added to tracking list with daily updates.")
-        else:
-            st.info(f"ℹ️ {ticker} analysis is session-only. Check 'Save to database' to track permanently.")
-        
-        # Fetch technical analysis data
-        with st.spinner(f"Analyzing {ticker}..."):
-            try:
-                technical_calculator = st.session_state.technical_calculator
-                
-                # Calculate comprehensive technical analysis with save_to_db control
-                analysis_data = technical_calculator.calculate_comprehensive_analysis(
-                    ticker, 
-                    save_to_db=should_save_to_db
-                )
-                
-                if not analysis_data.get('error'):
-                    # Store in session state
-                    st.session_state.technical_analysis_data = analysis_data
-                    st.session_state.technical_analysis_ticker = ticker
-                    st.session_state.technical_analysis_timestamp = datetime.now()
-                    
-                    # Also calculate 52-week analysis on initial analysis
-                    extremes_result = technical_calculator.calculate_52_week_analysis(ticker)
-                    if extremes_result.get('success'):
-                        st.session_state.price_extremes_data = extremes_result['periods']
-                    
-                    st.success(f"✅ Analysis complete for {ticker}")
-                else:
-                    st.error(f"❌ Error analyzing {ticker}: {analysis_data.get('message', 'Unknown error')}")
+        resolved_save_to_db = is_bucket or save_to_db_checkbox
+
+        # Decide whether we need to compute now (single compute gate)
+        last_ticker = st.session_state.get("technical_analysis_ticker")
+        last_days = int(st.session_state.get("technical_analysis_rolling_days", 10))
+
+        need_compute = False
+
+        # Auto-compute on first load or ticker change (matches your current behavior)
+        if last_ticker is None or last_ticker != ticker:
+            need_compute = True
+
+        # Analyze click always recomputes
+        if analyze_button:
+            need_compute = True
+
+        # If rolling_days changed for this ticker, recompute
+        selected_days = int(st.session_state.get("rh_days_selector", last_days))
+        if last_ticker == ticker and selected_days != last_days:
+            need_compute = True
+#        if last_ticker == ticker and int(rolling_days) != last_days:
+#            need_compute = True
+
+        if need_compute:
+            # Keep current_ticker if other dashboards reference it
+            st.session_state.current_ticker = ticker
+
+            # Info message (unchanged)
+            if is_bucket:
+                st.info(f"ℹ️ {ticker} is a bucket ticker and will be automatically tracked with daily updates.")
+            elif save_to_db_checkbox:
+                st.info(f"ℹ️ {ticker} will be added to tracking list with daily updates.")
+            else:
+                st.info(f"ℹ️ {ticker} analysis is session-only. Check 'Save to database' to track permanently.")
+
+            with st.spinner(f"Analyzing {ticker}..."):
+                try:
+                    technical_calculator = st.session_state.technical_calculator
+
+                    analysis_data = technical_calculator.calculate_comprehensive_analysis(
+                        ticker,
+                        save_to_db=resolved_save_to_db,
+                        rolling_days=int(selected_days),  #int(rolling_days),
+                    )
+
+                    if not analysis_data.get("error"):
+                        st.session_state.technical_analysis_data = analysis_data
+                        st.session_state.technical_analysis_ticker = ticker
+                        st.session_state.technical_analysis_timestamp = datetime.now()
+                        # Remember the days used to compute rolling_signals
+                        st.session_state.technical_analysis_rolling_days = int(selected_days)    #st.session_state.technical_analysis_rolling_days = int(rolling_days)
+
+                        st.session_state.technical_analysis_save_to_db = bool(resolved_save_to_db)
+
+                        extremes_result = technical_calculator.calculate_52_week_analysis(ticker)
+                        if extremes_result.get("success"):
+                            st.session_state.price_extremes_data = extremes_result["periods"]
+
+                        st.success(f"✅ Analysis complete for {ticker}")
+                    else:
+                        st.error(f"❌ Error analyzing {ticker}: {analysis_data.get('message', 'Unknown error')}")
+                        return
+
+                except Exception as e:
+                    st.error(f"❌ Error analyzing {ticker}: {str(e)}")
                     return
-                    
-            except Exception as e:
-                st.error(f"❌ Error analyzing {ticker}: {str(e)}")
-                return
     
     # Display analysis if available
     if ('technical_analysis_data' in st.session_state and 
@@ -1583,7 +1610,7 @@ def show_technical_analysis_dashboard():
         st.session_state.technical_analysis_ticker == ticker):
         
         data = st.session_state.technical_analysis_data
-        
+                    
         # Show timestamp
         if 'technical_analysis_timestamp' in st.session_state:
             timestamp = st.session_state.technical_analysis_timestamp
@@ -1757,6 +1784,16 @@ def show_technical_analysis_dashboard():
                 make_rolling_heatmap_figure,
             )
 
+            # Date range windows:  "Rolling heatmap window (trading days)" drop down
+            default_days = int(st.session_state.get("technical_analysis_rolling_days", 10))
+            rolling_days = st.selectbox(
+                "Rolling heatmap window (trading days)",
+                options=[10, 20, 30, 60],
+                index=[10, 20, 30, 60].index(default_days) if default_days in [10, 20, 30, 60] else 0,
+                help="Controls how many recent trading days are included in the rolling heatmap.",
+                key="rh_days_selector",
+            )
+
             available_keys = list(INDICATOR_DEFS.keys())
 
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
@@ -1793,21 +1830,82 @@ def show_technical_analysis_dashboard():
             default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
 
             selected_keys = st.multiselect(
-                "Indicators to display",
+                "Indicators to display/remove",
                 options=available_keys,
                 default=default_keys,
                 help="v1: controls which indicators are shown; defaults are a stable starter set.",
             )
 
+            # ---- Phase III (UI-only): Session-only row order persistence (Option 2) ----
+            # Goal: order persists across ticker changes/reruns in the same session, but resets on new session.
+
+            # Initialize row order once per session (from defaults).
+            if "rh_row_order" not in st.session_state:
+                st.session_state.rh_row_order = list(default_keys)
+
+            # Reconcile row order with current selection:
+            #  - remove deselected keys
+            #  - append newly selected keys at the end
+            current_order = [k for k in st.session_state.rh_row_order if k in selected_keys]
+            newly_selected = [k for k in selected_keys if k not in current_order]
+            st.session_state.rh_row_order = current_order + newly_selected
+            st.session_state.rh_row_order = list(dict.fromkeys(st.session_state.rh_row_order))
+
+            # Row reordering UI (mouse clicks; no external components)
+            with st.expander("Change Indicator Order", expanded=False):
+                st.caption("Use ↑ / ↓ to reorder rows for this session. Order resets on a new session.")
+
+                # Use INDICATOR_DEFS for friendly labels in the reorder panel
+                defs = INDICATOR_DEFS
+
+                # Sync the row order between heatmap & ordering drop-down
+                order_view = list(st.session_state.rh_row_order)  # snapshot for stable rendering
+                for idx, key in enumerate(order_view):
+                    label = defs.get(key, {}).get("display_name", key)
+
+                    c1, c2, c3 = st.columns([0.08, 0.08, 0.84])
+
+                    up_disabled = idx == 0
+                    down_disabled = idx == (len(st.session_state.rh_row_order) - 1)
+
+                    if c1.button("↑", key=f"rh_up_{idx}_{key}", disabled=up_disabled):
+                        order = list(st.session_state.rh_row_order)  # copy
+                        order[idx - 1], order[idx] = order[idx], order[idx - 1]
+                        st.session_state.rh_row_order = order
+                        st.rerun()
+
+                    if c2.button("↓", key=f"rh_down_{idx}_{key}", disabled=down_disabled):
+                        order = list(st.session_state.rh_row_order)  # copy
+                        order[idx], order[idx + 1] = order[idx + 1], order[idx]
+                        st.session_state.rh_row_order = order
+                        st.rerun()
+
+                    c3.write(label)
+
+            # Ordered keys for rendering
+            ordered_selected_keys = st.session_state.rh_row_order
+
             rolling_payload = _extract_rolling_signals_from_data(data)
 
             hm = build_plotly_heatmap_inputs(
                 rolling_payload=rolling_payload,
-                indicator_keys=selected_keys,
+                indicator_keys=ordered_selected_keys,  #selected_keys,
             )
-            fig = make_rolling_heatmap_figure(hm, title="Rolling Signal Heatmap")
+            # populate rolling heatmap & add title, if desired
+            fig = make_rolling_heatmap_figure(hm, title="")
 
-            st.plotly_chart(fig, use_container_width=True)
+            #st.plotly_chart(fig, use_container_width=True)
+            # Scroll-friendly rendering: expand figure width as days increase
+            days_n = len(hm.x) if hasattr(hm, "x") else int(st.session_state.get("rh_days_selector", 10))
+            fig.update_layout(autosize=False, width=max(900, days_n * 45))  # 45px per day column is a good starting point
+
+            st.markdown(
+                "<div style='overflow-x:auto; padding-bottom:8px;'>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig, use_container_width=False)  #use_container_width=False
+            st.markdown("</div>", unsafe_allow_html=True)
+
 
             # Optional debug view (safe to keep, collapsed)
             with st.expander("Raw Rolling Signals Data (debug)", expanded=False):

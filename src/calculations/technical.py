@@ -2090,7 +2090,7 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.error(f"Error calculating 52-week analysis for {ticker}: {e}")
             return {'success': False, 'error': str(e)}
     
-    def calculate_comprehensive_analysis(self, ticker: str, save_to_db: bool = True) -> Dict:
+    def calculate_comprehensive_analysis(self, ticker: str, save_to_db: bool = True, rolling_days: int = 10,) -> Dict:
         """
         Calculate comprehensive technical analysis for Dashboard 1
         
@@ -2135,21 +2135,23 @@ class DatabaseIntegratedTechnicalCalculator:
             }
 
             try:
-                df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=save_to_db)
+                # Phase III: Rolling heatmap inputs are UI-only and must never be persisted.
+                df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=False)
                 if df_ind is not None and not df_ind.empty:
                     scores = self.calculate_rule_engine_signals_optionc(
                         ticker=ticker,
                         feature_scope="heatmap",
                         use_meta_coverage=True,   # use the meta-derived list (not "indicators" baseline)
-                        save_to_db=save_to_db,
+                        save_to_db=False,         # UI-only: never persist heatmap-related artifacts
                     )
                     if scores:
                         rolling_signals = self._build_optionc_rolling_signals(
                             ticker=ticker,
                             df_ind=df_ind,
                             scores=scores,
-                            days=10,
-                        )
+                            days=int(rolling_days),  #days=10,
+                        )                
+
             except Exception as e:
                 logger.error(f"Error building rolling signals for {ticker}: {e}")
                 rolling_signals = {"status": "error", "message": str(e)}
