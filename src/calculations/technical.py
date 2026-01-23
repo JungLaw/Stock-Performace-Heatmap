@@ -984,12 +984,66 @@ class DatabaseIntegratedTechnicalCalculator:
             },
         ]
 
+    # Helper to resolve trading-day windows ('As-of' vs 'Start')
+    def _resolve_trading_window(
+        self,
+        *,
+        idx: pd.DatetimeIndex,
+        days: int,
+        anchor_mode: str,
+        anchor_date: Any | None,
+    ) -> pd.DatetimeIndex:
+        """
+        Resolve a trading-day window from an index.
+
+        anchor_mode:
+          - "asof": window ends at (<=) anchor_date (or last available if None)
+          - "start": window begins at (>=) anchor_date (or first available if None)
+        """
+        if idx is None or len(idx) == 0:
+            return idx
+
+        days = int(days) if days is not None else 10
+        days = max(1, days)
+
+        # Normalize anchor_date -> Timestamp (or None)
+        ts = None
+        if anchor_date:
+            try:
+                ts = pd.Timestamp(anchor_date)
+            except Exception:
+                ts = None
+
+        if anchor_mode == "start":
+            # Start anchor: first trading day >= ts
+            if ts is None:
+                start_pos = 0
+            else:
+                start_pos = int(idx.searchsorted(ts, side="left"))
+                start_pos = min(max(start_pos, 0), len(idx) - 1)
+
+            end_pos = min(start_pos + days, len(idx))
+            return idx[start_pos:end_pos]
+
+        # Default: "asof"
+        if ts is None:
+            end_pos = len(idx)
+        else:
+            # End anchor: last trading day <= ts
+            end_pos = int(idx.searchsorted(ts, side="right"))
+            end_pos = min(max(end_pos, 1), len(idx))
+
+        start_pos = max(end_pos - days, 0)
+        return idx[start_pos:end_pos]
+
     def _build_optionc_rolling_signals(
         self,
         ticker: str,
         df_ind: pd.DataFrame,
         scores: Dict[str, Dict[str, pd.Series]],
         days: int = 10,
+        anchor_mode: str = "asof",
+        anchor_date: Any | None = None,
     ) -> Dict[str, Any]:
         """
         Build rolling heatmap payload for the *rule-engine* indicator set.
@@ -1013,7 +1067,15 @@ class DatabaseIntegratedTechnicalCalculator:
             }
 
         df_ind = df_ind.sort_index()
-        last_dates = df_ind.index[-days:]
+
+        # --- Phase III (UI-only): date window selection (presentation only) ---
+        window_dates = self._resolve_trading_window(
+            idx=df_ind.index,
+            days=int(days),
+            anchor_mode=anchor_mode or "asof",
+            anchor_date=anchor_date,
+        )
+
         # ----------------------------
         # Phase III (UI-only): Price series for display row
         # Classification: Display-Only Row (never enters scoring)
@@ -1028,9 +1090,9 @@ class DatabaseIntegratedTechnicalCalculator:
 
         price_values: List[Optional[float]] = []
         if price_series is not None:
-            price_slice = price_series.reindex(last_dates)
+            price_slice = price_series.reindex(window_dates)
             for v in price_slice.tolist():
-                if v is None or (isinstance(v, float) and np.isnan(v)):  # np already used in codebase elsewhere
+                if v is None or (isinstance(v, float) and np.isnan(v)):
                     price_values.append(None)
                 else:
                     try:
@@ -1038,9 +1100,13 @@ class DatabaseIntegratedTechnicalCalculator:
                     except (TypeError, ValueError):
                         price_values.append(None)
 
+        # Ensure alignment (adapter expects one value per date)
+        if len(price_values) != len(window_dates):
+            price_values = (price_values + [None] * len(window_dates))[: len(window_dates)]
+
         date_keys = [
             d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
-            for d in last_dates
+            for d in window_dates
         ]
 
         score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
@@ -1051,14 +1117,10 @@ class DatabaseIntegratedTechnicalCalculator:
         #   here; inclusion is controlled deliberately to stage onboarding.
         optionc_meta = self._get_optionc_meta()
 
-#        # DELETE
-#        print("META DEBUG indicator families:", sorted({m["engine_indicator"] for m in optionc_meta}))
-#        print("META DEBUG last 8 display_keys:", [m["display_key"] for m in optionc_meta[-8:]])
-
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
-        for idx, dt in enumerate(last_dates):
+        for idx, dt in enumerate(window_dates):
             date_key = date_keys[idx]
             row_cells: Dict[str, Any] = {}
 
@@ -1134,7 +1196,7 @@ class DatabaseIntegratedTechnicalCalculator:
             df_scores = self._build_optionc_scores_multiindex_df(
                 scores=scores,
                 optionc_meta=optionc_meta,
-                last_dates=last_dates,
+                last_dates=window_dates,
             )
             if not hasattr(self, "_rolling_df_cache"):
                 self._rolling_df_cache = {}
@@ -1143,24 +1205,6 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.warning(f"Rolling DF cache build failed for {ticker}: {e}")
 
         status = "ok" if data else "empty"
-
-#        # DELETE: DEBUG: verify rolling payload (short_term)
-#        import json
-#
-#        try:
-#            debug_short_term = {
-#                "ticker": ticker,
-#                "status": status,
-#                "indicator_count": len(indicators),
-#                "day_count": len(data),
-#                "first_day": next(iter(data.keys()), None),
-#                # Print only the first day's cells to keep output manageable
-#                "first_day_cells": data.get(next(iter(data.keys()), ""), {}) if data else {},
-#            }
-#            print("ROLLING DEBUG:", json.dumps(debug_short_term, indent=2, default=str))
-#        except Exception as _dbg_e:
-#            print(f"ROLLING DEBUG FAILED for {ticker}: {_dbg_e}")
-
 
         return {
             "engine": "optionc_rulebook_v1",
@@ -2136,22 +2180,13 @@ class DatabaseIntegratedTechnicalCalculator:
 
             try:
                 # Phase III: Rolling heatmap inputs are UI-only and must never be persisted.
-                df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=False)
-                if df_ind is not None and not df_ind.empty:
-                    scores = self.calculate_rule_engine_signals_optionc(
-                        ticker=ticker,
-                        feature_scope="heatmap",
-                        use_meta_coverage=True,   # use the meta-derived list (not "indicators" baseline)
-                        save_to_db=False,         # UI-only: never persist heatmap-related artifacts
-                    )
-                    if scores:
-                        rolling_signals = self._build_optionc_rolling_signals(
-                            ticker=ticker,
-                            df_ind=df_ind,
-                            scores=scores,
-                            days=int(rolling_days),  #days=10,
-                        )                
-
+                rolling_signals = self.build_rolling_heatmap_signals(
+                    ticker=ticker,
+                    window_days=int(rolling_days),
+                    anchor_mode="asof",
+                    anchor_date=None,
+                    cache_enabled=False,
+                )
             except Exception as e:
                 logger.error(f"Error building rolling signals for {ticker}: {e}")
                 rolling_signals = {"status": "error", "message": str(e)}
@@ -2196,6 +2231,66 @@ class DatabaseIntegratedTechnicalCalculator:
                 'timestamp': datetime.now().isoformat()
             }
     
+    def build_rolling_heatmap_signals(
+        self,
+        *,
+        ticker: str,
+        window_days: int,
+        anchor_mode: str = "asof",
+        anchor_date: Any | None = None,
+        cache_enabled: bool = False,
+        base_buffer_days: int | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Phase III UI-only rolling heatmap builder.
+        - Never persists (save_to_db=False).
+        - Optional in-session cache (per ticker) to support fast browsing.
+        """
+
+        window_days = int(window_days)
+        buffer_days = int(base_buffer_days) if base_buffer_days is not None else max(3 * window_days, 120)
+
+        # Initialize cache container on-demand (session-only, in-memory)
+        if not hasattr(self, "_rh_session_cache"):
+            self._rh_session_cache = {}
+
+        cache_key = ticker.upper().strip()
+
+        df_ind = None
+        scores = None
+
+        if cache_enabled:
+            cached = self._rh_session_cache.get(cache_key) or {}
+            df_ind = cached.get("df_ind")
+            scores = cached.get("scores")
+
+        # Compute if cache miss (or cache disabled)
+        if df_ind is None or scores is None:
+            df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=False)
+            if df_ind is None or df_ind.empty:
+                return {"status": "empty", "ticker": ticker, "dates": [], "short_term": None, "extras": {}}
+
+            scores = self.calculate_rule_engine_signals_optionc(
+                ticker=ticker,
+                feature_scope="heatmap",
+                use_meta_coverage=True,
+                save_to_db=False,  # UI-only: never persist
+            )
+
+            if cache_enabled:
+                # Cache the full computed objects (they already include more history than buffer_days in practice)
+                self._rh_session_cache[cache_key] = {"df_ind": df_ind, "scores": scores}
+
+        # Build the payload for the requested window/anchor
+        return self._build_optionc_rolling_signals(
+            ticker=ticker,
+            df_ind=df_ind,
+            scores=scores,
+            days=window_days,
+            anchor_mode=anchor_mode,
+            anchor_date=anchor_date,
+        )
+
     def _format_technical_indicators(self, raw_indicators: Dict) -> Dict:
         """
         Reformat technical indicators from calculate_technical_indicators() for UI display

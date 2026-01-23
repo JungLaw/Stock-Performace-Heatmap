@@ -1579,6 +1579,7 @@ def show_technical_analysis_dashboard():
                     analysis_data = technical_calculator.calculate_comprehensive_analysis(
                         ticker,
                         save_to_db=resolved_save_to_db,
+
                         rolling_days=int(selected_days),  #int(rolling_days),
                     )
 
@@ -1774,7 +1775,7 @@ def show_technical_analysis_dashboard():
             )
         else:
             st.info("Pivot points data not available")
-        
+
         # Rolling Heatmap
         st.subheader("🔥 Rolling Signal Heatmap")
         if "rolling_signals" in data:
@@ -1784,15 +1785,95 @@ def show_technical_analysis_dashboard():
                 make_rolling_heatmap_figure,
             )
 
-            # Date range windows:  "Rolling heatmap window (trading days)" drop down
-            default_days = int(st.session_state.get("technical_analysis_rolling_days", 10))
-            rolling_days = st.selectbox(
-                "Rolling heatmap window (trading days)",
-                options=[10, 20, 30, 60],
-                index=[10, 20, 30, 60].index(default_days) if default_days in [10, 20, 30, 60] else 0,
-                help="Controls how many recent trading days are included in the rolling heatmap.",
-                key="rh_days_selector",
+            technical_calculator = st.session_state.technical_calculator
+
+            # --- Phase III (UI-only): Rolling heatmap controls (local to heatmap section) ---
+            # D1: Only recompute rolling_signals when rolling params change (not on every rerun).
+            cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 1.4])
+
+            with cA:
+                rolling_days = st.selectbox(
+                    "Rolling window (trading days)",
+                    options=[10, 20, 30, 60],
+                    index=0,
+                    key="rh_days_selector",
+                    help="Controls how many trading days the rolling heatmap displays.",
+                )
+
+            with cB:
+                anchor_mode = st.radio(
+                    "Anchor mode",
+                    options=["asof", "start"],
+                    index=0,
+                    horizontal=True,
+                    key="rh_anchor_mode",
+                    help="As-of: window ends on anchor date. Start: window begins on anchor date.",
+                )
+
+            with cC:
+                cache_enabled = st.toggle(
+                    "Save in-session",
+                    value=False,
+                    key="rh_cache_enabled",
+                    help="Caches rolling inputs per ticker for faster browsing within this session only. "
+                         "'On': deep-dive into multiple dates/windows. 'Off': sampling many tickers once each.",
+                )
+
+            # Optional anchor date: avoid st.date_input(value=None) to keep compatibility across Streamlit versions.
+            # We use a checkbox to control whether an anchor is applied.
+            with cD:
+                use_anchor_date = st.checkbox(
+                    "Use anchor date",
+                    value=False,
+                    key="rh_use_anchor_date",
+                    help="If unchecked, the builder uses the latest available trading day (as-of) "
+                         "or the earliest available trading day (start), depending on Anchor mode.",
+                )
+
+            anchor_date = None
+            if use_anchor_date:
+                anchor_label = "As-of date" if anchor_mode == "asof" else "Start date"
+                anchor_date = st.date_input(
+                    anchor_label,
+                    key="rh_anchor_date",
+                    help="Pick the anchor date used to resolve the rolling window.",
+                )
+
+            # Compute-gating: only rebuild rolling_signals when parameters change.
+            # This prevents unnecessary recompute on row-order clicks, expanders, etc.
+            rolling_params = (
+                str(ticker).upper().strip(),
+                int(rolling_days),
+                str(anchor_mode),
+                anchor_date,               # datetime.date or None
+                bool(cache_enabled),
             )
+
+            if "rh_last_params" not in st.session_state:
+                st.session_state.rh_last_params = None
+            if "rh_last_signals" not in st.session_state:
+                st.session_state.rh_last_signals = None
+
+            need_rebuild = (st.session_state.rh_last_params != rolling_params) or (st.session_state.rh_last_signals is None)
+
+            if need_rebuild:
+                with st.spinner("Building rolling heatmap…"):
+                    rolling_signals = technical_calculator.build_rolling_heatmap_signals(
+                        ticker=ticker,
+                        window_days=int(rolling_days),
+                        anchor_mode=str(anchor_mode),
+                        anchor_date=anchor_date,          # date | None
+                        cache_enabled=bool(cache_enabled),
+                        base_buffer_days=None,            # defer tuning; safe default inside builder
+                    )
+                st.session_state.rh_last_params = rolling_params
+                st.session_state.rh_last_signals = rolling_signals
+            else:
+                rolling_signals = st.session_state.rh_last_signals
+
+            # Inject/override only the rolling_signals used by the heatmap renderer
+            data = dict(data)  # shallow copy so we don't mutate session_state object unexpectedly
+            data["rolling_signals"] = rolling_signals
 
             available_keys = list(INDICATOR_DEFS.keys())
 
@@ -1889,30 +1970,19 @@ def show_technical_analysis_dashboard():
 
             hm = build_plotly_heatmap_inputs(
                 rolling_payload=rolling_payload,
-                indicator_keys=ordered_selected_keys,  #selected_keys,
+                indicator_keys=ordered_selected_keys,  # selected_keys,
             )
             # populate rolling heatmap & add title, if desired
             fig = make_rolling_heatmap_figure(hm, title="")
 
-            #st.plotly_chart(fig, use_container_width=True)
-            # Scroll-friendly rendering: expand figure width as days increase
-            days_n = len(hm.x) if hasattr(hm, "x") else int(st.session_state.get("rh_days_selector", 10))
-            fig.update_layout(autosize=False, width=max(900, days_n * 45))  # 45px per day column is a good starting point
-
-            st.markdown(
-                "<div style='overflow-x:auto; padding-bottom:8px;'>",
-                unsafe_allow_html=True,
-            )
-            st.plotly_chart(fig, use_container_width=False)  #use_container_width=False
-            st.markdown("</div>", unsafe_allow_html=True)
-
+            st.plotly_chart(fig, use_container_width=True)
 
             # Optional debug view (safe to keep, collapsed)
             with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
                 st.json(data.get("rolling_signals", {}))
         else:
             st.info("No rolling signals available yet for this ticker.")
-    
+
     elif ticker:
         st.info(f"👆 Click 'Analyze Stock' to get technical analysis for {ticker}")
     else:
