@@ -1,3 +1,4 @@
+# Stamp: Tue, Feb 10, 2026 4:12 PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -5,7 +6,6 @@ Technical analysis calculator that uses database cache first, then yfinance fall
 Follows the same proven pattern as DatabaseIntegratedPerformanceCalculator and
 DatabaseIntegratedVolumeCalculator for consistency and reliability.
 """
-
 import pandas as pd
 import numpy as np
 import sqlite3
@@ -228,7 +228,7 @@ class DatabaseIntegratedTechnicalCalculator:
             
             # Auto-save to database if enabled
             if save_to_db and self.db_available:
-                self._save_ohlcv_data_to_db(ticker, hist_data)
+                self._save_ohlcv_data_to_db(ticker, hist_data, save_to_db=save_to_db)
             
             # Align timezone-awareness between yfinance index and start/end datetimes.
             # yfinance often returns a tz-aware DatetimeIndex (e.g., America/New_York),
@@ -258,35 +258,36 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.error(f"Error fetching OHLCV data from yfinance for {ticker}: {e}")
             return None
     
-    def _save_ohlcv_data_to_db(self, ticker: str, historical_data: pd.DataFrame) -> bool:
+    def _save_ohlcv_data_to_db(self, ticker: str, historical_data: pd.DataFrame, save_to_db: bool = True) -> bool:
         """
         Save fetched OHLCV data to database (reusing logic from performance calculator)
-        
+
         Args:
             ticker: Stock ticker symbol
             historical_data: DataFrame with historical OHLCV data
-            
+            save_to_db: Whether to save fetched data to database
+
         Returns:
             True if saved successfully, False otherwise
         """
         # Import the save method from performance calculator to avoid code duplication
         from .performance import DatabaseIntegratedPerformanceCalculator
-        
+
         try:
             perf_calc = DatabaseIntegratedPerformanceCalculator(db_file=self.db_file)
-            success = perf_calc._save_historical_data_to_db(ticker, historical_data, save_to_db=True)
-            
+            success = perf_calc._save_historical_data_to_db(ticker, historical_data, save_to_db=save_to_db)
+
             if success:
                 logger.info(f"✅ OHLCV data saved to database for {ticker}")
             else:
                 logger.warning(f"⚠️ Failed to save OHLCV data for {ticker}")
-            
+
             return success
-            
+
         except Exception as e:
             logger.error(f"Error saving OHLCV data for {ticker}: {e}")
             return False
-    
+            
     def _get_sufficient_ohlcv_data(self, ticker: str, periods_needed: int = 200, save_to_db: bool = True) -> Optional[pd.DataFrame]:
         """
         Get sufficient OHLCV data for technical analysis calculations
@@ -1067,6 +1068,45 @@ class DatabaseIntegratedTechnicalCalculator:
             }
 
         df_ind = df_ind.sort_index()
+
+        # Log line for verifying 'input date' in rolling heatmap
+        #  DEBUG: rolling heatmap index alignment
+        try:
+            logger.info("=== RollingHeatmap DEBUG: index alignment ===")
+
+            # df_ind index diagnostics
+            logger.info(
+                "[df_ind.index] type=%s tz=%s min=%s max=%s",
+                type(df_ind.index),
+                getattr(df_ind.index, "tz", None),
+                df_ind.index.min(),
+                df_ind.index.max(),
+            )
+
+            # pick one representative score series
+            sample_series = None
+            for fam, fam_dict in scores.items():
+                for k, s in fam_dict.items():
+                    if s is not None and len(s) > 0:
+                        sample_series = s
+                        logger.info(
+                            "[score_series] family=%s key=%s type=%s tz=%s min=%s max=%s",
+                            fam,
+                            k,
+                            type(s.index),
+                            getattr(s.index, "tz", None),
+                            s.index.min(),
+                            s.index.max(),
+                        )
+                        break
+                if sample_series is not None:
+                    break
+
+            if sample_series is None:
+                logger.warning("[RollingHeatmap DEBUG] No non-empty score series found")
+
+        except Exception as e:
+            logger.exception("RollingHeatmap DEBUG failed: %s", e)        
 
         # --- Phase III (UI-only): date window selection (presentation only) ---
         window_dates = self._resolve_trading_window(
@@ -1943,11 +1983,11 @@ class DatabaseIntegratedTechnicalCalculator:
             return None
     
     def _calculate_price_extremes(self, ticker: str, period: str, start_date: datetime.date, 
-                                   close_based: bool = True) -> Optional[Dict]:
+                                   close_based: bool = True, save_to_db: bool = True,) -> Optional[Dict]:
         """Calculate high/low extremes for a period"""
         try:
             # Fetch OHLCV data
-            ohlcv_data = self._get_sufficient_ohlcv_data(ticker, periods_needed=200, save_to_db=True)
+            ohlcv_data = self._get_sufficient_ohlcv_data(ticker, periods_needed=200, save_to_db=save_to_db)
             if ohlcv_data is None or ohlcv_data.empty:
                 return None
             
@@ -2046,7 +2086,7 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.error(f"Error saving price extremes for {ticker} {period}: {e}")
             return False
     
-    def calculate_52_week_analysis(self, ticker: str, user_52w_high: Optional[float] = None) -> Dict:
+    def calculate_52_week_analysis(self, ticker: str, user_52w_high: Optional[float] = None, save_to_db: bool = True) -> Dict:
         """
         Calculate 52-week high/low analysis with 6 periods
         
@@ -2083,7 +2123,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 
                 # Calculate if not cached or stale
                 start_date = get_trading_day_target(period_key)
-                extremes = self._calculate_price_extremes(ticker, period, start_date, close_based=True)
+                extremes = self._calculate_price_extremes(ticker, period, start_date, close_based=True, save_to_db=save_to_db)
                 
                 if extremes:
                     self._save_price_extremes_to_db(ticker, period, extremes)
@@ -2092,7 +2132,7 @@ class DatabaseIntegratedTechnicalCalculator:
             # Handle '52w' period with user override logic
             # First calculate intraday-based 52w high
             start_date_52w = get_trading_day_target('1y')  # Use '1y' for 52-week period
-            intraday_extremes = self._calculate_price_extremes(ticker, '52w', start_date_52w, close_based=False)
+            intraday_extremes = self._calculate_price_extremes(ticker, '52w', start_date_52w, close_based=False, save_to_db=save_to_db)
             
             if intraday_extremes:
                 intraday_high = intraday_extremes['high_price']
@@ -2206,7 +2246,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 'technical_indicators': self._format_technical_indicators(tech_indicators),
                 
                 # Phase 3: 52-Week High Analysis    
-                'price_extremes': self.calculate_52_week_analysis(ticker),           
+                'price_extremes': self.calculate_52_week_analysis(ticker, save_to_db=save_to_db),           
                                                 
                 # Phase 4: Pivot Points (placeholder for now)
                 'pivot_points': self.calculate_pivot_points(
@@ -2498,18 +2538,24 @@ class DatabaseIntegratedTechnicalCalculator:
         return results
     
     # ===== PIVOT POINTS ANALYSIS METHODS =====
-    
+
     def _get_pivot_ohlc(self, ticker: str, target_date: date) -> Optional[Dict]:
         """
         Get High, Low, Close, Open for pivot calculations (database-first approach)
-        
+
         Args:
             ticker: Stock ticker symbol
             target_date: Date to fetch OHLC data for
-            
+
         Returns:
             Dict with OHLC values or None if data unavailable
         """
+        # ---- Patch P2: normalize any accidental datetime/timestamp inputs
+        if isinstance(target_date, datetime):
+            target_date = target_date.date()
+        elif isinstance(target_date, pd.Timestamp):
+            target_date = target_date.date()
+
         try:
             # Try database first
             conn = self._get_database_connection()
@@ -2519,13 +2565,13 @@ class DatabaseIntegratedTechnicalCalculator:
                 FROM {self.daily_prices_table}
                 WHERE Ticker = ? AND Date = ?
                 """
-                
+
                 date_str = target_date.strftime('%Y-%m-%d')
                 cursor = conn.cursor()
                 cursor.execute(query, (ticker, date_str))
                 result = cursor.fetchone()
                 conn.close()
-                
+
                 if result:
                     logger.info(f"✅ Found OHLC data in database for {ticker} on {date_str}")
                     return {
@@ -2535,35 +2581,118 @@ class DatabaseIntegratedTechnicalCalculator:
                         'close': result[3],
                         'date': target_date
                     }
-            
+
             # Fallback to yfinance if not in database
             logger.info(f"📡 Fetching OHLC from yfinance for {ticker} on {target_date}")
-            
+
             # Get data with buffer to ensure we have the target date
-            start_date = target_date - timedelta(days=5)
-            end_date = target_date + timedelta(days=1)
-            
-            hist_data = self._fetch_ohlcv_data_from_yfinance(ticker, start_date, end_date, save_to_db=True)
-            
+            start_date = datetime.combine(target_date - timedelta(days=5), datetime.min.time())
+            end_date = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+
+            hist_data = self._fetch_ohlcv_data_from_yfinance(
+                ticker,
+                start_date,
+                end_date,
+                save_to_db=False
+            )
+
             if hist_data is not None and not hist_data.empty:
-                # Find the exact date
-                target_datetime = pd.Timestamp(target_date)
-                if target_datetime in hist_data.index:
-                    row = hist_data.loc[target_datetime]
+                # Robust date match regardless of tz-awareness:
+                # yfinance often returns a tz-aware index; comparing by .date avoids tz mismatch.
+                idx_dates = pd.Index(hist_data.index.date)
+                matches = hist_data.loc[idx_dates == target_date]
+
+                if not matches.empty:
+                    # If multiple rows match (unlikely with daily data), take the first
+                    row = matches.iloc[0]
                     return {
-                        'open': row['Open'],
-                        'high': row['High'],
-                        'low': row['Low'],
-                        'close': row['Close'],
+                        'open': float(row['Open']),
+                        'high': float(row['High']),
+                        'low': float(row['Low']),
+                        'close': float(row['Close']),
                         'date': target_date
                     }
-            
+
             logger.warning(f"⚠️ No OHLC data found for {ticker} on {target_date}")
             return None
-            
+
         except Exception as e:
             logger.error(f"Error fetching OHLC for {ticker} on {target_date}: {e}")
             return None
+
+#    # ===== PIVOT POINTS ANALYSIS METHODS =====
+#    
+#    def _get_pivot_ohlc(self, ticker: str, target_date: date) -> Optional[Dict]:
+#        """
+#        Get High, Low, Close, Open for pivot calculations (database-first approach)
+#        
+#        Args:
+#            ticker: Stock ticker symbol
+#            target_date: Date to fetch OHLC data for
+#            
+#        Returns:
+#            Dict with OHLC values or None if data unavailable
+#        """
+#        # ---- Patch P2: normalize any accidental datetime/timestamp inputs
+#        if isinstance(target_date, datetime):
+#            target_date = target_date.date()
+#        elif isinstance(target_date, pd.Timestamp):
+#            target_date = target_date.date()
+#
+#        try:
+#            # Try database first
+#            conn = self._get_database_connection()
+#            if conn:
+#                query = f"""
+#                SELECT Open, High, Low, Close
+#                FROM {self.daily_prices_table}
+#                WHERE Ticker = ? AND Date = ?
+#                """
+#                
+#                date_str = target_date.strftime('%Y-%m-%d')
+#                cursor = conn.cursor()
+#                cursor.execute(query, (ticker, date_str))
+#                result = cursor.fetchone()
+#                conn.close()
+#                
+#                if result:
+#                    logger.info(f"✅ Found OHLC data in database for {ticker} on {date_str}")
+#                    return {
+#                        'open': result[0],
+#                        'high': result[1],
+#                        'low': result[2],
+#                        'close': result[3],
+#                        'date': target_date
+#                    }
+#            
+#            # Fallback to yfinance if not in database
+#            logger.info(f"📡 Fetching OHLC from yfinance for {ticker} on {target_date}")
+#            
+#            # Get data with buffer to ensure we have the target date
+#            start_date = target_date - timedelta(days=5)
+#            end_date = target_date + timedelta(days=1)
+#            
+#            hist_data = self._fetch_ohlcv_data_from_yfinance(ticker, start_date, end_date, save_to_db=False)
+#            
+#            if hist_data is not None and not hist_data.empty:
+#                # Find the exact date
+#                target_datetime = pd.Timestamp(target_date)
+#                if target_datetime in hist_data.index:
+#                    row = hist_data.loc[target_datetime]
+#                    return {
+#                        'open': row['Open'],
+#                        'high': row['High'],
+#                        'low': row['Low'],
+#                        'close': row['Close'],
+#                        'date': target_date
+#                    }
+#            
+#            logger.warning(f"⚠️ No OHLC data found for {ticker} on {target_date}")
+#            return None
+#            
+#        except Exception as e:
+#            logger.error(f"Error fetching OHLC for {ticker} on {target_date}: {e}")
+#            return None
     
     def _calculate_classic_pivot(self, high: float, low: float, close: float) -> Dict:
         """
@@ -2871,23 +3000,27 @@ class DatabaseIntegratedTechnicalCalculator:
         except Exception as e:
             logger.error(f"Error saving pivot points to database: {e}")
             return False
-    
-    def calculate_pivot_points(self, ticker: str, target_date: Optional[date] = None, 
-                               save_to_db: bool = True) -> Dict:
+
+    def calculate_pivot_points(
+        self,
+        ticker: str,
+        target_date: Optional[date] = None,
+        save_to_db: bool = True
+    ) -> Dict:
         """
         Calculate all 4 pivot point types for a ticker
-        
+
         Uses previous trading day's OHLC by default. Implements database-first pattern:
         1. Check database for cached pivots
         2. If missing, fetch OHLC data (database -> yfinance fallback)
         3. Calculate all pivot types
         4. Save to database if enabled
-        
+
         Args:
             ticker: Stock ticker symbol
             target_date: Date for pivot calculation (default: yesterday's trading day)
             save_to_db: Whether to save calculated pivots to database
-            
+
         Returns:
             Dict with all 4 pivot types and calculation metadata:
             {
@@ -2902,23 +3035,30 @@ class DatabaseIntegratedTechnicalCalculator:
             }
         """
         logger.info(f"📍 Calculating pivot points for {ticker}")
-        
+
         try:
             # Determine target date (previous trading day if not specified)
             if target_date is None:
                 from .performance import get_last_completed_trading_day
                 last_trading_day = get_last_completed_trading_day()
-                
+
                 # Use previous trading day (pivots calculated from yesterday's OHLC)
                 target_date = last_trading_day - timedelta(days=1)
-                
+
                 # Ensure it's a trading day
                 from .performance import is_us_trading_day
                 while not is_us_trading_day(target_date):
                     target_date -= timedelta(days=1)
-                
+
                 logger.info(f"Using previous trading day: {target_date}")
-            
+
+            # ---- Patch P1: normalize target_date to a pure date (avoid timestamp mismatch)
+            # Do this BEFORE DB cache lookup so key types are consistent.
+            if isinstance(target_date, datetime):
+                target_date = target_date.date()
+            elif isinstance(target_date, pd.Timestamp):
+                target_date = target_date.date()
+
             # Check database cache first
             cached_pivots = self._get_pivot_points_from_db(ticker, target_date)
             if cached_pivots:
@@ -2934,29 +3074,29 @@ class DatabaseIntegratedTechnicalCalculator:
                     'error': False,
                     'source': 'database_cache'
                 }
-            
+
             # Fetch OHLC data for target date
             ohlc_data = self._get_pivot_ohlc(ticker, target_date)
-            
+
             if not ohlc_data:
                 return {
                     'ticker': ticker,
                     'error': True,
                     'message': f'Unable to fetch OHLC data for {ticker} on {target_date}'
                 }
-            
+
             # Calculate all pivot types
             pivots_data = {}
-            
+
             # Classic Pivot
             classic = self._calculate_classic_pivot(
-                ohlc_data['high'], 
-                ohlc_data['low'], 
+                ohlc_data['high'],
+                ohlc_data['low'],
                 ohlc_data['close']
             )
             if classic:
                 pivots_data['classic'] = classic
-            
+
             # Fibonacci Pivot
             fibonacci = self._calculate_fibonacci_pivot(
                 ohlc_data['high'],
@@ -2965,7 +3105,7 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             if fibonacci:
                 pivots_data['fibonacci'] = fibonacci
-            
+
             # Camarilla Pivot
             camarilla = self._calculate_camarilla_pivot(
                 ohlc_data['high'],
@@ -2974,7 +3114,7 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             if camarilla:
                 pivots_data['camarilla'] = camarilla
-            
+
             # Woody's Pivot
             woodys = self._calculate_woodys_pivot(
                 ohlc_data['high'],
@@ -2984,13 +3124,13 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             if woodys:
                 pivots_data['woodys'] = woodys
-            
+
             # Save to database if enabled
             if save_to_db and pivots_data:
                 self._save_pivot_points_to_db(ticker, target_date, pivots_data)
-            
+
             logger.info(f"✅ Calculated {len(pivots_data)} pivot types for {ticker}")
-            
+
             return {
                 'ticker': ticker,
                 'calculation_date': datetime.now().strftime('%Y-%m-%d'),
@@ -3002,7 +3142,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 'error': False,
                 'source': 'calculated'
             }
-            
+
         except Exception as e:
             logger.error(f"Error calculating pivot points for {ticker}: {e}")
             return {
@@ -3010,6 +3150,150 @@ class DatabaseIntegratedTechnicalCalculator:
                 'error': True,
                 'message': str(e)
             }
+
+#    def calculate_pivot_points(self, ticker: str, target_date: Optional[date] = None, 
+#                               save_to_db: bool = True) -> Dict:
+#        """
+#        Calculate all 4 pivot point types for a ticker
+#        
+#        Uses previous trading day's OHLC by default. Implements database-first pattern:
+#        1. Check database for cached pivots
+#        2. If missing, fetch OHLC data (database -> yfinance fallback)
+#        3. Calculate all pivot types
+#        4. Save to database if enabled
+#        
+#        Args:
+#            ticker: Stock ticker symbol
+#            target_date: Date for pivot calculation (default: yesterday's trading day)
+#            save_to_db: Whether to save calculated pivots to database
+#            
+#        Returns:
+#            Dict with all 4 pivot types and calculation metadata:
+#            {
+#                'ticker': str,
+#                'calculation_date': str,
+#                'ohlc_date': str,
+#                'classic': {...},
+#                'fibonacci': {...},
+#                'camarilla': {...},
+#                'woodys': {...},
+#                'error': bool
+#            }
+#        """
+#        logger.info(f"📍 Calculating pivot points for {ticker}")
+#        
+#        try:
+#            # Determine target date (previous trading day if not specified)
+#            if target_date is None:
+#                from .performance import get_last_completed_trading_day
+#                last_trading_day = get_last_completed_trading_day()
+#                
+#                # Use previous trading day (pivots calculated from yesterday's OHLC)
+#                target_date = last_trading_day - timedelta(days=1)
+#                
+#                # Ensure it's a trading day
+#                from .performance import is_us_trading_day
+#                while not is_us_trading_day(target_date):
+#                    target_date -= timedelta(days=1)
+#                
+#                logger.info(f"Using previous trading day: {target_date}")
+#            
+#            # Check database cache first
+#            cached_pivots = self._get_pivot_points_from_db(ticker, target_date)
+#            if cached_pivots:
+#                logger.info(f"✅ Using cached pivot points for {ticker}")
+#                return {
+#                    'ticker': ticker,
+#                    'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+#                    'ohlc_date': target_date.strftime('%Y-%m-%d'),
+#                    'classic': cached_pivots.get('classic'),
+#                    'fibonacci': cached_pivots.get('fibonacci'),
+#                    'camarilla': cached_pivots.get('camarilla'),
+#                    'woodys': cached_pivots.get('woodys'),
+#                    'error': False,
+#                    'source': 'database_cache'
+#                }
+#            # ---- Patch P1: normalize target_date to a pure date (avoid timestamp mismatch)
+#            if isinstance(target_date, datetime):
+#                target_date = target_date.date()
+#            elif isinstance(target_date, pd.Timestamp):
+#                target_date = target_date.date()
+#            
+#            # Fetch OHLC data for target date
+#            ohlc_data = self._get_pivot_ohlc(ticker, target_date)
+#            
+#            if not ohlc_data:
+#                return {
+#                    'ticker': ticker,
+#                    'error': True,
+#                    'message': f'Unable to fetch OHLC data for {ticker} on {target_date}'
+#                }
+#            
+#            # Calculate all pivot types
+#            pivots_data = {}
+#            
+#            # Classic Pivot
+#            classic = self._calculate_classic_pivot(
+#                ohlc_data['high'], 
+#                ohlc_data['low'], 
+#                ohlc_data['close']
+#            )
+#            if classic:
+#                pivots_data['classic'] = classic
+#            
+#            # Fibonacci Pivot
+#            fibonacci = self._calculate_fibonacci_pivot(
+#                ohlc_data['high'],
+#                ohlc_data['low'],
+#                ohlc_data['close']
+#            )
+#            if fibonacci:
+#                pivots_data['fibonacci'] = fibonacci
+#            
+#            # Camarilla Pivot
+#            camarilla = self._calculate_camarilla_pivot(
+#                ohlc_data['high'],
+#                ohlc_data['low'],
+#                ohlc_data['close']
+#            )
+#            if camarilla:
+#                pivots_data['camarilla'] = camarilla
+#            
+#            # Woody's Pivot
+#            woodys = self._calculate_woodys_pivot(
+#                ohlc_data['high'],
+#                ohlc_data['low'],
+#                ohlc_data['close'],
+#                ohlc_data['open']
+#            )
+#            if woodys:
+#                pivots_data['woodys'] = woodys
+#            
+#            # Save to database if enabled
+#            if save_to_db and pivots_data:
+#                self._save_pivot_points_to_db(ticker, target_date, pivots_data)
+#            
+#            logger.info(f"✅ Calculated {len(pivots_data)} pivot types for {ticker}")
+#            
+#            return {
+#                'ticker': ticker,
+#                'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+#                'ohlc_date': target_date.strftime('%Y-%m-%d'),
+#                'classic': pivots_data.get('classic'),
+#                'fibonacci': pivots_data.get('fibonacci'),
+#                'camarilla': pivots_data.get('camarilla'),
+#                'woodys': pivots_data.get('woodys'),
+#                'error': False,
+#                'source': 'calculated'
+#            }
+#            
+#        except Exception as e:
+#            logger.error(f"Error calculating pivot points for {ticker}: {e}")
+#            return {
+#                'ticker': ticker,
+#                'error': True,
+#                'message': str(e)
+#            }
 
 
 # Factory function for backward compatibility

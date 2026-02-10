@@ -118,7 +118,7 @@ SECTOR_ETFS = [
 
 
 # Default custom tickers (remain as tickers only)
-CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'ONEQ', 'TSM']
+CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'ONEQ', 'TSM', 'MU']
 
 # Helper functions to work with ticker/name pairs
 def get_tickers_only(ticker_list):

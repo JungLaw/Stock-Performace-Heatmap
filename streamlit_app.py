@@ -1,3 +1,4 @@
+# Stamp: Tue, Feb 10, 2026 4:12 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -6,7 +7,6 @@ across different time periods and asset groups.
 
 Run with: streamlit run streamlit_app.py
 """
-
 import streamlit as st
 import sys
 from pathlib import Path
@@ -1592,7 +1592,7 @@ def show_technical_analysis_dashboard():
 
                         st.session_state.technical_analysis_save_to_db = bool(resolved_save_to_db)
 
-                        extremes_result = technical_calculator.calculate_52_week_analysis(ticker)
+                        extremes_result = technical_calculator.calculate_52_week_analysis(ticker, save_to_db=resolved_save_to_db,)
                         if extremes_result.get("success"):
                             st.session_state.price_extremes_data = extremes_result["periods"]
 
@@ -1731,7 +1731,8 @@ def show_technical_analysis_dashboard():
                     with st.spinner("Updating 52-week analysis..."):
                         extremes_result = st.session_state.technical_calculator.calculate_52_week_analysis(
                             ticker,
-                            user_52w_high=custom_52w_high
+                            user_52w_high=custom_52w_high,
+                            save_to_db=resolved_save_to_db,
                         )
                         
                         if extremes_result.get('error'):
@@ -1758,7 +1759,7 @@ def show_technical_analysis_dashboard():
                     pivot_data = st.session_state.technical_calculator.calculate_pivot_points(
                         ticker=ticker,
                         target_date=None,  # Auto-detect previous trading day
-                        save_to_db=should_save_to_db
+                        save_to_db=resolved_save_to_db   #should_save_to_db
                     )
                     st.session_state.pivot_points_data = pivot_data
                     st.session_state.pivot_points_ticker = ticker

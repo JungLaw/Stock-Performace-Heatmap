@@ -1,3 +1,4 @@
+# Stamp: Tue, Feb 10, 2026 4:12 PM
 """
 Database-Integrated Performance Calculator
 
@@ -5,7 +6,6 @@ This version uses the SQLite database first for historical data,
 only falling back to yfinance for missing data or current prices.
 Implements the agreed database-first lookup pattern.
 """
-
 import pandas as pd
 import numpy as np
 import sqlite3
