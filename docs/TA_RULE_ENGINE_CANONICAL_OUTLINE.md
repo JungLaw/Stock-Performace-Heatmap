@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.0 
+- Version: 3.1 
 - Created: 1/12/26
-- Last update: 1/12/26 @ 435P
+- Last update: 2/14/26 @ 126P
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -15,7 +15,9 @@
 
 * OHLCV retrieval (daily semantics)
 * Trading-calendar correctness (“last completed trading day” logic)
-* DB caching with deterministic fallback (e.g., yfinance)
+* DB caching with deterministic fallback (yfinance) **under explicit policies**:
+  - **TA dashboards:** session-only by default unless user opts in
+  - **Rolling Heatmap Scenario B:** DB-first + missing-range fetch; DB wins overlaps; no default persistence
 * Canonical index alignment and dtype normalization
 
 ### 2. Option A — Baseline indicators (price-driven)
@@ -177,8 +179,31 @@ Examples:
 * Stable adapter contract
 * Group selection (custom tickers, ETFs, etc.)
 
+---
+#### Rolling Heatmap Data Acquisition Milestone — Scenario B (DB-first missing-range fetch)
+(Added: 2/14/26)
+**Goal:** Allow anchors prior to current DB coverage (e.g., pre 10/16/23) by fetching **only missing ranges**, while treating DB as authoritative on overlaps.
 
-**Rolling Heatmap UX Milestone — Layout & Semantics (UI-only)**
+**Rules (authoritative):**
+- **DB-first:** use `daily_prices` when coverage exists.
+- **Missing-range fetch:** fetch only gaps (head/tail/interior) from yfinance.
+- **Overlap resolution:** DB wins whenever dates collide (“DB keeps its seat”).
+- **Persistence policy:** Rolling Heatmap must **not** write to `daily_prices` by default; fetched data is session-only unless an explicit save workflow is triggered.
+
+**Buffer policy (agreed):**
+- Anchor-relative buffer = **386 calendar days** (365 + 21 safety margin), to satisfy 200-trading-day needs.
+
+**Acceptance criteria:**
+- Deep anchor dates (e.g., 2018/2019) render full rolling heatmap with populated indicators.
+- For tickers with historical DB coverage (e.g., META 2018–2020), indicator series must reflect full merged history and must not silently truncate to recent DB segments (e.g., 2023-10-18).
+- Dataset merge logic must ensure:
+  - final `df_ind.index.min()` ≤ (anchor_date − 386 days)
+  - no interior gaps remain after DB + yfinance merge
+- No new tickers are persisted to `daily_prices` from Rolling Heatmap by default.
+- For DB-backed tickers, yfinance is only called when DB coverage is missing.
+
+---
+#### **Rolling Heatmap UX Milestone — Layout & Semantics (UI-only)**
 
 **Must-haves (Phase III, blocking for usability):**
 - Dates rendered at the **top** of the heatmap.
@@ -232,6 +257,10 @@ Any gap discovered becomes:
 🟡 Phase III is **in progress**.
 Rolling heatmap core is functional and validated.
 
+✅ Step 1 complete — TA persistence policy fixed (no TA writes to `daily_prices` when save_to_db=False).
+✅ Pivot Points date-normalization bug fixed (restored pivot table display).
+✅ Fingerprinting instrumentation used for runtime path proof; later removed after verification.
+
 ---
 
 ## MAJOR PHASE IV — Semantic Presentation & Decision Support
@@ -283,6 +312,33 @@ This is a **design choice**, not a missing feature.
 This is now the **official project path**.
 
 ---
+## Open Architectural Decisions (Pending Resolution)
+(Added: 2/14/26)
+
+The following items remain unresolved and require explicit policy decisions before Phase III/IV stabilization:
+
+### 1. `price_extremes_periods` Table
+- Question: Should close-based extremes be cached persistently?
+- Risk: Stale extremes vs unnecessary recomputation.
+- Decision required:
+  - Keep with auto-invalidation logic, OR
+  - Compute on demand (session-only) and remove table.
+
+### 2. `pivot_points_daily` Table
+- Question: Should pivot calculations ever persist to DB?
+- Current leaning: Pivot Points follow TA persistence policy (session-only unless explicitly saved).
+- Decision required: Remove persistence entirely or formalize opt-in workflow.
+
+### 3. `technical_indicators_daily` / `technical_indicators_variants_daily`
+- Question: Are these historical indicator tables required for future features?
+- Risk: Redundant storage vs performance gain.
+- Decision required:
+  - Keep as performance optimization layer, OR
+  - Remove to simplify system and reduce data integrity complexity.
+
+No structural DB changes should occur until these decisions are finalized.
+
+---
 
 ## Current Project State (Snapshot)
 
@@ -302,9 +358,9 @@ This is now the **official project path**.
 
 ## What Comes Next (Immediately)
 
-**Next active workstream:**
-
-> **Redesign the rolling heatmap layout and semantics**
+**Next active workstream (in order):**
+1) **Scenario B — Rolling Heatmap DB-first missing-range fetch (386-day buffer, DB wins overlaps)**  
+2) Rolling Heatmap UX milestone — layout & semantics polish (dates top, price row, ordering persistence)
 
 Only after that:
 
