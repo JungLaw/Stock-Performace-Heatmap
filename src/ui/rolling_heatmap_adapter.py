@@ -1,3 +1,4 @@
+# Stamp: Tue, Feb 10, 2026 4:12 PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 

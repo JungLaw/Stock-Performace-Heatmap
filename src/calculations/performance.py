@@ -75,7 +75,9 @@ def get_us_market_holidays(year: int) -> List[datetime]:
         2027: date(2027, 3, 26),
         2028: date(2028, 4, 14),
         2029: date(2029, 3, 30),
-        2030: date(2030, 4, 19)
+        2030: date(2030, 4, 19),
+        2031: date(2031, 4, 11),
+        2032: date(2032, 3, 26),
     }
     if year in easter_approximations:
         holidays.append(datetime.combine(easter_approximations[year], datetime.min.time()))

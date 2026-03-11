@@ -1,4 +1,4 @@
-# Stamp: Tue, Feb 10, 2026 4:12 PM
+# Stamp: Wed, March 11, 2026 6:00PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -288,6 +288,217 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.error(f"Error saving OHLCV data for {ticker}: {e}")
             return False
             
+# technical.py
+
+    def _get_ohlcv_data_for_heatmap_scenario_b(
+        self,
+        *,
+        ticker: str,
+        window_days: int,
+        anchor_mode: str,
+        anchor_date: Any | None,
+        historical_buffer_days: int = 435,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Scenario B OHLCV acquisition path for Rolling Heatmap only.
+
+        Rules enforced:
+        - DB-first coverage detection
+        - Fetch only missing trading-session ranges from yfinance
+        - DB authoritative on overlaps
+        - No implicit persistence from this path
+        - Anchor-relative historical buffer policy
+        """
+        try:
+            # Local import to minimize module-level import churn / circular-risk
+            from .performance import is_us_trading_day, get_last_completed_trading_day
+
+            # Resolve the effective anchor date from the UI contract.
+            # UI sends anchor_mode in {"asof", "start"} and may separately pass anchor_date.
+            if anchor_date is not None:
+                requested_anchor_date = pd.Timestamp(anchor_date).to_pydatetime()
+                if requested_anchor_date.tzinfo is not None:
+                    requested_anchor_date = requested_anchor_date.replace(tzinfo=None)
+                requested_anchor_date = pd.Timestamp(requested_anchor_date).normalize().to_pydatetime()
+
+                # Move backward to the nearest valid trading day
+                while not is_us_trading_day(requested_anchor_date):
+                    requested_anchor_date -= timedelta(days=1)
+            else:
+                requested_anchor_date = get_last_completed_trading_day()
+                requested_anchor_date = pd.Timestamp(requested_anchor_date).normalize().to_pydatetime()
+
+            # Build the acquisition window in a way that matches the downstream
+            # rolling-window contract:
+            # - asof: visible window ends at anchor date
+            # - start: visible window starts at anchor date
+            if anchor_mode == "start":
+                earliest_heatmap_date = requested_anchor_date
+
+                # Approximate forward calendar span for the requested visible window,
+                # then move to the nearest valid trading day on or after that date.
+                requested_end_date = requested_anchor_date + timedelta(days=max(int(window_days) - 1, 0))
+                requested_end_date = pd.Timestamp(requested_end_date).normalize().to_pydatetime()
+                while not is_us_trading_day(requested_end_date):
+                    requested_end_date += timedelta(days=1)
+            else:
+                # Default / "asof" behavior
+                requested_end_date = requested_anchor_date
+                earliest_heatmap_date = requested_end_date - timedelta(days=max(int(window_days) - 1, 0))
+
+            raw_required_start_date = earliest_heatmap_date - timedelta(days=int(historical_buffer_days))
+            raw_required_start_date = pd.Timestamp(raw_required_start_date).normalize().to_pydatetime()
+
+            required_start_date = raw_required_start_date
+            while not is_us_trading_day(required_start_date):
+                required_start_date += timedelta(days=1)
+
+            logger.info(
+                f"[Scenario B] {ticker}: "
+                f"window_days={window_days}, anchor_mode={anchor_mode}, "
+                f"anchor_date={requested_anchor_date:%Y-%m-%d}, "
+                f"raw_required_start={raw_required_start_date:%Y-%m-%d}, "
+                f"adjusted_required_start={required_start_date:%Y-%m-%d}, "
+                f"requested_end={requested_end_date:%Y-%m-%d}, "
+                f"historical_buffer_days={historical_buffer_days}, "
+                f"non_persistent=True"
+            )
+
+            # DB-first read across the full required window
+            db_data = self._fetch_ohlcv_data_from_db(
+                ticker,
+                required_start_date,
+                requested_end_date,
+            )
+
+            db_count = 0 if db_data is None else len(db_data)
+
+            # Normalize DB index and build actual DB trading-date set
+            actual_db_dates = set()
+            if db_data is not None and not db_data.empty:
+                db_data = db_data.copy().sort_index()
+                db_index = pd.DatetimeIndex(db_data.index)
+                if db_index.tz is not None:
+                    db_index = db_index.tz_localize(None)
+                db_data.index = db_index
+                actual_db_dates = {ts.date() for ts in db_index}
+            else:
+                db_data = None
+
+            # Build expected trading-session sequence for the required window
+            expected_trading_dates = []
+            cursor = required_start_date
+            while cursor <= requested_end_date:
+                if is_us_trading_day(cursor):
+                    expected_trading_dates.append(cursor.date())
+                cursor += timedelta(days=1)
+
+            expected_position = {d: i for i, d in enumerate(expected_trading_dates)}
+
+            # Identify missing trading sessions
+            missing_trading_dates = sorted(
+                d for d in expected_trading_dates
+                if d not in actual_db_dates
+            )
+
+            # Compress missing trading sessions into contiguous expected-session ranges
+            missing_ranges = []
+            if missing_trading_dates:
+                range_start = missing_trading_dates[0]
+                prev_date = missing_trading_dates[0]
+
+                for curr_date in missing_trading_dates[1:]:
+                    if expected_position[curr_date] == expected_position[prev_date] + 1:
+                        prev_date = curr_date
+                    else:
+                        missing_ranges.append((
+                            datetime.combine(range_start, datetime.min.time()),
+                            datetime.combine(prev_date, datetime.min.time()),
+                        ))
+                        range_start = curr_date
+                        prev_date = curr_date
+
+                missing_ranges.append((
+                    datetime.combine(range_start, datetime.min.time()),
+                    datetime.combine(prev_date, datetime.min.time()),
+                ))
+
+            logger.info(
+                f"[Scenario B] {ticker}: missing_ranges="
+                f"{[(s.strftime('%Y-%m-%d'), e.strftime('%Y-%m-%d')) for s, e in missing_ranges]}"
+            )
+
+            # Gap-fill only the missing ranges; never persist from Scenario B
+            fetched_frames = []
+            yf_rows = 0
+
+            for gap_start, gap_end in missing_ranges:
+                if gap_start > gap_end:
+                    continue
+
+                gap_start = pd.Timestamp(gap_start).normalize().to_pydatetime()
+                gap_end = pd.Timestamp(gap_end).normalize().to_pydatetime()
+
+                gap_df = self._fetch_ohlcv_data_from_yfinance(
+                    ticker,
+                    gap_start,
+                    gap_end,
+                    save_to_db=False,
+                )
+
+                if gap_df is not None and not gap_df.empty:
+                    gap_df = gap_df.copy()
+                    gap_index = pd.DatetimeIndex(gap_df.index)
+                    if gap_index.tz is not None:
+                        gap_index = gap_index.tz_localize(None)
+                    gap_df.index = gap_index
+
+                    fetched_frames.append(gap_df)
+                    yf_rows += len(gap_df)
+
+            # Merge with DB precedence on overlaps
+            frames = []
+            if db_data is not None and not db_data.empty:
+                frames.append(db_data)
+
+            frames.extend(fetched_frames)
+
+            if not frames:
+                logger.error(f"[Scenario B] No OHLCV data assembled for {ticker}")
+                return None
+
+            combined = pd.concat(frames).sort_index()
+
+            # DB precedence: DB data is concatenated first
+            overlap_count = int(combined.index.duplicated(keep="first").sum())
+            combined = combined[~combined.index.duplicated(keep="first")]
+
+            # Canonicalize final frame
+            combined = combined.sort_index()
+            combined = combined.loc[
+                (combined.index >= pd.Timestamp(required_start_date)) &
+                (combined.index <= pd.Timestamp(requested_end_date))
+            ]
+
+            if combined.empty:
+                logger.error(f"[Scenario B] Combined OHLCV frame is empty for {ticker}")
+                return None
+
+            logger.info(
+                f"[Scenario B] {ticker}: "
+                f"db_rows={db_count}, gaps={len(missing_ranges)}, "
+                f"yf_rows={yf_rows}, overlap_resolved_db_wins={overlap_count}, "
+                f"final_rows={len(combined)}, "
+                f"final_window={combined.index.min():%Y-%m-%d}→{combined.index.max():%Y-%m-%d}"
+            )
+
+            return combined
+
+        except Exception as e:
+            logger.error(f"[Scenario B] Error assembling OHLCV data for {ticker}: {e}")
+            return None
+
+
     def _get_sufficient_ohlcv_data(self, ticker: str, periods_needed: int = 200, save_to_db: bool = True) -> Optional[pd.DataFrame]:
         """
         Get sufficient OHLCV data for technical analysis calculations
@@ -359,6 +570,7 @@ class DatabaseIntegratedTechnicalCalculator:
         save_to_db: bool = False,
         config: Dict[str, Any] | None = None,
         rules_path: Union[str, Path] = "master_rules_normalized.json",
+        ohlcv_request: Dict[str, Any] | None = None,
     ) -> Optional[pd.DataFrame]:
         """
         Fetch sufficient OHLCV data for `ticker` and compute Option-C indicators
@@ -371,11 +583,20 @@ class DatabaseIntegratedTechnicalCalculator:
         Returns:
             DataFrame with OHLCV + indicator columns, or None on failure.
         """
-        df = self._get_sufficient_ohlcv_data(
-            ticker=ticker,
-            periods_needed=200,
-            save_to_db=save_to_db,
-        )
+        if ohlcv_request and ohlcv_request.get("mode") == "rolling_heatmap_scenario_b":
+            df = self._get_ohlcv_data_for_heatmap_scenario_b(
+                ticker=ticker,
+                window_days=int(ohlcv_request["window_days"]),
+                anchor_mode=str(ohlcv_request["anchor_mode"]),
+                anchor_date=ohlcv_request.get("anchor_date"),
+                historical_buffer_days=int(ohlcv_request.get("historical_buffer_days", 435)),
+            )
+        else:
+            df = self._get_sufficient_ohlcv_data(
+                ticker=ticker,
+                periods_needed=200,
+                save_to_db=save_to_db,
+            )
 
         if df is None or df.empty:
             logger.error(f"Unable to retrieve sufficient OHLCV data for {ticker}")
@@ -595,6 +816,7 @@ class DatabaseIntegratedTechnicalCalculator:
         indicators: list[str] | None = None,
         use_meta_coverage: bool = False,
         return_type: str = "scores",     # "rolling", "both"
+        ohlcv_request: Dict[str, Any] | None = None,
     ) -> Any:     #Dict[str, Dict[str, pd.Series]]:
         """
         Run the rulebook/DSL engine on the Option-C indicator DataFrame for `ticker`.
@@ -614,6 +836,8 @@ class DatabaseIntegratedTechnicalCalculator:
             ticker=ticker,
             save_to_db=save_to_db,
             config=config,
+            ohlcv_request=ohlcv_request,
+            rules_path=rules_path,
         )
 
         if df_ind is None or df_ind.empty:
@@ -2306,7 +2530,19 @@ class DatabaseIntegratedTechnicalCalculator:
 
         # Compute if cache miss (or cache disabled)
         if df_ind is None or scores is None:
-            df_ind = self.calculate_optionc_indicators(ticker=ticker, save_to_db=False)
+            ohlcv_request = {
+                "mode": "rolling_heatmap_scenario_b",
+                "window_days": window_days,
+                "anchor_mode": anchor_mode,
+                "anchor_date": anchor_date,
+                "historical_buffer_days": 435,
+            }
+
+            df_ind = self.calculate_optionc_indicators(
+                ticker=ticker,
+                save_to_db=False,
+                ohlcv_request=ohlcv_request,
+            )
             if df_ind is None or df_ind.empty:
                 return {"status": "empty", "ticker": ticker, "dates": [], "short_term": None, "extras": {}}
 
@@ -2315,6 +2551,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 feature_scope="heatmap",
                 use_meta_coverage=True,
                 save_to_db=False,  # UI-only: never persist
+                ohlcv_request=ohlcv_request,
             )
 
             if cache_enabled:
