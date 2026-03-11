@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.1 
+- Version: 3.2 
 - Created: 1/12/26
-- Last update: 2/14/2026 @ 126P
+- Last update: 3/11/2026 @ 6:46P
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -190,14 +190,23 @@ Examples:
 - **Overlap resolution:** DB wins whenever dates collide (“DB keeps its seat”).
 - **Persistence policy:** Rolling Heatmap must **not** write to `daily_prices` by default; fetched data is session-only unless an explicit save workflow is triggered.
 
-**Buffer policy (agreed):**
-- Anchor-relative buffer = **386 calendar days** (365 + 21 safety margin), to satisfy 200-trading-day needs.
+**Buffer policy (revised):**
+- Anchor-relative buffer = **435 calendar days**.
+
+**Rationale:**
+- Maintains coverage for ≥200-trading-day indicators.
+- Provides sufficient headroom for potential future indicators
+  such as a **300-day moving average** without requiring a
+  new acquisition policy change.
+
+The buffer remains **anchor-relative** and applies only to the
+Rolling Heatmap Scenario B acquisition path.
 
 **Acceptance criteria:**
 - Deep anchor dates (e.g., 2018/2019) render full rolling heatmap with populated indicators.
 - For tickers with historical DB coverage (e.g., META 2018–2020), indicator series must reflect full merged history and must not silently truncate to recent DB segments (e.g., 2023-10-18).
 - Dataset merge logic must ensure:
-  - final `df_ind.index.min()` ≤ (anchor_date − 386 days)
+  - final `df_ind.index.min()` ≤ (anchor_date − 435 days)
   - no interior gaps remain after DB + yfinance merge
 - No new tickers are persisted to `daily_prices` from Rolling Heatmap by default.
 - For DB-backed tickers, yfinance is only called when DB coverage is missing.
@@ -348,9 +357,10 @@ No structural DB changes should occur until these decisions are finalized.
   * Core engine: ✅
   * Option D: ✅
   * Option E/F: ⏸️ gated
+
 * Phase III:
 
-  * Rolling heatmap: 🟡 active
+  * Rolling heatmap acquisition (Scenario B): ✅ complete
   * Layout & semantics: next
 * Phase IV: 🔒 future
 
@@ -359,7 +369,7 @@ No structural DB changes should occur until these decisions are finalized.
 ## What Comes Next (Immediately)
 
 **Next active workstream (in order):**
-1) **Scenario B — Rolling Heatmap DB-first missing-range fetch (386-day buffer, DB wins overlaps)**  
+1) **Scenario B — Rolling Heatmap DB-first missing-range fetch (435-day buffer, DB wins overlaps)**  
 2) Rolling Heatmap UX milestone — layout & semantics polish (dates top, price row, ordering persistence)
 
 Only after that:
