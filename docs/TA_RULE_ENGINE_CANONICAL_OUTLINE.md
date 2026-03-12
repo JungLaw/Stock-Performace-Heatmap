@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2 
+- Version: 3.2.2 
 - Created: 1/12/26
-- Last update: 3/11/2026 @ 6:46P
+- Last update: 3/12/2026 @ 11:07A
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -199,8 +199,10 @@ Examples:
   such as a **300-day moving average** without requiring a
   new acquisition policy change.
 
-The buffer remains **anchor-relative** and applies only to the
-Rolling Heatmap Scenario B acquisition path.
+The buffer remains **anchor-relative** and applies only to the Rolling Heatmap Scenario B acquisition path.
+
+**Policy lock (important):**
+The 435-day buffer replaces the earlier 386-day policy used during initial Scenario B design. Future revisions must **not revert to 386** unless the indicator inventory is formally reduced below the current requirements.
 
 **Acceptance criteria:**
 - Deep anchor dates (e.g., 2018/2019) render full rolling heatmap with populated indicators.
@@ -369,10 +371,15 @@ No structural DB changes should occur until these decisions are finalized.
 ## What Comes Next (Immediately)
 
 **Next active workstream (in order):**
-1) **Scenario B — Rolling Heatmap DB-first missing-range fetch (435-day buffer, DB wins overlaps)**  
-2) Rolling Heatmap UX milestone — layout & semantics polish (dates top, price row, ordering persistence)
+1) **Rolling Heatmap UX milestone — layout & semantics polish**
+   - Dates rendered at top
+   - Price row (display-only)
+   - Stable row ordering
+   - Consistent column widths
+2) UX feedback loop into **Option E backlog definition**
+   - Identify missing numeric primitives surfaced by UI usage
+   - Formalize Option E tasks (slopes, derived metrics, band relations)
 
 Only after that:
-
-* Option E backlog formalization
-* Phase II continuation
+- Phase II continuation via **Option E**
+- Later semantic expansion via **Option F**
