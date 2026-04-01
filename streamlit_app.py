@@ -1,4 +1,4 @@
-# Stamp: Tue, Feb 10, 2026 4:12 PM
+# Stamp: Sat, March 14, 2026 6:00PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1817,18 +1817,16 @@ def show_technical_analysis_dashboard():
                     value=False,
                     key="rh_cache_enabled",
                     help="Caches rolling inputs per ticker for faster browsing within this session only. "
-                         "'On': deep-dive into multiple dates/windows. 'Off': sampling many tickers once each.",
+                        "'On': deep-dive into multiple dates/windows. 'Off': sampling many tickers once each.",
                 )
 
-            # Optional anchor date: avoid st.date_input(value=None) to keep compatibility across Streamlit versions.
-            # We use a checkbox to control whether an anchor is applied.
             with cD:
                 use_anchor_date = st.checkbox(
                     "Use anchor date",
                     value=False,
                     key="rh_use_anchor_date",
                     help="If unchecked, the builder uses the latest available trading day (as-of) "
-                         "or the earliest available trading day (start), depending on Anchor mode.",
+                        "or the earliest available trading day (start), depending on Anchor mode.",
                 )
 
             anchor_date = None
@@ -1941,7 +1939,7 @@ def show_technical_analysis_dashboard():
                 defs = INDICATOR_DEFS
 
                 # Sync the row order between heatmap & ordering drop-down
-                order_view = list(st.session_state.rh_row_order)  # snapshot for stable rendering
+                order_view = list(st.session_state.rh_row_order)
                 for idx, key in enumerate(order_view):
                     label = defs.get(key, {}).get("display_name", key)
 
@@ -1951,13 +1949,13 @@ def show_technical_analysis_dashboard():
                     down_disabled = idx == (len(st.session_state.rh_row_order) - 1)
 
                     if c1.button("↑", key=f"rh_up_{idx}_{key}", disabled=up_disabled):
-                        order = list(st.session_state.rh_row_order)  # copy
+                        order = list(st.session_state.rh_row_order)
                         order[idx - 1], order[idx] = order[idx], order[idx - 1]
                         st.session_state.rh_row_order = order
                         st.rerun()
 
                     if c2.button("↓", key=f"rh_down_{idx}_{key}", disabled=down_disabled):
-                        order = list(st.session_state.rh_row_order)  # copy
+                        order = list(st.session_state.rh_row_order)
                         order[idx], order[idx + 1] = order[idx + 1], order[idx]
                         st.session_state.rh_row_order = order
                         st.rerun()
@@ -1969,25 +1967,62 @@ def show_technical_analysis_dashboard():
 
             rolling_payload = _extract_rolling_signals_from_data(data)
 
+            # ----------------------------------------
+            # Hover-only OHLCV / indicator context
+            # ----------------------------------------
+            hover_ohlcv_df = None
+            try:
+                hover_ohlcv_df = technical_calculator.calculate_optionc_indicators(
+                    ticker=ticker,
+                    save_to_db=False,
+                    ohlcv_request={
+                        "mode": "rolling_heatmap_scenario_b",
+                        "window_days": int(rolling_days),
+                        "anchor_mode": str(anchor_mode),
+                        "anchor_date": anchor_date,
+                        "historical_buffer_days": 435,
+                    },
+                )
+            except Exception:
+                hover_ohlcv_df = None
+
             hm = build_plotly_heatmap_inputs(
                 rolling_payload=rolling_payload,
-                indicator_keys=ordered_selected_keys,  # selected_keys,
+                indicator_keys=ordered_selected_keys,
+                ohlcv_df=hover_ohlcv_df,
             )
             # populate rolling heatmap & add title, if desired
             fig = make_rolling_heatmap_figure(hm, title="")
-
+            
             st.plotly_chart(fig, use_container_width=True)
+
+            # ----------------------------------------
+            # Educational expander (row-stable only)
+            # ----------------------------------------
+            with st.expander("📘 Indicator Definitions", expanded=False):
+                for key in ordered_selected_keys:
+                    info = INDICATOR_DEFS.get(key, {})
+                    display_name = info.get("display_name", key)
+                    definition = info.get("definition", "")
+                    how_to_read = info.get("how_to_read", "")
+
+                    st.markdown(f"**{display_name}**")
+                    if definition:
+                        st.markdown(f"- **Definition:** {definition}")
+                    if how_to_read:
+                        st.markdown(f"- **How to Read:** {how_to_read}")
+                    st.markdown("")
 
             # Optional debug view (safe to keep, collapsed)
             with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
-                st.json(data.get("rolling_signals", {}))
+                st.json(data.get("rolling_signals", {}))                
         else:
             st.info("No rolling signals available yet for this ticker.")
 
     elif ticker:
         st.info(f"👆 Click 'Analyze Stock' to get technical analysis for {ticker}")
     else:
-        st.info("👆 Enter a stock ticker symbol above to get started")
+        st.info("👆 Enter a stock ticker symbol above to get started")             
 
 def show_performance_heatmaps():
     """Original Performance Heatmaps Dashboard (Existing Functionality)"""
