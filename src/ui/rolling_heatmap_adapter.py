@@ -652,6 +652,31 @@ def build_plotly_heatmap_inputs(
                         vol_rel = None
 
                 # ----------------------------
+                # Preformatted hover fragments (Price-row)
+                # ----------------------------
+                delta_abs_fmt = format_signed_number(delta_abs, decimals=2)
+                delta_pct_suffix = f" ({format_signed_percent(delta_pct, decimals=2)})" if delta_pct is not None else ""
+
+                volume_block = ""
+                if not _is_missing(vol):
+                    volume_block = f"Volume: {_abbr(float(vol))}<br>"
+
+                volume_vs_avg_block = ""
+                if not _is_missing(vol_rel) and not _is_missing(vol_avg):
+                    volume_vs_avg_block = (
+                        f"Volume vs 5D Avg: {format_signed_percent(vol_rel, decimals=1)} "
+                        f"({_abbr(float(vol_avg))})<br>"
+                    )
+
+                # price row stays display-only / non-semantic
+                trend_line = ""
+                signal_line = ""
+                rule_block = ""
+                notes_block = ""
+                definition_block = ""
+                how_to_read_block = ""
+
+                # ----------------------------
                 # Customdata enrichment
                 # ----------------------------
                 cd_row.append(
@@ -680,6 +705,18 @@ def build_plotly_heatmap_inputs(
                         # no educational text for price row
                         "definition": "",
                         "how_to_read": "",
+
+                        # preformatted hover fields
+                        "delta_abs_fmt": delta_abs_fmt,
+                        "delta_pct_suffix": delta_pct_suffix,
+                        "trend_line": trend_line,
+                        "signal_line": signal_line,
+                        "rule_block": rule_block,
+                        "notes_block": notes_block,
+                        "definition_block": definition_block,
+                        "how_to_read_block": how_to_read_block,
+                        "volume_block": volume_block,
+                        "volume_vs_avg_block": volume_vs_avg_block,
 
                         "meta": rolling_payload.get("meta", {}),
                     }
@@ -737,6 +774,22 @@ def build_plotly_heatmap_inputs(
             definition = defs.get(key, {}).get("definition", "")
             how_to_read = defs.get(key, {}).get("how_to_read", "")
 
+            # ----------------------------
+            # Preformatted hover fragments (Indicator-row)
+            # ----------------------------
+            delta_abs_fmt = format_signed_number(delta_abs, decimals=2)
+            delta_pct_suffix = f" ({format_signed_percent(delta_pct, decimals=2)})" if delta_pct is not None else ""
+            trend_line = f"Trend: {trend}<br>" if trend else ""
+            signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
+            rule_block = f"<br>Rule:<br>{rule_text}<br>" if rule_text else ""
+            notes_block = f"<br>Notes:<br>{rule_notes}<br>" if rule_notes else ""
+            definition_block = f"<br>Definition:<br>{definition}<br>" if definition else ""
+            how_to_read_block = f"<br>How to Read:<br>{how_to_read}<br>" if how_to_read else ""
+
+            # indicator rows do not use volume hover fields
+            volume_block = ""
+            volume_vs_avg_block = ""
+
             # z must be numeric; use NaN for missing
             z_row.append(float(s) if s is not None else float("nan"))
             text_row.append(format_cell_value(key, v))
@@ -757,6 +810,19 @@ def build_plotly_heatmap_inputs(
                     "rule_text": rule_text,
                     "definition": definition,
                     "how_to_read": how_to_read,
+
+                    # preformatted hover fields
+                    "delta_abs_fmt": delta_abs_fmt,
+                    "delta_pct_suffix": delta_pct_suffix,
+                    "trend_line": trend_line,
+                    "signal_line": signal_line,
+                    "rule_block": rule_block,
+                    "notes_block": notes_block,
+                    "definition_block": definition_block,
+                    "how_to_read_block": how_to_read_block,
+                    "volume_block": volume_block,
+                    "volume_vs_avg_block": volume_vs_avg_block,
+
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -792,6 +858,24 @@ def make_rolling_heatmap_figure(
         [1.0, "#006400"],   # strong buy
     ]
 
+    hovertemplate = (
+        "<b>%{customdata.display_name}</b><br>"
+        "Date: %{customdata.date}<br>"
+        "<br>"
+        "Value: %{customdata.formatted_value}<br>"
+        "Δ vs prior day: %{customdata.delta_abs_fmt}"
+        "%{customdata.delta_pct_suffix}<br>"
+        "%{customdata.trend_line}"
+        "%{customdata.signal_line}"
+        "%{customdata.rule_block}"
+        "%{customdata.notes_block}"
+        "%{customdata.definition_block}"
+        "%{customdata.how_to_read_block}"
+        "%{customdata.volume_block}"
+        "%{customdata.volume_vs_avg_block}"
+        "<extra></extra>"
+    )
+
     fig = go.Figure(
         data=go.Heatmap(
             z=hm.z,
@@ -803,13 +887,7 @@ def make_rolling_heatmap_figure(
             colorscale=colorscale,
             zmin=-2,
             zmax=2,
-            hovertemplate=(
-                "<b>%{customdata.display_name}</b><br>"
-                "Date: %{customdata.date}<br>"
-                "Value: %{customdata.raw_value}<br>"
-                "Score: %{customdata.score}<br>"
-                "<extra></extra>"
-            ),
+            hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
     )
