@@ -1,4 +1,4 @@
-# Stamp: Tue, Feb 10, 2026 4:12 PM
+# Stamp: Sat, March 14, 2026 6:00PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -233,6 +233,184 @@ def format_cell_value(indicator_key: str, v: Any) -> str:
         return _abbr(fv)
     return f"{fv:.2f}"
 
+# ----------------------------
+# Formatting + hover helpers (Phase III UX)
+# ----------------------------
+_SCORE_LABELS = {
+    -2: "Strong Sell",
+    -1: "Sell",
+     0: "Neutral",
+     1: "Buy",
+     2: "Strong Buy",
+}
+
+_SCORE_RULE_KEYS = {
+    -2: "strong_sell",
+    -1: "sell",
+     0: "neutral",
+     1: "buy",
+     2: "strong_buy",
+}
+
+
+def score_to_label(score: Any) -> str:
+    """Map numeric score to the user-facing signal label."""
+    try:
+        return _SCORE_LABELS.get(int(score), "")
+    except Exception:
+        return ""
+
+
+def score_to_rule_key(score: Any) -> Optional[str]:
+    """Map numeric score to the rulebook state key."""
+    try:
+        return _SCORE_RULE_KEYS.get(int(score))
+    except Exception:
+        return None
+
+
+def _is_missing(v: Any) -> bool:
+    """Safe missing-value check for None / NaN-like values."""
+    if v is None:
+        return True
+    try:
+        return bool(np.isnan(float(v)))
+    except Exception:
+        return False
+
+
+def format_hover_value(indicator_key: str, v: Any) -> str:
+    """
+    Format values for hover/expander display.
+
+    This is deliberately separate from format_cell_value() so we can keep
+    in-cell text stable while using cleaner hover-specific formatting.
+    """
+    if _is_missing(v):
+        return "—"
+
+    try:
+        fv = float(v)
+    except Exception:
+        return "—"
+
+    if indicator_key == "__PRICE__":
+        return f"${fv:,.2f}"
+    if indicator_key.startswith("RSI"):
+        return f"{fv:.1f}"
+    if indicator_key.startswith("CMF"):
+        return f"{fv:.3f}"
+    if indicator_key == "OBV" or indicator_key.startswith("OBV"):
+        return _abbr(fv)
+    return f"{fv:.2f}"
+
+
+def format_signed_number(v: Any, decimals: int = 2) -> str:
+    """Format signed numeric deltas such as +4.81 / -1.22."""
+    if _is_missing(v):
+        return "—"
+    try:
+        fv = float(v)
+    except Exception:
+        return "—"
+    return f"{fv:+,.{decimals}f}"
+
+
+def format_signed_percent(v: Any, decimals: int = 2) -> str:
+    """Format signed percentages such as +0.99% / -1.22%."""
+    if _is_missing(v):
+        return "—"
+    try:
+        fv = float(v)
+    except Exception:
+        return "—"
+    return f"{fv:+.{decimals}f}%"
+
+
+def safe_pct_delta(curr: Any, prev: Any) -> Optional[float]:
+    """
+    Compute percent change from prev -> curr as a display percentage.
+    Returns None when calculation is not valid.
+    """
+    if _is_missing(curr) or _is_missing(prev):
+        return None
+    try:
+        curr_f = float(curr)
+        prev_f = float(prev)
+    except Exception:
+        return None
+    if prev_f == 0:
+        return None
+    return ((curr_f - prev_f) / abs(prev_f)) * 100.0
+
+
+def infer_trend(curr: Any, prev: Any, tolerance: float = 1e-12) -> str:
+    """Return Rising / Falling / Flat for day-over-day movement."""
+    if _is_missing(curr) or _is_missing(prev):
+        return ""
+    try:
+        curr_f = float(curr)
+        prev_f = float(prev)
+    except Exception:
+        return ""
+    delta = curr_f - prev_f
+    if abs(delta) <= tolerance:
+        return "Flat"
+    return "Rising" if delta > 0 else "Falling"
+
+
+def _humanize_indicator_token(token: str) -> str:
+    """
+    Convert a raw rule token like EMA_20 into EMA(20), RSI_14 into RSI(14),
+    UO_7_14_28 into UO(7,14,28), etc.
+    """
+    if not token or "_" not in token:
+        return token
+
+    parts = token.split("_")
+    head, tail = parts[0], parts[1:]
+
+    if all(p.replace(".", "", 1).isdigit() for p in tail):
+        return f"{head}({','.join(tail)})"
+    return token
+
+
+def translate_rule_text(expr: str) -> str:
+    """
+    Lightweight adapter-side translation of common rule-expression patterns.
+
+    This is presentation-only. It should improve readability without altering
+    rule meaning. Unknown patterns fall back to the raw expression.
+    """
+    if not expr:
+        return ""
+
+    text = str(expr)
+
+    simple_replacements = {
+        "Close > ": "Price is above ",
+        "Close < ": "Price is below ",
+        "close > ": "Price is above ",
+        "close < ": "Price is below ",
+        " >= 0": " is non-negative",
+        " <= 0": " is non-positive",
+        "_slope > 0": " is rising",
+        "_slope < 0": " is falling",
+        "rising_2bar(": "has risen for 2 bars: ",
+        "falling_2bar(": "has fallen for 2 bars: ",
+        "abs(Close/": "Price is close to ",
+        "abs(close/": "Price is close to ",
+    }
+
+    for old, new in simple_replacements.items():
+        text = text.replace(old, new)
+
+    for raw in sorted(INDICATOR_DEFS.keys(), key=len, reverse=True):
+        text = text.replace(raw, _humanize_indicator_token(raw))
+
+    text = text.replace("ATRP_", "ATR%(")
+    text = text.replace(") ", ") ")
+    return text
 
 # ----------------------------
 # Contract adapter (pure)
