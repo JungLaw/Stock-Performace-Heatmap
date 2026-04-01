@@ -420,6 +420,7 @@ def build_plotly_heatmap_inputs(
     rolling_payload: dict,
     indicator_keys: List[str],
     indicator_defs: Optional[Dict[str, Dict[str, str]]] = None,
+    ohlcv_df: Optional[Any] = None,   # (for hover-only)
 ) -> PlotlyHeatmapInputs:
     """
     Convert the rolling heatmap “contract payload” into Plotly-ready matrices.
@@ -575,31 +576,111 @@ def build_plotly_heatmap_inputs(
     # ----------------------------
     if price_block and isinstance(price_block.get("values"), list):
         price_vals = price_block.get("values", [])
-        # Ensure length alignment to raw_dates
         if len(price_vals) == len(raw_dates):
             row_keys.append("__PRICE__")
             y.append("Price")
 
-            z_row = [float("nan")] * len(raw_dates)  # NaN => no score color semantics
+            z_row = [float("nan")] * len(raw_dates)
             text_row = []
             cd_row = []
 
-            for d_raw, v in zip(raw_dates, price_vals):
+            # ----------------------------------------
+            # Optional OHLCV context (hover-only)
+            # ----------------------------------------
+            volume_series = {}
+            volume_5d_avg = {}
+
+            if ohlcv_df is not None:
+                try:
+                    df = ohlcv_df.copy()
+                    df = df.sort_index()
+
+                    # Normalize index to string YYYY-MM-DD
+                    df.index = df.index.astype(str)
+
+                    if "Volume" in df.columns:
+                        volume_series = df["Volume"].to_dict()
+                        volume_5d_avg = (
+                            df["Volume"]
+                            .rolling(5)
+                            .mean()
+                            .to_dict()
+                        )
+                except Exception:
+                    volume_series = {}
+                    volume_5d_avg = {}
+
+            for idx, (d_raw, v) in enumerate(zip(raw_dates, price_vals)):
+                prev_v = price_vals[idx - 1] if idx > 0 else None
+
+                # ----------------------------
+                # Value + formatting
+                # ----------------------------
                 if v is None:
-                    text_row.append("")  # blank cell
+                    text_row.append("")
                 else:
                     try:
                         text_row.append(f"${float(v):,.2f}")
-                    except (TypeError, ValueError):
+                    except Exception:
                         text_row.append("")
 
+                formatted_value = format_hover_value("__PRICE__", v)
+
+                # ----------------------------
+                # Delta calculations
+                # ----------------------------
+                delta_abs = None
+                if not _is_missing(v) and not _is_missing(prev_v):
+                    try:
+                        delta_abs = float(v) - float(prev_v)
+                    except Exception:
+                        delta_abs = None
+
+                delta_pct = safe_pct_delta(v, prev_v)
+
+                # ----------------------------
+                # Volume metrics
+                # ----------------------------
+                vol = volume_series.get(d_raw)
+                vol_avg = volume_5d_avg.get(d_raw)
+
+                vol_rel = None
+                if vol is not None and vol_avg not in (None, 0):
+                    try:
+                        vol_rel = ((float(vol) - float(vol_avg)) / float(vol_avg)) * 100.0
+                    except Exception:
+                        vol_rel = None
+
+                # ----------------------------
+                # Customdata enrichment
+                # ----------------------------
                 cd_row.append(
                     {
                         "indicator_key": "__PRICE__",
                         "display_name": "Price",
                         "date": d_raw,
                         "raw_value": v,
+                        "formatted_value": formatted_value,
                         "score": None,
+                        "score_label": "",
+                        "delta_abs": delta_abs,
+                        "delta_pct": delta_pct,
+                        "trend": "",
+
+                        # volume metrics
+                        "volume": vol,
+                        "volume_5d_avg": vol_avg,
+                        "volume_vs_5d_avg_pct": vol_rel,
+
+                        # no rule semantics
+                        "rule_expr": "",
+                        "rule_notes": "",
+                        "rule_text": "",
+
+                        # no educational text for price row
+                        "definition": "",
+                        "how_to_read": "",
+
                         "meta": rolling_payload.get("meta", {}),
                     }
                 )
