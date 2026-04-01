@@ -446,15 +446,129 @@ def build_plotly_heatmap_inputs(
     rows: Dict[str, dict] = dict(rolling_payload.get("rows", {}))
     extras = rolling_payload.get("extras") if isinstance(rolling_payload.get("extras"), dict) else {}
     price_block = extras.get("price") if isinstance(extras.get("price"), dict) else None
-    raw_dates = dates   #x = dates    
+    raw_dates = dates
     x = [format_date_label(d) for d in raw_dates]
-    
-    # Inititalize variables
+
+    # Initialize variables
     row_keys: List[str] = []
     y: List[str] = []
     z: List[List[float]] = []
     text: List[List[str]] = []
     customdata: List[List[dict]] = []
+
+    # -------------------------------------------------
+    # Local rulebook lookup (presentation-only, adapter-owned)
+    # -------------------------------------------------
+    _rulebook_cache: Optional[dict] = None
+
+    def _load_rulebook() -> dict:
+        nonlocal _rulebook_cache
+        if _rulebook_cache is not None:
+            return _rulebook_cache
+
+        try:
+            import json
+            from pathlib import Path
+
+            candidate_paths = [
+                Path("master_rules_normalized.json"),
+                Path("src/config/master_rules_normalized.json"),
+            ]
+            for p in candidate_paths:
+                if p.exists():
+                    with p.open("r", encoding="utf-8") as f:
+                        _rulebook_cache = json.load(f)
+                    return _rulebook_cache
+        except Exception:
+            pass
+
+        _rulebook_cache = {}
+        return _rulebook_cache
+
+    def _rulebook_indicator_name(indicator_key: str) -> Optional[str]:
+        """
+        Map a row key like RSI_14 / STOCH_14_3_3 to the rulebook indicator family.
+        """
+        if indicator_key.startswith("RSI_"):
+            return "RSI"
+        if indicator_key.startswith("MACD_"):
+            return "MACD"
+        if indicator_key.startswith("STOCH_"):
+            return "Stochastic"
+        if indicator_key.startswith("ROC_"):
+            return "ROC"
+        if indicator_key.startswith("WILLR_"):
+            return "Williams_R"
+        if indicator_key.startswith("ADX_"):
+            return "ADX"
+        if indicator_key.startswith("MFI_"):
+            return "MFI"
+        if indicator_key.startswith("CMF_"):
+            return "CMF"
+        if indicator_key == "OBV" or indicator_key.startswith("OBV"):
+            return "OBV"
+        if indicator_key.startswith("EMA_"):
+            return "EMA"
+        if indicator_key.startswith("HMA_"):
+            return "HMA"
+        if indicator_key.startswith("CCI_"):
+            return "CCI"
+        if indicator_key.startswith("UO_"):
+            return "Ultimate_Oscillator"
+        if indicator_key.startswith("BullBearPower_"):
+            return "BullBearPower"
+        return None
+
+    def _rulebook_param_key(indicator_key: str) -> Optional[str]:
+        """
+        Extract the param portion from a row key.
+        Examples:
+          RSI_14 -> 14
+          MACD_12_26_9 -> 12_26_9
+          OBV -> 0
+        """
+        if indicator_key == "OBV":
+            return "0"
+        if "_" not in indicator_key:
+            return None
+        return indicator_key.split("_", 1)[1]
+
+    def _find_rule_block(indicator_key: str, score: Any) -> tuple[str, str, str]:
+        """
+        Return (rule_expr, rule_notes, rule_text) for the current indicator row + score.
+        Presentation-only. Falls back cleanly on misses.
+        """
+        rule_state = score_to_rule_key(score)
+        if not rule_state:
+            return "", "", ""
+
+        ind_name = _rulebook_indicator_name(indicator_key)
+        param_key = _rulebook_param_key(indicator_key)
+        if not ind_name or not param_key:
+            return "", "", ""
+
+        rules = _load_rulebook()
+        categories = rules.get("categories", {}) if isinstance(rules, dict) else {}
+
+        for _cat_name, indicators in categories.items():
+            if not isinstance(indicators, dict):
+                continue
+            ind_block = indicators.get(ind_name)
+            if not isinstance(ind_block, dict):
+                continue
+
+            feature_scopes = ind_block.get("feature_scopes", {})
+            heatmap_scope = feature_scopes.get("heatmap", {}) if isinstance(feature_scopes, dict) else {}
+            rule_block = heatmap_scope.get(param_key)
+            if not isinstance(rule_block, dict):
+                continue
+
+            rule_expr = str(rule_block.get(rule_state, "") or "")
+            rule_notes = str(rule_block.get("notes", "") or "")
+            rule_text = translate_rule_text(rule_expr) if rule_expr else ""
+            return rule_expr, rule_notes, rule_text
+
+        return "", "", ""
 
     # ----------------------------
     # Phase III (UI-only): Display-Only Price row
@@ -496,9 +610,8 @@ def build_plotly_heatmap_inputs(
 
     for key in indicator_keys:
         row = rows.get(key) or {}
-        
+
         # display reader-friendly TI names
-        #display_name = row.get("display_name") or defs.get(key, {}).get("display_name") or key
         row_display = row.get("display_name")
         defs_display = defs.get(key, {}).get("display_name")
 
@@ -506,7 +619,7 @@ def build_plotly_heatmap_inputs(
         if row_display and defs_display and row_display.strip() == key:
             display_name = defs_display
         else:
-            display_name = row_display or defs_display or key        
+            display_name = row_display or defs_display or key
 
         values = list(row.get("values", []))
         scores = list(row.get("scores", []))
@@ -524,7 +637,25 @@ def build_plotly_heatmap_inputs(
         text_row: List[str] = []
         cd_row: List[dict] = []
 
-        for d_raw, v, s in zip(raw_dates, values, scores):  #for d, v, s in zip(x, values, scores):
+        for idx, (d_raw, v, s) in enumerate(zip(raw_dates, values, scores)):
+            prev_v = values[idx - 1] if idx > 0 else None
+            delta_abs = None
+            if not _is_missing(v) and not _is_missing(prev_v):
+                try:
+                    delta_abs = float(v) - float(prev_v)
+                except Exception:
+                    delta_abs = None
+
+            delta_pct = safe_pct_delta(v, prev_v)
+            trend = infer_trend(v, prev_v)
+
+            formatted_value = format_hover_value(key, v)
+            score_label = score_to_label(s)
+
+            rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
+            definition = defs.get(key, {}).get("definition", "")
+            how_to_read = defs.get(key, {}).get("how_to_read", "")
+
             # z must be numeric; use NaN for missing
             z_row.append(float(s) if s is not None else float("nan"))
             text_row.append(format_cell_value(key, v))
@@ -532,9 +663,19 @@ def build_plotly_heatmap_inputs(
                 {
                     "indicator_key": key,
                     "display_name": display_name,
-                    "date": d_raw,    #d,
+                    "date": d_raw,
                     "raw_value": v,
+                    "formatted_value": formatted_value,
                     "score": s,
+                    "score_label": score_label,
+                    "delta_abs": delta_abs,
+                    "delta_pct": delta_pct,
+                    "trend": trend,
+                    "rule_expr": rule_expr,
+                    "rule_notes": rule_notes,
+                    "rule_text": rule_text,
+                    "definition": definition,
+                    "how_to_read": how_to_read,
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
