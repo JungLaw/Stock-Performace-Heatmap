@@ -1,4 +1,4 @@
-# Stamp: Sat, March 14, 2026 6:00PM
+# Stamp: Mon, April 6, 2026 4:50PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -411,6 +411,75 @@ def translate_rule_text(expr: str) -> str:
     text = text.replace("ATRP_", "ATR%(")
     text = text.replace(") ", ") ")
     return text
+
+# ----------------------------
+# Indicator family / doc helpers (Phase III education UX)
+# ----------------------------
+def get_indicator_family(row_key: str) -> str:
+    """
+    Resolve a row key like EMA_20 or MACD_12_26_9 to an indicator family name.
+
+    This is intentionally adapter-owned because row-key interpretation belongs
+    with the adapter metadata layer, not the Streamlit layout layer.
+    """
+    if not row_key:
+        return ""
+
+    if row_key.startswith("EMA_"):
+        return "EMA"
+    if row_key.startswith("SMA_"):
+        return "SMA"
+    if row_key.startswith("VWMA_"):
+        return "VWMA"
+    if row_key.startswith("HMA_"):
+        return "HMA"
+
+    if row_key.startswith("RSI_"):
+        return "RSI"
+    if row_key.startswith("MACD_"):
+        return "MACD"
+    if row_key.startswith("STOCH_"):
+        return "STOCH"
+    if row_key.startswith("ROC_"):
+        return "ROC"
+    if row_key.startswith("WILLR_"):
+        return "WILLR"
+    if row_key.startswith("ADX_"):
+        return "ADX"
+    if row_key.startswith("ATR_"):
+        return "ATR"
+    if row_key.startswith("ATRP_"):
+        return "ATR"
+    if row_key.startswith("MFI_"):
+        return "MFI"
+    if row_key.startswith("CMF_"):
+        return "CMF"
+    if row_key.startswith("CCI_"):
+        return "CCI"
+    if row_key.startswith("UO_"):
+        return "UO"
+
+    if row_key == "OBV" or row_key.startswith("OBV_"):
+        return "OBV"
+    if row_key.startswith("BullBearPower_"):
+        return "BullBearPower"
+
+    # Future-proofed even if currently deferred / out of scope
+    if row_key.startswith("BB_") or row_key.startswith("BOLL_") or row_key.startswith("Bollinger"):
+        return "Bollinger"
+
+    return row_key
+
+
+def get_indicator_doc_slug(row_key: str) -> str:
+    """
+    Resolve the markdown documentation slug for a row key.
+
+    Initially this matches the indicator family, but it is intentionally
+    separated so documentation structure can diverge later without changing
+    UI call sites.
+    """
+    return get_indicator_family(row_key)
 
 # ----------------------------
 # Contract adapter (pure)
