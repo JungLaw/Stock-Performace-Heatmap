@@ -1807,6 +1807,7 @@ def show_technical_analysis_dashboard():
                 INDICATOR_DEFS,
                 build_plotly_heatmap_inputs,
                 make_rolling_heatmap_figure,
+                get_indicator_doc_slug,
             )
 
             technical_calculator = st.session_state.technical_calculator
@@ -2032,10 +2033,19 @@ def show_technical_analysis_dashboard():
 
                     st.markdown(f"**{display_name}**")
                     if definition:
-                        st.markdown(f"- **Definition:** {definition}")
+                        st.write(f"Definition: {definition}")
                     if how_to_read:
-                        st.markdown(f"- **How to Read:** {how_to_read}")
-                    st.markdown("")
+                        st.write(f"How to Read: {how_to_read}")
+
+                    # Optional family-level long-form overview
+                    doc_slug = get_indicator_doc_slug(key)
+                    markdown_text = load_indicator_markdown(doc_slug)
+
+                    if markdown_text:
+                        with st.expander(f"Learn more about {doc_slug}", expanded=False):
+                            st.markdown(markdown_text)
+
+                    st.markdown("---")
 
             # Optional debug view (safe to keep, collapsed)
             with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
