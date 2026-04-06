@@ -1,4 +1,4 @@
-# Stamp: Sat, March 14, 2026 6:00PM
+# Stamp: Mon, April 6, 2026 4:50PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -14,7 +14,7 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Add src to path for imports
 src_path = Path(__file__).parent / "src"
@@ -26,6 +26,29 @@ from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
+
+def load_indicator_markdown(doc_slug: str) -> Optional[str]:
+    """
+    Load family-level educational markdown for an indicator, if available.
+
+    Expected repo location:
+        docs/indicators/<doc_slug>.md
+
+    Returns:
+        markdown text when the file exists and can be read,
+        otherwise None.
+    """
+    if not doc_slug:
+        return None
+
+    doc_path = Path(__file__).parent / "docs" / "indicators" / f"{doc_slug}.md"
+
+    try:
+        if not doc_path.exists() or not doc_path.is_file():
+            return None
+        return doc_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -1878,6 +1901,7 @@ def show_technical_analysis_dashboard():
 
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
             DEFAULT_KEYS = [
+                "RSI_14",
                 #"EMA_5",
                 #"EMA_10",
                 #"EMA_13",
