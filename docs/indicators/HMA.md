@@ -1,12 +1,6 @@
 Status: incomplete
 
-> [!FAQ]- Click to expand the answer
-> This content is hidden until you click it.
-
-
-:::note
-This is a note callout.
-:::
+> These here below are examples only:
 
 > 💡 **Tip**
 > Use CCI with trend filters like ADX.

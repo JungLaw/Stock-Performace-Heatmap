@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.2 
+- Version: 3.2.4 
 - Created: 1/12/26
-- Last update: 3/12/2026 @ 11:07A
+- Last update: 4/11/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -120,7 +120,6 @@ Decision to be made once and applied globally; mixed-unit handling is prohibited
 **Purpose:** Provide reusable numeric transforms that other layers depend on.
 
 Examples:
-
 * Slopes (EMA/HMA/ADX)
 * Deltas / ROC-of-indicators
 * Volatility normalization
@@ -129,7 +128,22 @@ Examples:
 > ⚠️ Important boundary:
 > Option E produces **numbers**, not interpretations.
 
+---
+**Status:** ✅ ACTIVE
 
+**Constraints (authoritative):**
+- MUST NOT modify existing indicator values
+- MUST NOT introduce rule semantics
+- MUST remain computation-layer only
+
+**Validation requirement:**
+- All derived outputs must be validated against:
+  - `baseline/indicator_baseline_AAPL_phase3_baseline.csv`
+
+**First target:**
+- EMA slope (canonical derived primitive)
+
+---
 #### Option E Task Class — Numeric Deviation & Normalization (Explicit)
 
 **Definition (Option E):** Numeric deviation work defines or corrects **pure numeric transforms** such as units, scaling, normalization, and derived series. It must not introduce buy/sell meaning or thresholds beyond unit alignment.
@@ -147,6 +161,11 @@ Numeric deviation tasks may be initiated by UI discrepancies or rule-evaluation 
 - Any semantic interpretation of numeric values (belongs to Option F)
 - Any UI formatting or display-only transforms (belongs to Phase III)
 
+Implementation of Option E must conform to the
+"Numeric Layer Contract"
+(NUMERIC_LAYER_CONTRACT.md),
+which defines column identity, derived numeric outputs,
+normalization rules, and separation from semantic interpretation.
 
 ### 10. Option F — Semantic & relational logic
 
@@ -159,15 +178,14 @@ Examples:
 * Regime classification
 * Composite signals
 
-**Status (Phase II overall):**
-
-* Rule infrastructure exists and is operational
-* Option D closed
-* Option E & F are **intentionally incomplete**, pending UI-driven confirmation
+**Status:** ⏸️ DEFERRED (pending Option E stabilization)
 
 ---
 
 ## MAJOR PHASE III — Visualization & Interaction Layer (UI)
+Implementation of the Rolling Heatmap UX layer must conform to the
+"Rolling Heatmap Row Architecture Contract" (ROLLING_HEATMAP_ROW_ARCHITECTURE.md),
+which defines row identity, payload mapping, adapter transformation, and UI responsibilities.
 
 **Goal:** Make engine outputs visible, explorable, and trustworthy **without redefining the math**.
 
@@ -238,6 +256,75 @@ The 435-day buffer replaces the earlier 386-day policy used during initial Scena
   - heatmap renders next *N* completed trading days
   - must not introduce new rule semantics.
 
+**Heatmap UI Guardrail (Authoritative)**
+The Rolling Heatmap UI layer may control:
+- ordering, grouping, labels, tooltips, legends, and display-only rows
+
+The Rolling Heatmap UI layer must **not**:
+- alter rule thresholds or score meanings
+- reinterpret indicator semantics locally
+- introduce UI-specific logic into the rule engine or indicator engine
+
+Any issue discovered through UI usage must be routed to:
+- Phase II / Option E (numeric derivation), or
+- Phase II / Option F (semantic interpretation),
+not patched inside the UI layer.
+
+#### Hover Enrichment — Tooltip Context (UI-only)
+
+**Purpose:** Improve interpretability of heatmap cells by surfacing contextual data in hover tooltips.
+
+Hover enrichment is **presentation-only** and must not alter rule semantics,
+indicator computation, or signal classification.
+
+**Price row hover content**
+Display the following contextual metrics derived from the canonical price series:
+
+- Δ vs prior day
+- % change vs prior day
+- Volume
+- Volume vs 5-day average (show both relative delta and the 5-day average value)
+
+Example:
+
+Δ vs prior day: +4.81  
+% change: +0.99%  
+Volume: 18.2M  
+Volume vs 5D Avg: +11.7% (16.3M)
+
+**Indicator row hover content**
+
+Tooltips must include contextual information derived from the indicator series
+and rule engine outputs.
+
+Display:
+
+- Value (2 decimal places)
+- Δ vs prior day (absolute and relative)
+- Trend (Rising / Falling / Flat based on prior-day comparison)
+- Signal (existing rule-engine signal classification)
+- Rule (rulebook-authored explanation text when available)
+
+Example:
+
+Value: 62.34  
+Δ vs prior day: +1.85 (+3.06%)  
+Trend: Rising  
+Signal: Buy (+1)  
+Rule: RSI above 60 momentum threshold
+
+**Guardrails**
+
+Hover enrichment must:
+
+- use existing indicator values and rule-engine outputs
+- remain strictly UI/presentation logic
+- never modify rule thresholds, indicator computation, or signal meaning
+
+If interpretability gaps are discovered, they must be routed to:
+
+- Option E — numeric derivations
+- Option F — semantic rule interpretation
 
 ### 12. Technical Analysis dashboard (tiles)
 
@@ -265,14 +352,41 @@ Any gap discovered becomes:
 * or Option F task (semantic)
 
 **Status:**
-🟡 Phase III is **in progress**.
+✅ Phase III is **complete (closed)**.
 Rolling heatmap core is functional and validated.
 
 ✅ Step 1 complete — TA persistence policy fixed (no TA writes to `daily_prices` when save_to_db=False).
 ✅ Pivot Points date-normalization bug fixed (restored pivot table display).
 ✅ Fingerprinting instrumentation used for runtime path proof; later removed after verification.
+✅ Hover enrichment implemented and validated (value, deltas, rule text, notes).
+✅ Educational expander implemented (row-stable `INDICATOR_DEFS` content).
+✅ Learn More system implemented (family-level markdown via `docs/indicators/`).
+✅ UI contract integrity verified (selection sync, ordering, no regressions).
+
+**Closure constraints (verified):**
+- No changes to rule semantics
+- No changes to indicator computation
+- No changes to Scenario B acquisition or persistence behavior
+- All UX enhancements are additive and contract-safe
 
 ---
+
+## Phase Transition — Phase III Complete → Option E Activation
+
+**Prerequisites satisfied:**
+
+1. Phase III UX declared complete
+2. Indicator numeric baseline captured  
+   - `baseline/indicator_baseline_AAPL_phase3_baseline.csv`
+3. Rulebook version frozen  
+   - `master_rules_normalized__phase3_baseline.json`
+
+**Interpretation:**
+- System is now safe to proceed with derived numeric work (Option E)
+- Baselines enable detection of unintended numeric or semantic drift
+
+**Next Active Workstream:**
+→ Option E — Derived Numeric Indicators
 
 ## MAJOR PHASE IV — Semantic Presentation & Decision Support
 
@@ -358,12 +472,13 @@ No structural DB changes should occur until these decisions are finalized.
 
   * Core engine: ✅
   * Option D: ✅
-  * Option E/F: ⏸️ gated
+  * Option E: ✅ active
+  * Option F: ⏸️ deferred pending Option E stabilization
 
 * Phase III:
 
   * Rolling heatmap acquisition (Scenario B): ✅ complete
-  * Layout & semantics: next
+  * Layout & semantics: ✅ complete
 * Phase IV: 🔒 future
 
 ---
@@ -371,15 +486,16 @@ No structural DB changes should occur until these decisions are finalized.
 ## What Comes Next (Immediately)
 
 **Next active workstream (in order):**
-1) **Rolling Heatmap UX milestone — layout & semantics polish**
-   - Dates rendered at top
-   - Price row (display-only)
-   - Stable row ordering
-   - Consistent column widths
-2) UX feedback loop into **Option E backlog definition**
-   - Identify missing numeric primitives surfaced by UI usage
-   - Formalize Option E tasks (slopes, derived metrics, band relations)
+1) **Option E — Derived numeric primitives**
+   - EMA slope
+   - validation against numeric baseline
+   - additive-only numeric derivation work
 
-Only after that:
-- Phase II continuation via **Option E**
-- Later semantic expansion via **Option F**
+2) **Option E backlog continuation**
+   - additional slopes / derived metrics
+   - normalization primitives
+   - band-derived numeric outputs
+
+Only after Option E stabilization:
+- Phase II continuation via **Option F**
+- Later semantic expansion via **Phase IV**

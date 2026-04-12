@@ -6,14 +6,6 @@ CMF is for assessing the prevailing buy or sell pressure over a sustained period
 
 ---
 
-> [!FAQ]- Click to expand the answer
-> This content is hidden until you click it.
-
-
-:::note
-This is a note callout.
-:::
-
 
 ---
 **Class**: Volume Indicator
