@@ -1,4 +1,4 @@
-# Stamp: Mon, April 6, 2026 4:50PM
+# Stamp: Mon, April 13, 2026 6:44PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -141,7 +141,16 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Rate of Change over a longer window than ROC(12).",
         "how_to_read": "Smoother momentum read than ROC(12).",
     },
-
+    "BB_PCT_B": {
+        "display_name": "BB %B",
+        "definition": "Bollinger %B shows where price sits within the Bollinger band range.  A 'location indicactor'. Used for measuring relative price location within the bands (oscillator value).",
+        "how_to_read": "Display-only preview for now. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+    },
+    "BB_BW": {
+        "display_name": "BB Bandwidth",
+        "definition": "Bollinger Bandwidth measures the width of the Bollinger Bands relative to the middle band.",
+        "how_to_read": "Display-only preview for now. Higher values mean wider bands; lower values mean tighter bands.",
+    },
     # Trend strength
     "ADX_9": {
         "display_name": "ADX (9)",
@@ -227,6 +236,13 @@ def format_cell_value(indicator_key: str, v: Any) -> str:
 
     if indicator_key.startswith("RSI"):
         return f"{fv:.1f}"
+    if indicator_key.startswith("ROC"):
+#        return f"{fv:.3f}"             # fractional units
+        return f"{fv * 100.0:.2f}"      # percent-point units
+    if indicator_key == "BB_PCT_B":
+        return f"{fv * 100.0:.1f}"
+    if indicator_key == "BB_BW":
+        return f"{fv * 100.0:.2f}" 
     if indicator_key.startswith("CMF"):
         return f"{fv:.3f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
@@ -298,6 +314,13 @@ def format_hover_value(indicator_key: str, v: Any) -> str:
         return f"${fv:,.2f}"
     if indicator_key.startswith("RSI"):
         return f"{fv:.1f}"
+    if indicator_key.startswith("ROC"):
+#        return f"{fv:.3f}"          # fractional units
+        return f"{fv * 100.0:.2f}"   # percent-point units 
+    if indicator_key == "BB_PCT_B":
+        return f"{fv * 100.0:.1f}"
+    if indicator_key == "BB_BW":
+        return f"{fv * 100.0:.2f}"    
     if indicator_key.startswith("CMF"):
         return f"{fv:.3f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
@@ -518,6 +541,12 @@ def build_plotly_heatmap_inputs(
     price_block = extras.get("price") if isinstance(extras.get("price"), dict) else None
     raw_dates = dates
     x = [format_date_label(d) for d in raw_dates]
+
+    # Date -> current price map for indicator-specific hover context
+    price_values = list(price_block.get("values", [])) if isinstance(price_block, dict) else []
+    if len(price_values) < len(raw_dates):
+        price_values = price_values + [None] * (len(raw_dates) - len(price_values))
+    price_by_date = dict(zip(raw_dates, price_values))
 
     # Initialize variables
     row_keys: List[str] = []
@@ -810,12 +839,15 @@ def build_plotly_heatmap_inputs(
 
         values = list(row.get("values", []))
         scores = list(row.get("scores", []))
+        row_extras = list(row.get("extras", []))
 
         # Normalize lengths (defensive)
         if len(values) < len(x):
             values = values + [None] * (len(x) - len(values))
         if len(scores) < len(x):
             scores = scores + [None] * (len(x) - len(scores))
+        if len(row_extras) < len(x):
+            row_extras = row_extras + [{}] * (len(x) - len(row_extras))
 
         row_keys.append(key)
         y.append(display_name)
@@ -824,7 +856,7 @@ def build_plotly_heatmap_inputs(
         text_row: List[str] = []
         cd_row: List[dict] = []
 
-        for idx, (d_raw, v, s) in enumerate(zip(raw_dates, values, scores)):
+        for idx, (d_raw, v, s, extra_map) in enumerate(zip(raw_dates, values, scores, row_extras)):        
             prev_v = values[idx - 1] if idx > 0 else None
             delta_abs = None
             if not _is_missing(v) and not _is_missing(prev_v):
@@ -858,6 +890,36 @@ def build_plotly_heatmap_inputs(
             # indicator rows do not use volume hover fields
             volume_block = ""
             volume_vs_avg_block = ""
+            band_context_block = ""
+
+            if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
+                parts = []
+                current_price = price_by_date.get(d_raw)
+
+                try:
+                    current_price = float(current_price) if not _is_missing(current_price) else None
+                except Exception:
+                    current_price = None
+
+                for band_key, label_txt in (("mid", "Mid"), ("upper", "Upper"), ("lower", "Lower")):
+                    band_val = extra_map.get(band_key)
+                    if _is_missing(band_val):
+                        continue
+
+                    pct_to_band = None
+                    if current_price not in (None, 0):
+                        try:
+                            pct_to_band = ((float(band_val) / float(current_price)) - 1.0) * 100.0
+                        except Exception:
+                            pct_to_band = None
+
+                    if pct_to_band is None:
+                        parts.append(f"{label_txt}: {float(band_val):.2f}")
+                    else:
+                        parts.append(f"{label_txt}: {float(band_val):.2f} ({pct_to_band:+.1f}%)")
+
+                if parts:
+                    band_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
             # z must be numeric; use NaN for missing
             z_row.append(float(s) if s is not None else float("nan"))
@@ -891,6 +953,7 @@ def build_plotly_heatmap_inputs(
                     "how_to_read_block": how_to_read_block,
                     "volume_block": volume_block,
                     "volume_vs_avg_block": volume_vs_avg_block,
+                    "band_context_block": band_context_block,
 
                     "meta": rolling_payload.get("meta", {}),
                 }
@@ -940,6 +1003,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"
         "%{customdata.how_to_read_block}"
+        "%{customdata.band_context_block}"
         "%{customdata.volume_block}"
         "%{customdata.volume_vs_avg_block}"
         "<extra></extra>"

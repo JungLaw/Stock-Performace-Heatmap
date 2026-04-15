@@ -1,3 +1,4 @@
+# Stamp: Sat, April 11, 2026 6:00PM
 # signals_loader.py
 
 import json
@@ -229,12 +230,24 @@ def build_compute_config(
 
     # Option E slope emission configuration.
     if include_slope:
+        enabled_slope_families = [
+            fam for fam in ("EMA", "VWMA", "HMA")
+            if fam in cfg and cfg[fam]
+        ]
+
         cfg["SLOPE"] = {
             "window": int(slope_window),
-            "method": str(slope_method),
+            "method": str(slope_method).lower(),
             "emit_aliases": bool(emit_slope_aliases),
             "vwma_anchor": int(vwma_slope_anchor),
             "hma_anchor": int(hma_slope_anchor),
+            "families": enabled_slope_families,
+            "canonical_pattern": "{base_col}_slope__{method}_{window}",
+            "compatibility_aliases": [
+                "EMA_<len>_slope",
+                "VWMA_slope",
+                "HMA_slope",
+            ],
         }
 
     return cfg

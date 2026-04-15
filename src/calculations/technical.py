@@ -1,4 +1,4 @@
-# Stamp: Wed, March 11, 2026 6:00PM
+# Stamp: Mon, April 13, 2026 6:44PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -655,6 +655,27 @@ class DatabaseIntegratedTechnicalCalculator:
                 )
             )
             logger.info("=== END columns ===")
+
+        # ============================================
+        # BASELINE SNAPSHOT (TEMP — pre-Option E/F)
+        # ============================================
+        try:
+            from pathlib import Path
+
+            # Limit to one representative ticker to avoid repeated writes
+            if ticker == "AAPL":
+                output_dir = Path("baseline")
+                output_dir.mkdir(exist_ok=True)
+
+                output_path = output_dir / "indicator_baseline_AAPL.csv"
+
+                # Save the most recent 100 rows of the raw computed indicator dataframe
+                df_ind.tail(100).to_csv(output_path)
+
+                logger.info(f"[BASELINE] Indicator snapshot saved to: {output_path}")
+        except Exception as e:
+            logger.warning(f"[BASELINE ERROR] {e}")
+
         return df_ind
 
 
@@ -981,6 +1002,28 @@ class DatabaseIntegratedTechnicalCalculator:
                 "display_key": "ROC_50",
                 "value_col": "ROC_50",
             },
+            {
+                "engine_indicator": "Bollinger",
+                "param_key": "20_2.0",
+                "display_key": "BB_PCT_B",
+                "value_col": "BB_PCT_B",
+                "extra_value_cols": {
+                    "mid": "BB_20_2_mid",
+                    "upper": "BB_20_2_upper",
+                    "lower": "BB_20_2_lower",
+                },
+            },
+            {
+                "engine_indicator": "Bollinger",
+                "param_key": "20_2.0",
+                "display_key": "BB_BW",
+                "value_col": "BB_BW",
+                "extra_value_cols": {
+                    "mid": "BB_20_2_mid",
+                    "upper": "BB_20_2_upper",
+                    "lower": "BB_20_2_lower",
+                },
+            },        
             {
                 "engine_indicator": "Williams_R",
                 "param_key": "5",
@@ -1394,27 +1437,40 @@ class DatabaseIntegratedTechnicalCalculator:
                 display_key = meta["display_key"]
                 value_col = meta["value_col"]
 
-                series_dict = scores.get(eng_name, {})
-                score_series = series_dict.get(param_key)
-                if score_series is None or dt not in score_series.index:
-                    continue
-
-                raw_score = score_series.loc[dt]
-                if pd.isna(raw_score):
-                    continue
-
-                try:
-                    score_int = int(raw_score)
-                except (TypeError, ValueError):
-                    continue
-
-                label = score_to_label.get(score_int, "neutral")
-                # MARKER
+                # Always try to source the raw display value from the indicator dataframe.
                 value = None
                 if value_col in df_ind.columns and dt in df_ind.index:
                     v = df_ind.loc[dt, value_col]
                     if not pd.isna(v):
-                        value = float(v)
+                        try:
+                            value = float(v)
+                        except (TypeError, ValueError):
+                            value = None
+
+                series_dict = scores.get(eng_name, {})
+                score_series = series_dict.get(param_key)
+
+                # Default path: score-driven row (existing behavior)
+                if score_series is not None and dt in score_series.index:
+                    raw_score = score_series.loc[dt]
+                    if pd.isna(raw_score):
+                        continue
+
+                    try:
+                        score_int = int(raw_score)
+                    except (TypeError, ValueError):
+                        continue
+
+                    label = score_to_label.get(score_int, "neutral")
+
+                # Display-only fallback: allow rows with raw numeric values
+                # even when semantic score coverage does not exist yet.
+                elif value is not None:
+                    score_int = 0
+                    label = "neutral"
+
+                else:
+                    continue
 
                 # Optional extra numeric fields for richer hover / future UI
                 extras: Dict[str, float] = {}
@@ -1428,7 +1484,7 @@ class DatabaseIntegratedTechnicalCalculator:
                                     extras[k] = float(ev)
                                 except (TypeError, ValueError):
                                     pass
-                                
+
                 if value is not None:
                     hover = f"{display_key} = {value:.2f}, score={score_int} ({label})"
                 else:
@@ -1436,10 +1492,9 @@ class DatabaseIntegratedTechnicalCalculator:
 
                 # If extras exist, append them (still readable, no UI changes required)
                 if extras:
-                    # Example: BullPower=1.23, BearPower=-0.45, BBP=0.78
                     extras_str = ", ".join([f"{k}={v:.2f}" for k, v in extras.items()])
                     hover = f"{hover} | {extras_str}"
-                    
+
                 cell = {
                     "score": score_int,
                     "signal": label,
@@ -1448,7 +1503,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 }
                 if extras:
                     cell["extras"] = extras
-                
+
                 row_cells[display_key] = cell
 
             if row_cells:
@@ -3553,3 +3608,4 @@ def calculate_technical_analysis(ticker: str, save_to_db: bool = False) -> Dict:
     """
     calculator = DatabaseIntegratedTechnicalCalculator()
     return calculator.calculate_technical_indicators(ticker, save_to_db=save_to_db)
+

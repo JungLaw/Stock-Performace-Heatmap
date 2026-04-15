@@ -1,3 +1,4 @@
+# Stamp: Mon, April 13, 2026 6:44PM
 from __future__ import annotations
 
 import pandas as pd
@@ -366,7 +367,10 @@ def compute_all_indicators(
     hma_periods = [int(x) for x in cfg.get("HMA", [])]
     if hma_periods:
         for p_i in hma_periods:
-            df[f"HMA_{p_i}"] = pd.to_numeric(_rolling_hma(price.astype("float64"), p_i), errors="coerce").astype("float64")     #df[f"HMA_{p_i}"] = _rolling_hma(price.astype("float64"), p_i)
+            df[f"HMA_{p_i}"] = pd.to_numeric(
+                _rolling_hma(price.astype("float64"), p_i),
+                errors="coerce"
+            ).astype("float64")
 
     # ====================================================
     # Option E: Derived numeric transformations (slopes)
@@ -374,14 +378,21 @@ def compute_all_indicators(
     # Canonical (parameterized) slope primitives:
     #   {BASECOL}_slope__linreg_{W}
     #
-    # Legacy compatibility aliases (rulebook tokens):
-    #   EMA_{n}_slope, SMA_{n}_slope, VWMA_slope, HMA_slope
+    # Compatibility aliases used by current rulebook consumers:
+    #   EMA_{n}_slope, HMA_{n}_slope, VWMA_slope, HMA_slope
+    #
+    # Scope lock:
+    #   SMA slope remains deferred and is not emitted in this wave.
     # ====================================================
     slope_cfg = cfg.get("SLOPE", None)
     if isinstance(slope_cfg, dict):
         window = int(slope_cfg.get("window", 14))
         method = str(slope_cfg.get("method", "linreg")).lower()
         emit_aliases = bool(slope_cfg.get("emit_aliases", True))
+        slope_families = [
+            str(fam).upper()
+            for fam in (slope_cfg.get("families") or ["EMA", "VWMA", "HMA"])
+        ]
 
         if method not in {"linreg"}:
             # For now, only linreg is contractually supported.
@@ -390,37 +401,76 @@ def compute_all_indicators(
         def _canonical_slope_name(base_col: str) -> str:
             return f"{base_col}_slope__{method}_{window}"
 
-        # Determine which base columns should have slopes
+        def _resolve_anchor_base(
+            family: str,
+            preferred_anchor: int,
+        ) -> str | None:
+            """
+            Resolve the anchored base column deterministically.
+
+            Priority:
+            1) configured preferred anchor if present in df
+            2) first available configured period for the family
+            3) None if no family base column exists
+            """
+            preferred_base = f"{family}_{int(preferred_anchor)}"
+            if preferred_base in df.columns:
+                return preferred_base
+
+            for n in (cfg.get(family, []) or []):
+                candidate = f"{family}_{int(n)}"
+                if candidate in df.columns:
+                    return candidate
+
+            return None
+
+        # Determine which base columns should have slopes for this wave only.
         base_cols: list[str] = []
-        for fam in ("EMA", "SMA", "VWMA", "HMA"):
+        for fam in slope_families:
             for n in (cfg.get(fam, []) or []):
                 base_cols.append(f"{fam}_{int(n)}")
 
-        # Compute slopes where base series exists
+        # Compute canonical slope columns where the base series exists.
         for base_col in base_cols:
             if base_col not in df.columns:
                 continue
-            canon = _canonical_slope_name(base_col)
-            df[canon] = _rolling_linreg_slope(df[base_col].astype("float64"), window)
 
-            if emit_aliases and (base_col.startswith("EMA_") or base_col.startswith("SMA_")):
+            canon = _canonical_slope_name(base_col)
+            df[canon] = _rolling_linreg_slope(
+                df[base_col].astype("float64"),
+                window
+            )
+
+            # Parameterized compatibility aliases for EMA and HMA.
+            if emit_aliases and (
+                base_col.startswith("EMA_") or base_col.startswith("HMA_")
+            ):
                 df[f"{base_col}_slope"] = df[canon]
 
         if emit_aliases:
-            # Unparameterized legacy aliases: resolve deterministically
+            # Unparameterized compatibility aliases: resolve deterministically
+            # from configured anchors, with safe fallback to first available period.
             vwma_anchor = int(slope_cfg.get("vwma_anchor", 20))
             hma_anchor = int(slope_cfg.get("hma_anchor", 21))
 
-            vwma_base = f"VWMA_{vwma_anchor}"
-            hma_base = f"HMA_{hma_anchor}"
+            vwma_base = (
+                _resolve_anchor_base("VWMA", vwma_anchor)
+                if "VWMA" in slope_families else None
+            )
+            hma_base = (
+                _resolve_anchor_base("HMA", hma_anchor)
+                if "HMA" in slope_families else None
+            )
 
-            vwma_canon = _canonical_slope_name(vwma_base)
-            hma_canon = _canonical_slope_name(hma_base)
+            if vwma_base is not None:
+                vwma_canon = _canonical_slope_name(vwma_base)
+                if vwma_canon in df.columns:
+                    df["VWMA_slope"] = df[vwma_canon]
 
-            if vwma_canon in df.columns:
-                df["VWMA_slope"] = df[vwma_canon]
-            if hma_canon in df.columns:
-                df["HMA_slope"] = df[hma_canon]
+            if hma_base is not None:
+                hma_canon = _canonical_slope_name(hma_base)
+                if hma_canon in df.columns:
+                    df["HMA_slope"] = df[hma_canon]
     # ====================================================
     # Bull/Bear Power
     # ====================================================
@@ -480,43 +530,78 @@ def compute_all_indicators(
         upper = bb_df[upper_src] if upper_src in bb_df.columns else bb_df.iloc[:, 2]
         lower = bb_df[lower_src] if lower_src in bb_df.columns else bb_df.iloc[:, 0]
 
+        mid = pd.to_numeric(mid, errors="coerce").astype("float64")
+        upper = pd.to_numeric(upper, errors="coerce").astype("float64")
+        lower = pd.to_numeric(lower, errors="coerce").astype("float64")
+
         # Option C naming uses integer std tag (e.g. BB_20_2_mid)
         std_tag_int = int(round(n_std))
         df[f"BB_{p_i}_{std_tag_int}_mid"] = mid
         df[f"BB_{p_i}_{std_tag_int}_upper"] = upper
         df[f"BB_{p_i}_{std_tag_int}_lower"] = lower
 
+        # Option E canonical Bollinger-derived numeric outputs.
+        # Emit only for the canonical 20,2 anchor tuple to avoid
+        # parameterized naming churn.
+        if p_i == 20 and abs(n_std - 2.0) < 1e-12:
+            band_range = upper - lower
+
+            # %B = (price - lower_band) / (upper_band - lower_band)
+            bb_pct_b = (price - lower) / band_range
+            bb_pct_b = pd.to_numeric(bb_pct_b, errors="coerce").astype("float64")
+            bb_pct_b = bb_pct_b.replace([np.inf, -np.inf], np.nan)
+
+            # Bandwidth = (upper_band - lower_band) / middle_band
+            bb_bw = band_range / mid
+            bb_bw = pd.to_numeric(bb_bw, errors="coerce").astype("float64")
+            bb_bw = bb_bw.replace([np.inf, -np.inf], np.nan)
+
+            df["BB_PCT_B"] = bb_pct_b
+            df["BB_BW"] = bb_bw
+ 
     # ====================================================
     # ATR and ATRP (pandas_ta_classic.atr)
     # ====================================================
     if {"High", "Low"}.issubset(df.columns):
+        price_f = pd.to_numeric(price, errors="coerce").astype("float64")
+
         for length in cfg.get("ATR", []):
             l_i = int(length)
             atr_series = ta.atr(
                 high=df["High"],
                 low=df["Low"],
-                close=price,
+                close=price_f,
                 length=l_i,
             )
-            df[f"ATR_{l_i}"] = atr_series
+            df[f"ATR_{l_i}"] = pd.to_numeric(
+                atr_series,
+                errors="coerce"
+            ).astype("float64")
 
-        # ATRP = ATR% (ATR relative to price)
+        # ATRP = ATR relative to price, expressed in percent units
+        # to match existing rulebook consumers such as:
+        #   abs(Close/EMA_20 - 1) <= 0.50 * ATRP_20
         for length in cfg.get("ATRP", []):
             l_i = int(length)
             atr_col = f"ATR_{l_i}"
             if atr_col not in df.columns:
-                # Compute ATR on the fly if not already done
                 atr_series = ta.atr(
                     high=df["High"],
                     low=df["Low"],
-                    close=price,
+                    close=price_f,
                     length=l_i,
                 )
-                df[atr_col] = atr_series
-            atr_series = df[atr_col]
+                df[atr_col] = pd.to_numeric(
+                    atr_series,
+                    errors="coerce"
+                ).astype("float64")
 
-            # ATRP = 100 * ATR / price, with infinities mapped to NaN
-            atrp = (atr_series / price) * 100.0
+            atr_series = pd.to_numeric(df[atr_col], errors="coerce").astype("float64")
+
+            # ATRP remains percent-of-price (not fractional) for current
+            # moving-average neutral-zone consumers.
+            atrp = (atr_series / price_f) * 100.0
+            atrp = pd.to_numeric(atrp, errors="coerce").astype("float64")
             atrp = atrp.replace([np.inf, -np.inf], np.nan)
 
             df[f"ATRP_{l_i}"] = atrp
@@ -598,6 +683,12 @@ def compute_all_indicators(
             close=price,
             length=l_i,
         )
+
+        # Authoritative Option E unit policy:
+        # normalize ROC to fractional units so rulebook thresholds like
+        # 0.03 / 0.07 mean +3% / +7% consistently.
+        roc_series = pd.to_numeric(roc_series, errors="coerce").astype("float64") / 100.0
+
         # pandas-ta names this ROC_<length>; we mirror that in Option C.
         df[f"ROC_{l_i}"] = roc_series
 
