@@ -1,4 +1,4 @@
-# Stamp: Wed, April 8 2026 5:25P
+# Stamp: Sun, April 19, 2026 4:02PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1486,13 +1486,14 @@ def _extract_rolling_signals_from_data(data: dict) -> dict:
 
             rows: dict = {}
             for ind_key in indicators:
-                vals, scores, hovers = [], [], []
+                vals, scores, hovers, extras_list = [], [], [], []
 
                 for d in rs_dates:
                     cell = (data_by_date.get(d, {}) or {}).get(ind_key, {}) or {}
                     vals.append(cell.get("value"))
                     scores.append(cell.get("score"))
                     hovers.append(cell.get("hover"))
+                    extras_list.append(cell.get("extras") if isinstance(cell.get("extras"), dict) else {})
 
                 # Skip rows that contain nothing (prevents blank/ghost rows)
                 has_any = any(v is not None for v in vals) or any(s is not None for s in scores)
@@ -1504,6 +1505,7 @@ def _extract_rolling_signals_from_data(data: dict) -> dict:
                     "values": vals,
                     "scores": scores,
                     "hover": hovers,
+                    "extras": extras_list,
                 }
 
             extras = rs.get("extras") if isinstance(rs.get("extras"), dict) else {}
@@ -1903,6 +1905,7 @@ def show_technical_analysis_dashboard():
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
             DEFAULT_KEYS = [
                 "RSI_14",
+                "SMA_200",
                 #"EMA_5",
                 #"EMA_10",
                 #"EMA_13",
@@ -1925,10 +1928,13 @@ def show_technical_analysis_dashboard():
                 "MFI_14",
                 "ROC_12",
                 "ROC_20",
+                "BB_PCT_B",
+                "BB_BW",
                 #"ADX_19",
                 "ADX_14",
                 #"ADX_20",
                 #"OBV",
+                "VWMA_10", "VWMA_20", "VWMA_50",  
                 # If you want to include the UI-mock expansion, uncomment these:
                 # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
             ]

@@ -1,4 +1,4 @@
-# Stamp: Sat, April 11, 2026 6:00PM
+# Stamp: Sun, April 19, 2026 4:02PM
 # signals_loader.py
 
 import json

@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.4 
+- Version: 3.2.6 
 - Created: 1/12/26
-- Last update: 4/11/2026
+- Last update: 4/16/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -40,19 +40,19 @@
 * `indicator_preprocessor.py` as the canonical computation wrapper
 
 
-**Deferred but canonically named Bollinger-derived outputs**
+**Canonically named Bollinger-derived outputs**
 
-The following Bollinger-derived numeric outputs are canonically named now,
-but computation and rule usage are deferred:
+The following Bollinger-derived numeric outputs are canonically named and now
+computed in the numeric layer:
 
 - Bollinger %B → `BB_PCT_B`
 - Bollinger Bandwidth → `BB_BW`
 
 **Status:**
 - Naming is locked to prevent future churn.
-- Computation, semantics, and UI exposure are deferred until:
-  - Option E (numeric derivation) and
-  - Option F (band-position semantics) are explicitly activated.
+- Numeric computation is complete in **Option E Wave 1**.
+- Semantic interpretation remains deferred to:
+  - Option F (band-position semantics)
 
 
 ### 5. Required detour — pandas dtype & stability fixes
@@ -96,23 +96,22 @@ Known non-blocking issues: pandas fragmentation/performance warnings.
 
 
 **Rule-evaluation correctness checkpoint — ROC unit normalization**
-- Validate that ROC_* numeric series units match the thresholds defined in
+- ROC_* numeric series must match the thresholds defined in
   `master_rules_normalized.json`.
-- Current risk: ROC series are emitted in **percent-point units**
-  (e.g., `ROC_20 = 6.34` meaning +6.34%), while rule thresholds are written
-  in **fractional units** (e.g., `0.03` meaning +3%).
-- This mismatch causes ROC rules to over-score as `buy` / `strong_buy`
-  across most positive values.
 
-**Resolution rule (authoritative):**
-- Either:
-  1) Normalize ROC series to fractional units (`ROC = ROC / 100`), **or**
-  2) Rewrite ROC rule thresholds to percent-point units.
+**Resolved decision (authoritative):**
+- ROC series are normalized to **fractional units** in the numeric layer:
+  - `ROC = ROC / 100`
+- Rule thresholds remain expressed in fractional units.
+- Mixed-unit handling is prohibited.
 
-Decision to be made once and applied globally; mixed-unit handling is prohibited.
+**Status:**
+- ROC normalization completed in **Option E Wave 1**.
+- Heatmap display may format ROC in percent-point style for readability,
+  but numeric truth remains fractional upstream.
 
 **Acceptance criteria:**
-- ROC_12 / ROC_20 signals must transition correctly across
+- ROC_12 / ROC_20 signals transition correctly across
   neutral / buy / sell boundaries when replayed against historical data.
 
 ### 9. Option E — Derived numeric primitives (**NOT semantics**)
@@ -129,10 +128,11 @@ Examples:
 > Option E produces **numbers**, not interpretations.
 
 ---
-**Status:** ✅ ACTIVE
+**Status:** ✅ WAVE 1 COMPLETE
 
 **Constraints (authoritative):**
-- MUST NOT modify existing indicator values
+- MUST NOT modify existing indicator values except for explicitly approved
+  numeric normalization corrections
 - MUST NOT introduce rule semantics
 - MUST remain computation-layer only
 
@@ -140,8 +140,23 @@ Examples:
 - All derived outputs must be validated against:
   - `baseline/indicator_baseline_AAPL_phase3_baseline.csv`
 
-**First target:**
-- EMA slope (canonical derived primitive)
+**Wave 1 completed scope:**
+- EMA / HMA / VWMA slope primitives
+- ROC normalization to fractional units
+- ATRP / volatility-normalization validation
+- Bollinger-derived numeric outputs:
+  - `BB_PCT_B`
+  - `BB_BW`
+
+**Still deferred beyond Wave 1:**
+- SMA slope
+- Option F semantic activation, beginning with:
+  - Bollinger semantics
+  - VWMA rule semantics
+- later semantic tiers:
+  - composites
+  - cross-confirmation
+  - regime logic
 
 ---
 #### Option E Task Class — Numeric Deviation & Normalization (Explicit)
@@ -178,7 +193,43 @@ Examples:
 * Regime classification
 * Composite signals
 
-**Status:** ⏸️ DEFERRED (pending Option E stabilization)
+**Status:** 🟡 NEXT ACTIVE WORKSTREAM (Wave 1 defined; implementation pending)
+
+**Wave 1 scope (authoritative):**
+* Bollinger semantic activation
+* VWMA rule semantics
+
+**Wave 1 boundary:**
+* Option F must consume existing numeric primitives from the indicator dataframe
+* semantic meaning must be created through the rulebook / signal-classifier path
+* UI layers may display semantic outputs but must not invent semantics locally
+
+**Deferred beyond Wave 1:**
+* composites
+* cross-confirmation
+* regime logic
+
+**Deferred outside Option F Wave 1:**
+* SMA slope / SMA semantic reopen
+  - remains a later numeric backlog / review item, not a first-wave semantic target
+
+---
+#### Option F Sequencing (authoritative)
+
+Option F should proceed in semantic tiers:
+
+**Wave 1 — single-family semantic activation**
+- Bollinger semantics
+- VWMA semantics
+
+**Wave 2 — multi-indicator semantics**
+- composites
+- cross-confirmation
+
+**Wave 3 — higher-order context**
+- regime logic
+
+This sequencing exists to prevent higher-order semantic work from being introduced before family-level semantic outputs are stable.
 
 ---
 
@@ -371,7 +422,7 @@ Rolling heatmap core is functional and validated.
 
 ---
 
-## Phase Transition — Phase III Complete → Option E Activation
+## Phase Transition — Option E Wave 1 Complete → Option F Activation
 
 **Prerequisites satisfied:**
 
@@ -380,13 +431,18 @@ Rolling heatmap core is functional and validated.
    - `baseline/indicator_baseline_AAPL_phase3_baseline.csv`
 3. Rulebook version frozen  
    - `master_rules_normalized__phase3_baseline.json`
+4. Option E Wave 1 numeric primitives completed and validated
 
 **Interpretation:**
-- System is now safe to proceed with derived numeric work (Option E)
-- Baselines enable detection of unintended numeric or semantic drift
+- System is now safe to proceed with first-wave semantic activation (Option F)
+- Numeric baselines remain available to detect unintended drift while semantic work is introduced
 
 **Next Active Workstream:**
-→ Option E — Derived Numeric Indicators
+→ Option F — Semantic & Relational Logic (Wave 1)
+
+**Wave 1 initial targets:**
+- Bollinger semantics
+- VWMA rule semantics
 
 ## MAJOR PHASE IV — Semantic Presentation & Decision Support
 
@@ -472,8 +528,8 @@ No structural DB changes should occur until these decisions are finalized.
 
   * Core engine: ✅
   * Option D: ✅
-  * Option E: ✅ active
-  * Option F: ⏸️ deferred pending Option E stabilization
+  * Option E: ✅ Wave 1 complete
+  * Option F: ⏸️ deferred pending explicit reopening
 
 * Phase III:
 

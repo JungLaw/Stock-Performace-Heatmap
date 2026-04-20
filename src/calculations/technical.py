@@ -1,4 +1,4 @@
-# Stamp: Mon, April 13, 2026 6:44PM
+# Stamp: Sun, April 19, 2026 4:02PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -67,7 +67,6 @@ def _resolve_rulebook_path(rules_path: Union[str, Path]) -> str:
 
     # 3) Return original string (so caller logs the meaningful path)
     return str(rp)
-
 
 class DatabaseIntegratedTechnicalCalculator:
     """
@@ -868,19 +867,17 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             return {}
 
-        # Default indicator set: Option C baseline (non-breaking).
-        # Tests / Option A onboarding can pass an explicit list.
-        # Coverage policy:
-        #  - By default, keep the Option C baseline list (non-breaking).
-        #  - If use_meta_coverage=True, derive indicator families from `optionc_meta`
-        #    so scoring coverage always matches rolling payload coverage.
+        # Default indicator set:
+        # - If caller provides `indicators`, respect that explicitly.
+        # - Otherwise, derive scored-family coverage from `_get_optionc_meta()`
+        #   so runtime score coverage stays aligned with emitted rolling rows.
+        #
+        # This is the correct Option F / rolling-heatmap behavior because
+        # `_get_optionc_meta()` is already the single source of truth for
+        # rolling payload inclusion.
         if indicators is None:
-            if use_meta_coverage:
-                # Keep `optionc_meta` as the single source of truth for rolling coverage.
-                optionc_meta = self._get_optionc_meta()
-                indicators = sorted({m["engine_indicator"] for m in optionc_meta})
-            else:
-                indicators = ["RSI", "MACD", "Stochastic", "ADX"]
+            optionc_meta = self._get_optionc_meta()
+            indicators = sorted({m["engine_indicator"] for m in optionc_meta})
             
         scores = run_optionc_heatmap(
             df_ind, 
@@ -1060,6 +1057,24 @@ class DatabaseIntegratedTechnicalCalculator:
                 "display_key": "ADX_20",
                 "value_col": "ADX_20",
             },            
+            {
+                "engine_indicator": "VWMA",
+                "param_key": "10",
+                "display_key": "VWMA_10",
+                "value_col": "VWMA_10",
+            },
+            {
+                "engine_indicator": "VWMA",
+                "param_key": "20",
+                "display_key": "VWMA_20",
+                "value_col": "VWMA_20",
+            },
+            {
+                "engine_indicator": "VWMA",
+                "param_key": "50",
+                "display_key": "VWMA_50",
+                "value_col": "VWMA_50",
+            },
             # -------------------------
             # Option B — Core Volume
             # -------------------------
@@ -1505,6 +1520,10 @@ class DatabaseIntegratedTechnicalCalculator:
                     cell["extras"] = extras
 
                 row_cells[display_key] = cell
+
+                # (DELETE) TEMP DEBUG — inspect emitted VWMA payload cell
+                if eng_name == "VWMA":
+                    print("VWMA ROW CELL DEBUG:", display_key, date_key, cell)
 
             if row_cells:
                 data[date_key] = row_cells

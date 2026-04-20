@@ -1,3 +1,4 @@
+# Stamp: Sun, April 19, 2026 4:02PM
 # signal_classifier.py
 """
 Signal classification and rule-engine evaluation.
@@ -69,6 +70,98 @@ INSTANCE_BINDINGS = {
     #     "WILLR": "WILLR_{param_key}",
     # },
 }
+
+def _normalize_bollinger_param_key(param_key: str) -> list[str]:
+    """
+    Return candidate suffixes for Bollinger dataframe columns.
+
+    Rulebook param keys use forms like:
+      - "20_2.0"
+      - "10_1.5"
+      - "50_2.5"
+
+    The dataframe may store the sigma component with or without trailing .0,
+    so we generate a small candidate list to resolve the actual column names
+    without reopening numeric computation.
+    """
+    candidates: list[str] = []
+    raw = str(param_key)
+
+    # Original form first
+    candidates.append(raw)
+
+    parts = raw.split("_")
+    if len(parts) == 2:
+        length_part, sigma_part = parts[0], parts[1]
+
+        # Strip only trailing .0 for cases like 2.0 -> 2
+        if sigma_part.endswith(".0"):
+            candidates.append(f"{length_part}_{sigma_part[:-2]}")
+
+        # General float normalization fallback (e.g. 2.0 -> 2, 1.50 -> 1.5)
+        try:
+            sigma_float = float(sigma_part)
+            sigma_compact = f"{sigma_float:g}"
+            compact = f"{length_part}_{sigma_compact}"
+            if compact not in candidates:
+                candidates.append(compact)
+        except Exception:
+            pass
+
+    # de-dup while preserving order
+    seen = set()
+    out = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _bind_bollinger_context(
+    context: Dict[str, Any],
+    df: pd.DataFrame,
+    param_key: str,
+) -> None:
+    """
+    Bind Bollinger rulebook variables to existing dataframe columns.
+
+    Rulebook variables:
+      - close  -> already handled via Close -> close alias
+      - mid    -> BB_<param>_mid
+      - std    -> derived from already-computed band geometry:
+                  (upper - mid) / sigma
+
+    This stays within Option F scope because it consumes existing numeric
+    columns and only creates semantic-layer aliases for rule evaluation.
+    """
+    suffix_candidates = _normalize_bollinger_param_key(param_key)
+
+    for suffix in suffix_candidates:
+        mid_col = f"BB_{suffix}_mid"
+        upper_col = f"BB_{suffix}_upper"
+        lower_col = f"BB_{suffix}_lower"
+
+        if mid_col in df.columns:
+            context["mid"] = df[mid_col]
+
+            # Bind std only if we can resolve sigma from param_key and the upper band exists.
+            parts = str(param_key).split("_")
+            if len(parts) == 2 and upper_col in df.columns:
+                try:
+                    sigma = float(parts[1])
+                    if sigma != 0:
+                        context["std"] = (df[upper_col] - df[mid_col]) / sigma
+                except Exception:
+                    pass
+
+            # Optional convenience aliases for future diagnostics / hover support
+            if upper_col in df.columns:
+                context["upper"] = df[upper_col]
+            if lower_col in df.columns:
+                context["lower"] = df[lower_col]
+
+            return
 
 class SignalEngine:
     """
@@ -216,7 +309,7 @@ class SignalEngine:
             context["close"] = context["Close"]
 
         # ------------------------------------------------------------
-        # Option D: instance binding (rulebook variable → df column)
+        # Instance binding (rulebook variable → df column / alias)
         # ------------------------------------------------------------
         bindings = INSTANCE_BINDINGS.get(indicator_name)
         if bindings:
@@ -224,6 +317,22 @@ class SignalEngine:
                 col_name = col_template.format(param_key=param_key)
                 if col_name in df.columns:
                     context[var_name] = df[col_name]
+
+        # ------------------------------------------------------------
+        # Option F Wave 1: Bollinger semantic binding
+        # Rulebook variables:
+        #   - close  (already satisfied via Close -> close alias above)
+        #   - mid
+        #   - std
+        # Bind these to existing Bollinger dataframe columns without
+        # reopening numeric computation.
+        # ------------------------------------------------------------
+        if indicator_name == "Bollinger":
+            _bind_bollinger_context(
+                context=context,
+                df=df,
+                param_key=param_key,
+            )
 
 #        # ------------------------------------------------------------
 #        # Instance binding (Option D concept): bind rulebook variables

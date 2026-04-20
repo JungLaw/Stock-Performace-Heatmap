@@ -1,4 +1,4 @@
-# Stamp: Mon, April 13, 2026 6:44PM
+# Stamp: Sun, April 19, 2026 4:02PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -90,6 +90,21 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Hull Moving Average over a longer window.",
         "how_to_read": "Smoother trend reference with reduced lag relative to longer SMAs/EMAs.",
     },
+    "VWMA_10": {
+        "display_name": "VWMA (10)",
+        "definition": "Volume Weighted Moving Average weights price by volume over the last 10 periods.",
+        "how_to_read": "Short-term trend reference. Because it is volume-weighted, heavier-volume sessions influence the average more than low-volume sessions.",
+    },
+    "VWMA_20": {
+        "display_name": "VWMA (20)",
+        "definition": "Volume Weighted Moving Average weights price by volume over the last 20 periods.",
+        "how_to_read": "Medium-term trend reference. In Wave 1, shading should reflect engine-native VWMA rule scores while the displayed value remains the raw VWMA numeric value.",
+    },
+    "VWMA_50": {
+        "display_name": "VWMA (50)",
+        "definition": "Volume Weighted Moving Average weights price by volume over the last 50 periods.",
+        "how_to_read": "Longer-term trend reference. Smoother than VWMA(10) and VWMA(20), with more emphasis on persistent, volume-backed trend direction.",
+    },    
     # Momentum / oscillators
     "RSI_14": {
         "display_name": "RSI (14)",
