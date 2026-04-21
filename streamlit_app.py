@@ -1935,6 +1935,7 @@ def show_technical_analysis_dashboard():
                 #"ADX_20",
                 #"OBV",
                 "VWMA_10", "VWMA_20", "VWMA_50",  
+                "MACD_12_26_9", "MACD_8_17_5", "MACD_20_50_10", # "MACD_5_34_1"
                 # If you want to include the UI-mock expansion, uncomment these:
                 # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
             ]

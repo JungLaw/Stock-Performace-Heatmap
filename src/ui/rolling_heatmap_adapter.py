@@ -182,6 +182,26 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Average Directional Index measures trend strength (not direction).",
         "how_to_read": "Smoother than ADX(14); better for longer trend-strength regimes.",
     },
+    "MACD_12_26_9": {
+        "display_name": "MACD(12,26,9)",
+        "definition": "Moving Average Convergence Divergence histogram using parameters 12, 26, and 9.",
+        "how_to_read": "Histogram value is calculated as the 'MACD Line' minus the 'Signal Line'. A positive histogram value (above zero) signifies that the MACD Line has recently crossed above the Signal Line.",
+    },
+    "MACD_5_34_1": {
+        "display_name": "MACD(5,34,1)",
+        "definition": "Moving Average Convergence Divergence histogram using parameters 5, 34, and 1.",
+        "how_to_read": "Displayed value is the MACD histogram. Hover also shows the MACD line, signal line, and day-over-day histogram change.",
+    },
+    "MACD_8_17_5": {
+        "display_name": "MACD(8,17,5)",
+        "definition": "Moving Average Convergence Divergence histogram using parameters 8, 17, and 5.",
+        "how_to_read": "Displayed value is the MACD histogram. Hover also shows the MACD line, signal line, and day-over-day histogram change.",
+    },
+    "MACD_20_50_10": {
+        "display_name": "MACD(20,50,10)",
+        "definition": "Moving Average Convergence Divergence histogram using parameters 20, 50, and 10.",
+        "how_to_read": "Displayed value is the MACD histogram. Hover also shows the MACD line, signal line, and day-over-day histogram change.",
+    },
     # Volume-based
     "MFI_14": {
         "display_name": "MFI (14)",
@@ -890,6 +910,22 @@ def build_plotly_heatmap_inputs(
             definition = defs.get(key, {}).get("definition", "")
             how_to_read = defs.get(key, {}).get("how_to_read", "")
 
+            macd_context_block = ""
+
+            if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
+                parts = []
+
+                macd_line = extra_map.get("macd_line")
+                if not _is_missing(macd_line):
+                    parts.append(f"MACD Line: {format_signed_number(macd_line, decimals=2)}")
+
+                macd_signal = extra_map.get("macd_signal")
+                if not _is_missing(macd_signal):
+                    parts.append(f"Signal Line: {format_signed_number(macd_signal, decimals=2)}")
+
+                if parts:
+                    macd_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
             # ----------------------------
             # Preformatted hover fragments (Indicator-row)
             # ----------------------------
@@ -969,7 +1005,7 @@ def build_plotly_heatmap_inputs(
                     "volume_block": volume_block,
                     "volume_vs_avg_block": volume_vs_avg_block,
                     "band_context_block": band_context_block,
-
+					"macd_context_block": macd_context_block,
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -1014,6 +1050,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
         "%{customdata.signal_line}"
+		"%{customdata.macd_context_block}"
         "%{customdata.rule_block}"
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"

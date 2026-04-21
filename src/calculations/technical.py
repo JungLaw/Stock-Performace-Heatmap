@@ -1500,6 +1500,28 @@ class DatabaseIntegratedTechnicalCalculator:
                                 except (TypeError, ValueError):
                                     pass
 
+                # MACD-specific payload enrichment:
+                # keep histogram as the row value, but expose line/signal for hover.
+                if eng_name == "MACD" and dt in df_ind.index:
+                    line_col = f"{display_key}_line"
+                    signal_col = f"{display_key}_signal"
+
+                    if line_col in df_ind.columns:
+                        raw_line = df_ind.loc[dt, line_col]
+                        if not pd.isna(raw_line):
+                            try:
+                                extras["macd_line"] = float(raw_line)
+                            except (TypeError, ValueError):
+                                pass
+
+                    if signal_col in df_ind.columns:
+                        raw_signal = df_ind.loc[dt, signal_col]
+                        if not pd.isna(raw_signal):
+                            try:
+                                extras["macd_signal"] = float(raw_signal)
+                            except (TypeError, ValueError):
+                                pass
+                            
                 if value is not None:
                     hover = f"{display_key} = {value:.2f}, score={score_int} ({label})"
                 else:
