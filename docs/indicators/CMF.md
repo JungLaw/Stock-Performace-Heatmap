@@ -4,8 +4,6 @@ Status: Incomplete
 CMF is for assessing the prevailing buy or sell pressure over a sustained period. 
 - CMF helps confirm trends and potential reversals.
 
----
-
 
 ---
 **Class**: Volume Indicator
@@ -14,7 +12,7 @@ CMF is for assessing the prevailing buy or sell pressure over a sustained period
 
 **Use when**: You need to assess overall buying/selling pressure over a multi-day period.
 
-**Key Concept:** Combines [[#5. Accumulation/Distribution Line (A/D Line)|Accumulation/Distribution Line]] concept with momentum analysis by averaging the money flow multiplier over a set period (typically 21 days).
+**Key Concept:** Combines Accumulation/Distribution Line concept with momentum analysis by averaging the money flow multiplier over a set period (typically 21 days).
 
 **Calculation:** Sum of money flow volume over N periods divided by sum of volume over same N periods. Oscillates between +1 and -1.
 
@@ -30,3 +28,10 @@ CMF is for assessing the prevailing buy or sell pressure over a sustained period
 **Limitations:** Can lag during rapid price movements. May produce whipsaws around the zero line in choppy markets.
 
 **Complexity Level:** Intermediate
+
+**Difference Between: Chaikin Money Flow vs. MFI**:
+MFI gives a more direct overbought/oversold signal, whereas CMF is more focused on the overall trend strength and direction of money flow.
+
+The main difference is that: 
+- Money Flow Index (MFI) is a momentum oscillator that uses price and volume to identify overbought/oversold conditions, ranging from 0-100
+- Chaikin Money Flow (CMF) measures the strength of buying and selling pressure over a longer period, using a multiplier based on the price's closing position within its high-low range, resulting in a range between -1 and +1. 

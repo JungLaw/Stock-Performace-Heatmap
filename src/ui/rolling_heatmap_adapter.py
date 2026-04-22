@@ -106,16 +106,36 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "how_to_read": "Longer-term trend reference. Smoother than VWMA(10) and VWMA(20), with more emphasis on persistent, volume-backed trend direction.",
     },    
     # Momentum / oscillators
+    "RSI_10": {
+        "display_name": "RSI(10)",
+        "definition": "Compares recent gains vs losses on a 0–100 scale. 80+ = strong sell | 70+ = sell | <30 = buy | <20 = strong buy",
+        "how_to_read": "When RSI is rising above 50 and MACD crosses above its signal line, it reinforces the likelihood of an uptrend continuation. If RSI makes lower highs while MACD makes higher highs (or vice versa), it may indicate weakening momentum and a potential trend shift.",
+    },
     "RSI_14": {
         "display_name": "RSI (14)",
         "definition": "Relative Strength Index compares recent gains vs losses on a 0–100 scale.",
         "how_to_read": "Higher = stronger recent gains; lower = stronger recent losses.",
     },
+    "RSI_21": {
+        "display_name": "RSI(21)",
+        "definition": "Relative Strength Index compares recent gains vs losses on a 0–100 scale.",
+        "how_to_read": "↑RSI above 50 + ↑volume ~ strong buying interest (reinforcing continuation of an uptrend). If RSI signals divergence (e.g., RSI (lower highs) + price (higher highs) +  high volume ~ possible trend reversal.",
+    },
+#    "WILLR_5": {
+#        "display_name": "Williams %R(5)",
+#        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
+#        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
+#    },
     "WILLR_14": {
         "display_name": "Williams %R (14)",
         "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
         "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
     },
+#    "WILLR_20": {
+#        "display_name": "Williams %R(20)",
+#        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
+#        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
+#    },
     "UO_5_10_15": {
         "display_name": "UO(5,10,15)",
         "definition": "Ultimate Oscillator blends short/medium/long buying pressure into one momentum oscillator.",
@@ -146,16 +166,26 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Commodity Channel Index measures how far price has deviated from its statistical mean.",
         "how_to_read": "Longer length smooths swings; +100/-100 remain common reference levels.",
     },
+    "ROC_9": {
+        "display_name": "ROC(9)",
+        "definition": "More sensitive; faster signals; for ST trading; Caution: more frequent false signals",
+        "how_to_read": "Confirming trend strength and direction in trending markets.",
+    },    
     "ROC_12": {
         "display_name": "ROC (12)",
-        "definition": "Rate of Change measures percent change versus N periods ago.",
+        "definition": "Measures the momentum of price changes. ROC measures %Δ versus N periods ago.",
         "how_to_read": "Positive = up vs N periods ago; negative = down vs N periods ago.",
     },
     "ROC_20": {
         "display_name": "ROC (20)",
-        "definition": "Rate of Change over a longer window than ROC(12).",
+        "definition": "14-36 days offers a balance of sensitivity & reliability for swing trading.",
         "how_to_read": "Smoother momentum read than ROC(12).",
     },
+    "ROC_50": {
+        "display_name": "ROC(50)",
+        "definition": "Use longer periods, such as 36 or 200 days, for a smoother indicator that identifies long-term trend.",
+        "how_to_read": "Strength: Highly responsive to price changes, giving traders quick insights into market dynamics.",
+    },    
     "BB_PCT_B": {
         "display_name": "BB %B",
         "definition": "Bollinger %B shows where price sits within the Bollinger band range.  A 'location indicactor'. Used for measuring relative price location within the bands (oscillator value).",
@@ -203,14 +233,39 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "how_to_read": "Displayed value is the MACD histogram. Hover also shows the MACD line, signal line, and day-over-day histogram change.",
     },
     # Volume-based
+    "MFI_10": {
+        "display_name": "MFI(10)",
+        "definition": "MFI combines price and volume to estimate buying vs selling pressure. 10d: more sensitivity to recent price & volume Δs; identify overbought/oversold conditions quickly.",
+        "how_to_read": "Higher suggests stronger buying pressure; lower suggests stronger selling pressure.",
+    },
     "MFI_14": {
         "display_name": "MFI (14)",
         "definition": "Money Flow Index combines price and volume to estimate buying vs selling pressure.",
+        "how_to_read": "MFI<20 → Oversold (buy) | MFI>80 → Overbought (sell). Neutral: 45–55.",
+    },
+    "MFI_30": {
+        "display_name": "MFI(30)",
+        "definition": "30d: for LT analysis, smoothing out ST volatility to focus on sustained buying/selling pressure.",
         "how_to_read": "Higher suggests stronger buying pressure; lower suggests stronger selling pressure.",
+    },
+    "CMF_10": {
+        "display_name": "CMF(10)",
+        "definition": "CMF estimates buying/selling pressure using price and volume.",
+        "how_to_read": "Above 0 suggests accumulation; below 0 suggests distribution.",
     },
     "CMF_21": {
         "display_name": "CMF (21)",
         "definition": "Chaikin Money Flow estimates buying/selling pressure using price and volume.",
+        "how_to_read": ">0: accumulation bias (buying pressure) | Above +0.25 = strong accumulation; <0 = distribution bias (selling pressure) | Below -0.25 = strong distribution",
+    },
+    "CMF_50": {
+        "display_name": "CMF(50)",
+        "definition": "CMF estimates buying/selling pressure using price and volume.",
+        "how_to_read": "Effective in both trending and ranging markets. Works well on daily and weekly charts for swing trading analysis.",
+    },
+    "CMF_30": {
+        "display_name": "CMF(30)",
+        "definition": "CMF estimates buying/selling pressure using price and volume.",
         "how_to_read": "Above 0 suggests accumulation; below 0 suggests distribution.",
     },
     "OBV": {
@@ -526,6 +581,18 @@ def get_indicator_family(row_key: str) -> str:
     if row_key.startswith("BB_") or row_key.startswith("BOLL_") or row_key.startswith("Bollinger"):
         return "Bollinger"
 
+# In `get_indicator_family()` but not here (a/o 4/22/26)
+#    if row_key.startswith("SMA_"):
+#        return "SMA"
+#    if row_key.startswith("ATR_"):
+#        return "ATR"
+#    if row_key.startswith("ATRP_"):
+#        return "ATR"
+
+#    # Future-proofed even if currently deferred / out of scope
+#    if row_key.startswith("BB_") or row_key.startswith("BOLL_") or row_key.startswith("Bollinger"):
+#        return "Bollinger"
+
     return row_key
 
 
@@ -651,6 +718,8 @@ def build_plotly_heatmap_inputs(
             return "Ultimate_Oscillator"
         if indicator_key.startswith("BullBearPower_"):
             return "BullBearPower"
+        if indicator_key.startswith("VWMA_"):
+            return "VWMA"
         return None
 
     def _rulebook_param_key(indicator_key: str) -> Optional[str]:

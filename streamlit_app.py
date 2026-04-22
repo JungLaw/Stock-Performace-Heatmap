@@ -1905,6 +1905,8 @@ def show_technical_analysis_dashboard():
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
             DEFAULT_KEYS = [
                 "RSI_14",
+                "RSI_10",
+                "RSI_21",
                 "SMA_200",
                 #"EMA_5",
                 #"EMA_10",
@@ -1917,17 +1919,26 @@ def show_technical_analysis_dashboard():
                 "HMA_21",
                 #"HMA_50",
                 "RSI_14",
+                #"WILLR_5",     # didn't display correctly
                 "WILLR_14",
+                #"WILLR_20",
+#                "CMF_10",      # didn't display correctly
                 "CMF_21",
+#                "CMF_50",      # didn't display correctly
+#                "CMF_30",      # didn't display correctly
                 #"UO_5_10_15",
                 "UO_7_14_28",
                 #"UO_10_20_40",
                 #"CCI_10"
                 "CCI_14",
                 #"CCI_20"
+                "MFI_10",
                 "MFI_14",
+                "MFI_30",
+                "ROC_9",
                 "ROC_12",
-                "ROC_20",
+                #"ROC_20",
+                #"ROC_50",
                 "BB_PCT_B",
                 "BB_BW",
                 #"ADX_19",

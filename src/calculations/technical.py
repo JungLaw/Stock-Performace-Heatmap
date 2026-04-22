@@ -1544,8 +1544,8 @@ class DatabaseIntegratedTechnicalCalculator:
                 row_cells[display_key] = cell
 
                 # (DELETE) TEMP DEBUG — inspect emitted VWMA payload cell
-                if eng_name == "VWMA":
-                    print("VWMA ROW CELL DEBUG:", display_key, date_key, cell)
+                #if eng_name == "VWMA":
+                #    print("VWMA ROW CELL DEBUG:", display_key, date_key, cell)
 
             if row_cells:
                 data[date_key] = row_cells

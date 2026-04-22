@@ -302,7 +302,7 @@
               "sell": "Close < VWMA_10 and VWMA_slope < 0",
               "strong_sell": "Close < VWMA_10 and VWMA_slope < -0.002 and falling_2bar(VWMA_10)",
               "k": 0.25,
-              "notes": "VWMA uses 0.25\u00c3\u2014ATR% band (k-value). Volume-weighted slope gives cleaner trend view."
+              "notes": "VWMA uses 0.25 ATR% band (k-value). Volume-weighted slope gives cleaner trend view."
             },
             "20": {
               "strong_buy": "Close > VWMA_20 and VWMA_slope > 0.0015 and rising_2bar(VWMA_20)",
@@ -311,7 +311,7 @@
               "sell": "Close < VWMA_20 and VWMA_slope < 0",
               "strong_sell": "Close < VWMA_20 and VWMA_slope < -0.0015 and falling_2bar(VWMA_20)",
               "k": 0.5,
-              "notes": "VWMA uses 0.50\u00c3\u2014ATR% band (k-value)."
+              "notes": "VWMA uses 0.50 ATR% band (k-value)."
             },
             "50": {
               "strong_buy": "Close > VWMA_50 and VWMA_slope > 0.001 and rising_2bar(VWMA_50)",
@@ -320,7 +320,7 @@
               "sell": "Close < VWMA_50 and VWMA_slope < 0",
               "strong_sell": "Close < VWMA_50 and VWMA_slope < -0.001 and falling_2bar(VWMA_50)",
               "k": 1.0,
-              "notes": "Neutral band: 1.0\u00c3\u2014ATR% band (k-value); slope threshold scaled for long-term."
+              "notes": "Neutral band: 1.0 ATR% band (k-value); slope threshold scaled for long-term."
             }
           },
           "overlay": {
@@ -597,7 +597,7 @@
               "neutral": "abs(MACD_12_26_9_hist) <= 0.2 * ATR_12",
               "sell": "MACD_12_26_9 < MACD_12_26_9_signal",
               "strong_sell": "MACD_12_26_9 < MACD_12_26_9_signal and falling_2bar(MACD_12_26_9_hist, 2) and MACD_12_26_9_hist < 0",
-              "notes": "Histogram slope gives clean \u00e2\u20ac\u02dcstrength\u00e2\u20ac\u2122 confirmation; loose 2-bar slope."
+              "notes": "Histogram slope gives clean strength confirmation; loose 2-bar slope."
             },
             "20_50_10": {
               "strong_buy": "MACD_20_50_10 > MACD_20_50_10_signal and rising_2bar(MACD_20_50_10_hist, 2) and MACD_20_50_10_hist > 0",
@@ -661,7 +661,7 @@
               "neutral": "-55 <= WILLR_5 <= -45",
               "sell": "WILLR_5 < -45",
               "strong_sell": "WILLR_5 < -60 and falling_2bar(WILLR_5)",
-              "notes": "Inverse of Stoch logic. Neutral = \u00e2\u02c6\u201955 to \u00e2\u02c6\u201945."
+              "notes": "Inverse of Stoch logic. Neutral = 55 to 45."
             },
             "14": {
               "strong_buy": "WILLR_14 > -40 and rising_2bar(WILLR_14)",
@@ -1027,7 +1027,7 @@
               "neutral": "abs(close-mid) <= 0.5*std",
               "sell": "close < mid - 0.5*std",
               "strong_sell": "close < mid - 1.0*std",
-              "notes": "Neutral band uses \u00c2\u00b10.5\u00cf\u0192. Strong = \u00c2\u00b11.0\u00cf\u0192."
+              "notes": "Neutral band uses 0.5. Strong = 1.0."
             },
             "20_2.0": {
               "strong_buy": "close > mid + 1.0*std",
