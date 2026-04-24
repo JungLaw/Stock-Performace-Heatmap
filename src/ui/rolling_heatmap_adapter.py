@@ -186,16 +186,36 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Use longer periods, such as 36 or 200 days, for a smoother indicator that identifies long-term trend.",
         "how_to_read": "Strength: Highly responsive to price changes, giving traders quick insights into market dynamics.",
     },    
+    "BB_PCT_B_ST": {
+        "display_name": "BB %B(ST)",
+        "definition": "Bollinger %B using Bollinger(10,1.5). Shows where price sits within the ST band range.",
+        "how_to_read": "Short-term Bollinger location measure. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+    },
+    "BB_BW_ST": {
+        "display_name": "BB Bandwidth(ST)",
+        "definition": "Bollinger Bandwidth using Bollinger(10,1.5). Measures short-term band width relative to the middle band.",
+        "how_to_read": "Short-term Bollinger width measure. Higher values mean wider short-term bands; lower values mean tighter short-term bands.",
+    },
     "BB_PCT_B": {
         "display_name": "BB %B",
         "definition": "Bollinger %B shows where price sits within the Bollinger band range.  A 'location indicactor'. Used for measuring relative price location within the bands (oscillator value).",
-        "how_to_read": "Display-only preview for now. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+        "how_to_read": "Canonical medium-term Bollinger %B using Bollinger(20,2.0). Lower values sit closer to the lower band; higher values sit closer to the upper band.",
     },
     "BB_BW": {
         "display_name": "BB Bandwidth",
         "definition": "Bollinger Bandwidth measures the width of the Bollinger Bands relative to the middle band.",
-        "how_to_read": "Display-only preview for now. Higher values mean wider bands; lower values mean tighter bands.",
+        "how_to_read": "Canonical medium-term Bollinger bandwidth using Bollinger(20,2.0). Higher values mean wider bands; lower values mean tighter bands.",
     },
+    "BB_PCT_B_LT": {
+        "display_name": "BB %B(LT)",
+        "definition": "Bollinger %B using Bollinger(50,2.5). Shows where price sits within the long-term band range.",
+        "how_to_read": "Long-term Bollinger location measure. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+    },
+    "BB_BW_LT": {
+        "display_name": "BB Bandwidth(LT)",
+        "definition": "Bollinger Bandwidth using Bollinger(50,2.5). Measures LT band width relative to the middle band.",
+        "how_to_read": "Long-term Bollinger width measure. Higher values mean wider long-term bands; lower values mean tighter long-term bands.",
+    },    
     # Trend strength
     "ADX_9": {
         "display_name": "ADX (9)",
@@ -360,10 +380,10 @@ def format_cell_value(indicator_key: str, v: Any) -> str:
     if indicator_key.startswith("ROC"):
 #        return f"{fv:.3f}"             # fractional units
         return f"{fv * 100.0:.2f}"      # percent-point units
-    if indicator_key == "BB_PCT_B":
+    if indicator_key.startswith("BB_PCT_B"):
         return f"{fv * 100.0:.1f}"
-    if indicator_key == "BB_BW":
-        return f"{fv * 100.0:.2f}" 
+    if indicator_key.startswith("BB_BW"):
+        return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
         return f"{fv:.3f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
@@ -437,11 +457,11 @@ def format_hover_value(indicator_key: str, v: Any) -> str:
         return f"{fv:.1f}"
     if indicator_key.startswith("ROC"):
 #        return f"{fv:.3f}"          # fractional units
-        return f"{fv * 100.0:.2f}"   # percent-point units 
-    if indicator_key == "BB_PCT_B":
+        return f"{fv * 100.0:.2f}"   # percent-point units   
+    if indicator_key.startswith("BB_PCT_B"):
         return f"{fv * 100.0:.1f}"
-    if indicator_key == "BB_BW":
-        return f"{fv * 100.0:.2f}"    
+    if indicator_key.startswith("BB_BW"):
+        return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
         return f"{fv:.3f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
@@ -751,6 +771,8 @@ def build_plotly_heatmap_inputs(
             return "BullBearPower"
         if indicator_key.startswith("VWMA_"):
             return "VWMA"
+        if indicator_key.startswith("BB_PCT_B") or indicator_key.startswith("BB_BW"):
+            return "Bollinger"
         return None
 
     def _rulebook_param_key(indicator_key: str) -> Optional[str]:
@@ -763,6 +785,13 @@ def build_plotly_heatmap_inputs(
         """
         if indicator_key == "OBV":
             return "0"
+        # Explicit Bollinger display-row mappings
+        if indicator_key == "BB_PCT_B_ST" or indicator_key == "BB_BW_ST":
+            return "10_1.5"
+        if indicator_key == "BB_PCT_B" or indicator_key == "BB_BW":
+            return "20_2.0"
+        if indicator_key == "BB_PCT_B_LT" or indicator_key == "BB_BW_LT":
+            return "50_2.5"
         if "_" not in indicator_key:
             return None
         return indicator_key.split("_", 1)[1]
@@ -915,7 +944,7 @@ def build_plotly_heatmap_inputs(
                 cd_row.append(
                     {
                         "indicator_key": "__PRICE__",
-                        "display_name": "Price",
+                        "display_name": "Price",   # To get rid of "Price" "display_name": "",
                         "date": d_raw,
                         "raw_value": v,
                         "formatted_value": formatted_value,
@@ -929,6 +958,12 @@ def build_plotly_heatmap_inputs(
                         "volume": vol,
                         "volume_5d_avg": vol_avg,
                         "volume_vs_5d_avg_pct": vol_rel,
+
+                        # no indicator-specific content
+                        "macd_context_block": "",
+                        "stoch_context_block": "",
+                        "bullbear_context_block": "",
+                        "band_context_block": "",
 
                         # no rule semantics
                         "rule_expr": "",
@@ -1156,7 +1191,9 @@ def build_plotly_heatmap_inputs(
             volume_vs_avg_block = ""
             band_context_block = ""
 
-            if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
+            # BOLLINGERS: Custom hover content (deltas)
+            #if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
+            if key in {"BB_PCT_B_ST", "BB_BW_ST", "BB_PCT_B", "BB_BW", "BB_PCT_B_LT", "BB_BW_LT"} and isinstance(extra_map, dict) and extra_map:
                 parts = []
                 current_price = price_by_date.get(d_raw)
 
@@ -1260,7 +1297,7 @@ def make_rolling_heatmap_figure(
         "<b>%{customdata.display_name}</b><br>"
         "Date: %{customdata.date}<br>"
         "<br>"
-        "Value: %{customdata.formatted_value}<br>"
+        "Price: %{customdata.formatted_value}<br>"  #"%{customdata.date}: %{customdata.formatted_value}<br>"  #for 'date: price'
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"

@@ -534,28 +534,34 @@ def compute_all_indicators(
         upper = pd.to_numeric(upper, errors="coerce").astype("float64")
         lower = pd.to_numeric(lower, errors="coerce").astype("float64")
 
-        # Option C naming uses integer std tag (e.g. BB_20_2_mid)
-        std_tag_int = int(round(n_std))
-        df[f"BB_{p_i}_{std_tag_int}_mid"] = mid
-        df[f"BB_{p_i}_{std_tag_int}_upper"] = upper
-        df[f"BB_{p_i}_{std_tag_int}_lower"] = lower
+        # Preserve sigma precision in the dataframe column identity:
+        # 10_1.5 -> BB_10_1.5_*
+        # 20_2.0 -> BB_20_2_*
+        # 50_2.5 -> BB_50_2.5_*
+        std_tag_key = f"{n_std:g}"
+        df[f"BB_{p_i}_{std_tag_key}_mid"] = mid
+        df[f"BB_{p_i}_{std_tag_key}_upper"] = upper
+        df[f"BB_{p_i}_{std_tag_key}_lower"] = lower
 
-        # Option E canonical Bollinger-derived numeric outputs.
-        # Emit only for the canonical 20,2 anchor tuple to avoid
-        # parameterized naming churn.
+        band_range = upper - lower
+
+        # %B = (price - lower_band) / (upper_band - lower_band)
+        bb_pct_b = (price - lower) / band_range
+        bb_pct_b = pd.to_numeric(bb_pct_b, errors="coerce").astype("float64")
+        bb_pct_b = bb_pct_b.replace([np.inf, -np.inf], np.nan)
+
+        # Bandwidth = (upper_band - lower_band) / middle_band
+        bb_bw = band_range / mid
+        bb_bw = pd.to_numeric(bb_bw, errors="coerce").astype("float64")
+        bb_bw = bb_bw.replace([np.inf, -np.inf], np.nan)
+
+        # Parameter-specific Bollinger-derived numeric outputs for row display.
+        std_tag_id = std_tag_key.replace(".", "_")
+        df[f"BB_PCT_B_{p_i}_{std_tag_id}"] = bb_pct_b
+        df[f"BB_BW_{p_i}_{std_tag_id}"] = bb_bw
+
+        # Preserve the canonical Option E anchor outputs for 20,2.0
         if p_i == 20 and abs(n_std - 2.0) < 1e-12:
-            band_range = upper - lower
-
-            # %B = (price - lower_band) / (upper_band - lower_band)
-            bb_pct_b = (price - lower) / band_range
-            bb_pct_b = pd.to_numeric(bb_pct_b, errors="coerce").astype("float64")
-            bb_pct_b = bb_pct_b.replace([np.inf, -np.inf], np.nan)
-
-            # Bandwidth = (upper_band - lower_band) / middle_band
-            bb_bw = band_range / mid
-            bb_bw = pd.to_numeric(bb_bw, errors="coerce").astype("float64")
-            bb_bw = bb_bw.replace([np.inf, -np.inf], np.nan)
-
             df["BB_PCT_B"] = bb_pct_b
             df["BB_BW"] = bb_bw
  

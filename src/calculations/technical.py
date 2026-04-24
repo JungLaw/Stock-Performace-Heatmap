@@ -1010,6 +1010,28 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "Bollinger",
+                "param_key": "10_1.5",
+                "display_key": "BB_PCT_B_ST",
+                "value_col": "BB_PCT_B_10_1_5",
+                "extra_value_cols": {
+                    "mid": "BB_10_1.5_mid",
+                    "upper": "BB_10_1.5_upper",
+                    "lower": "BB_10_1.5_lower",
+                },
+            },
+            {
+                "engine_indicator": "Bollinger",
+                "param_key": "10_1.5",
+                "display_key": "BB_BW_ST",
+                "value_col": "BB_BW_10_1_5",
+                "extra_value_cols": {
+                    "mid": "BB_10_1.5_mid",
+                    "upper": "BB_10_1.5_upper",
+                    "lower": "BB_10_1.5_lower",
+                },
+            },
+            {
+                "engine_indicator": "Bollinger",
                 "param_key": "20_2.0",
                 "display_key": "BB_PCT_B",
                 "value_col": "BB_PCT_B",
@@ -1030,6 +1052,28 @@ class DatabaseIntegratedTechnicalCalculator:
                     "lower": "BB_20_2_lower",
                 },
             },        
+            {
+                "engine_indicator": "Bollinger",
+                "param_key": "50_2.5",
+                "display_key": "BB_PCT_B_LT",
+                "value_col": "BB_PCT_B_50_2_5",
+                "extra_value_cols": {
+                    "mid": "BB_50_2.5_mid",
+                    "upper": "BB_50_2.5_upper",
+                    "lower": "BB_50_2.5_lower",
+                },
+            },
+            {
+                "engine_indicator": "Bollinger",
+                "param_key": "50_2.5",
+                "display_key": "BB_BW_LT",
+                "value_col": "BB_BW_50_2_5",
+                "extra_value_cols": {
+                    "mid": "BB_50_2.5_mid",
+                    "upper": "BB_50_2.5_upper",
+                    "lower": "BB_50_2.5_lower",
+                },
+            },
             {
                 "engine_indicator": "Williams_R",
                 "param_key": "5",
