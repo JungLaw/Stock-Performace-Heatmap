@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -180,6 +180,9 @@
             20
           ],
           [
+            21
+          ],
+          [
             50
           ],
           [
@@ -216,7 +219,7 @@
               "sell": "Close < EMA_13 and EMA_13_slope < 0",
               "strong_sell": "Close < EMA_13 and EMA_13_slope < -0.0025 and falling_2bar(EMA_13)",
               "k": 0.25,
-              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+              "notes": "EMA more responsive slightly higher slope threshold."
             },
             "20": {
               "strong_buy": "Close > EMA_20 and EMA_20_slope > 0.002 and rising_2bar(EMA_20)",
@@ -227,6 +230,15 @@
               "k": 0.2,
               "notes": "EMA retains quicker reaction vs. SMA."
             },
+            "21": {
+              "strong_buy": "Close > EMA_21 and EMA_21_slope > 0.002 and rising_2bar(EMA_21)",
+              "buy": "Close > EMA_21 and EMA_21_slope > 0",
+              "neutral": "abs(Close/EMA_21 - 1) <= 0.50 * ATRP_21",
+              "sell": "Close < EMA_21 and EMA_21_slope < 0",
+              "strong_sell": "Close < EMA_21 and EMA_21_slope < -0.002 and falling_2bar(EMA_21)",
+              "k": 0.2,
+              "notes": "EMA retains quicker reaction vs. SMA."
+            },            
             "50": {
               "strong_buy": "Close > EMA_50 and EMA_50_slope > 0.002 and rising_2bar(EMA_50)",
               "buy": "Close > EMA_50 and EMA_50_slope > 0",

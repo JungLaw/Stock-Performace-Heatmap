@@ -1,4 +1,4 @@
-# Stamp: Sun, April 19, 2026 4:02PM
+# Stamp: Wed, April 23, 2026 7:42PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1905,29 +1905,28 @@ def show_technical_analysis_dashboard():
             # v1 defaults (edit this list freely; any missing keys are ignored safely)
             DEFAULT_KEYS = [
                 "RSI_14",
-                "RSI_10",
+#                "RSI_10",
                 "RSI_21",
                 "SMA_200",
                 #"EMA_5",
                 #"EMA_10",
                 #"EMA_13",
-                "EMA_20", 
+#                "EMA_20", 
                 "EMA_50",
                 #"EMA_100",
                 #"EMA_200",
                 #"HMA_9",
-                "HMA_21",
+#                "HMA_21",
                 #"HMA_50",
-                "RSI_14",
-                #"WILLR_5",     # didn't display correctly
+                "WILLR_5",     # didn't display correctly
                 "WILLR_14",
-                #"WILLR_20",
-#                "CMF_10",      # didn't display correctly
+                "WILLR_20",
+                "CMF_10",      # didn't display correctly
                 "CMF_21",
-#                "CMF_50",      # didn't display correctly
-#                "CMF_30",      # didn't display correctly
+                "CMF_50",      # didn't display correctly
+                "CMF_30",      # didn't display correctly
                 #"UO_5_10_15",
-                "UO_7_14_28",
+#                "UO_7_14_28",
                 #"UO_10_20_40",
                 #"CCI_10"
                 "CCI_14",
@@ -1937,8 +1936,8 @@ def show_technical_analysis_dashboard():
                 "MFI_30",
                 "ROC_9",
                 "ROC_12",
-                #"ROC_20",
-                #"ROC_50",
+                "ROC_20",
+                "ROC_50",
                 "BB_PCT_B",
                 "BB_BW",
                 #"ADX_19",
@@ -1946,7 +1945,10 @@ def show_technical_analysis_dashboard():
                 #"ADX_20",
                 #"OBV",
                 "VWMA_10", "VWMA_20", "VWMA_50",  
-                "MACD_12_26_9", "MACD_8_17_5", "MACD_20_50_10", # "MACD_5_34_1"
+                "MACD_12_26_9", "MACD_8_17_5", "MACD_20_50_10", 
+                "STOCH_14_3_3", "STOCH_5_3_3", "STOCH_21_5_5",
+                "BullBearPower_10", "BullBearPower_13", "BullBearPower_21",
+                # "MACD_5_34_1"
                 # If you want to include the UI-mock expansion, uncomment these:
                 # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
             ]

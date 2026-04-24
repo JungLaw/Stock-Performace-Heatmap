@@ -1,4 +1,4 @@
-# Stamp: Sun, April 19, 2026 4:02PM
+# Stamp: Tue, April 22, 2026 2:46PM
 # signal_classifier.py
 """
 Signal classification and rule-engine evaluation.

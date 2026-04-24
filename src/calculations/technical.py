@@ -1,4 +1,4 @@
-# Stamp: Sun, April 19, 2026 4:02PM
+# Stamp: Wed, April 23, 2026 7:42PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -962,18 +962,27 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "14_3_3",
                 "display_key": "STOCH_14_3_3",
                 "value_col": "STOCHK_14_3_3",
+                "extra_value_cols": {
+                    "stoch_d": "STOCHD_14_3_3",
+                },
             },
             {
                 "engine_indicator": "Stochastic",
                 "param_key": "5_3_3",
                 "display_key": "STOCH_5_3_3",
                 "value_col": "STOCHK_5_3_3",
+                "extra_value_cols": {
+                    "stoch_d": "STOCHD_5_3_3",
+                },
             },
             {
                 "engine_indicator": "Stochastic",
                 "param_key": "21_5_5",
                 "display_key": "STOCH_21_5_5",
                 "value_col": "STOCHK_21_5_5",
+                "extra_value_cols": {
+                    "stoch_d": "STOCHD_21_5_5",
+                },
             },
             {
                 "engine_indicator": "ROC",

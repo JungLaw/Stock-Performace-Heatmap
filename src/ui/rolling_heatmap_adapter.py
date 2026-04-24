@@ -1,4 +1,4 @@
-# Stamp: Sun, April 19, 2026 4:02PM
+# Stamp: Wed, April 23, 2026 7:42PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -121,21 +121,21 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Relative Strength Index compares recent gains vs losses on a 0–100 scale.",
         "how_to_read": "↑RSI above 50 + ↑volume ~ strong buying interest (reinforcing continuation of an uptrend). If RSI signals divergence (e.g., RSI (lower highs) + price (higher highs) +  high volume ~ possible trend reversal.",
     },
-#    "WILLR_5": {
-#        "display_name": "Williams %R(5)",
-#        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
-#        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
-#    },
+    "WILLR_5": {
+        "display_name": "Williams %R(5)",
+        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
+        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
+    },
     "WILLR_14": {
         "display_name": "Williams %R (14)",
         "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
         "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
     },
-#    "WILLR_20": {
-#        "display_name": "Williams %R(20)",
-#        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
-#        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
-#    },
+    "WILLR_20": {
+        "display_name": "Williams %R(20)",
+        "definition": "Shows where the close sits within the recent high-low range (typically -100 to 0).",
+        "how_to_read": "Closer to 0 = near recent highs; closer to -100 = near recent lows.",
+    },
     "UO_5_10_15": {
         "display_name": "UO(5,10,15)",
         "definition": "Ultimate Oscillator blends short/medium/long buying pressure into one momentum oscillator.",
@@ -231,6 +231,37 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "display_name": "MACD(20,50,10)",
         "definition": "Moving Average Convergence Divergence histogram using parameters 20, 50, and 10.",
         "how_to_read": "Displayed value is the MACD histogram. Hover also shows the MACD line, signal line, and day-over-day histogram change.",
+    },
+
+    "STOCH_14_3_3": {
+        "display_name": "Stoch(14,3,3)",
+        "definition": "Stochastic Oscillator %K using parameters 14, 3, and 3.",
+        "how_to_read": "Displayed value is %K. Higher values indicate price closing near the recent high; lower values indicate price closing near the recent low.",
+    },
+    "STOCH_5_3_3": {
+        "display_name": "Stoch(5,3,3)",
+        "definition": "Stochastic Oscillator %K using parameters 5, 3, and 3.",
+        "how_to_read": "Shorter lookback makes this more reactive than Stoch(14,3,3). Displayed value is %K.",
+    },
+    "STOCH_21_5_5": {
+        "display_name": "Stoch(21,5,5)",
+        "definition": "Stochastic Oscillator %K using parameters 21, 5, and 5.",
+        "how_to_read": "Longer lookback makes this smoother and slower. Displayed value is %K.",
+    },
+    "BullBearPower_10": {
+        "display_name": "BullBear(10)",
+        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(10).",
+        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+    },
+    "BullBearPower_13": {
+        "display_name": "BullBear(13)",
+        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(13).",
+        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+    },
+    "BullBearPower_21": {
+        "display_name": "BullBear(21)",
+        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(21).",
+        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
     },
     # Volume-based
     "MFI_10": {
@@ -879,7 +910,7 @@ def build_plotly_heatmap_inputs(
                 how_to_read_block = ""
 
                 # ----------------------------
-                # Customdata enrichment
+                # Customdata enrichment ('Price'-row)
                 # ----------------------------
                 cd_row.append(
                     {
@@ -962,6 +993,8 @@ def build_plotly_heatmap_inputs(
 
         for idx, (d_raw, v, s, extra_map) in enumerate(zip(raw_dates, values, scores, row_extras)):        
             prev_v = values[idx - 1] if idx > 0 else None
+            prev_extra_map = row_extras[idx - 1] if idx > 0 else {}
+
             delta_abs = None
             if not _is_missing(v) and not _is_missing(prev_v):
                 try:
@@ -980,23 +1013,134 @@ def build_plotly_heatmap_inputs(
             how_to_read = defs.get(key, {}).get("how_to_read", "")
 
             macd_context_block = ""
+            stoch_context_block = ""
+            bullbear_context_block = ""
 
+            # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
 
+                prev_extra_map = row_extras[idx - 1] if idx > 0 else {}
+
                 macd_line = extra_map.get("macd_line")
+                prev_macd_line = prev_extra_map.get("macd_line") if isinstance(prev_extra_map, dict) else None
+
+                macd_line_delta_abs = None
+                if not _is_missing(macd_line) and not _is_missing(prev_macd_line):
+                    try:
+                        macd_line_delta_abs = float(macd_line) - float(prev_macd_line)
+                    except Exception:
+                        macd_line_delta_abs = None
+
+                macd_line_delta_pct = safe_pct_delta(macd_line, prev_macd_line)
+
                 if not _is_missing(macd_line):
-                    parts.append(f"MACD Line: {format_signed_number(macd_line, decimals=2)}")
+                    macd_line_suffix = ""
+                    if macd_line_delta_abs is not None or macd_line_delta_pct is not None:
+                        macd_line_suffix = (
+                            f" ({format_signed_number(macd_line_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(macd_line_delta_pct, decimals=1)}' if macd_line_delta_pct is not None else ''})"
+                        )
+                    parts.append(f"MACD Line: {format_signed_number(macd_line, decimals=2)}{macd_line_suffix}")
 
                 macd_signal = extra_map.get("macd_signal")
+                prev_macd_signal = prev_extra_map.get("macd_signal") if isinstance(prev_extra_map, dict) else None
+
+                macd_signal_delta_abs = None
+                if not _is_missing(macd_signal) and not _is_missing(prev_macd_signal):
+                    try:
+                        macd_signal_delta_abs = float(macd_signal) - float(prev_macd_signal)
+                    except Exception:
+                        macd_signal_delta_abs = None
+
+                macd_signal_delta_pct = safe_pct_delta(macd_signal, prev_macd_signal)
+
                 if not _is_missing(macd_signal):
-                    parts.append(f"Signal Line: {format_signed_number(macd_signal, decimals=2)}")
+                    macd_signal_suffix = ""
+                    if macd_signal_delta_abs is not None or macd_signal_delta_pct is not None:
+                        macd_signal_suffix = (
+                            f" ({format_signed_number(macd_signal_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(macd_signal_delta_pct, decimals=1)}' if macd_signal_delta_pct is not None else ''})"
+                        )
+                    parts.append(f"Signal Line: {format_signed_number(macd_signal, decimals=2)}{macd_signal_suffix}")
 
                 if parts:
                     macd_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
+            # STOCH: Custom hover content (deltas)
+            if key.startswith("STOCH_") and isinstance(extra_map, dict) and extra_map:
+                parts = []
+
+                stoch_d = extra_map.get("stoch_d")
+                prev_stoch_d = prev_extra_map.get("stoch_d") if isinstance(prev_extra_map, dict) else None
+
+                stoch_d_delta_abs = None
+                if not _is_missing(stoch_d) and not _is_missing(prev_stoch_d):
+                    try:
+                        stoch_d_delta_abs = float(stoch_d) - float(prev_stoch_d)
+                    except Exception:
+                        stoch_d_delta_abs = None
+
+                stoch_d_delta_pct = safe_pct_delta(stoch_d, prev_stoch_d)
+
+                if not _is_missing(stoch_d):
+                    parts.append(
+                        f"%D: {format_signed_number(stoch_d, decimals=2)} "
+                        f"({format_signed_number(stoch_d_delta_abs, decimals=2)}"
+                        f"{f', {format_signed_percent(stoch_d_delta_pct, decimals=1)}' if stoch_d_delta_pct is not None else ''})"
+                    )
+
+                if parts:
+                    stoch_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+            # BULL BEAR: Custom hover content (deltas)
+            if key.startswith("BullBearPower_") and isinstance(extra_map, dict) and extra_map:
+                parts = []
+
+                bull_val = extra_map.get("BullPower")
+                prev_bull_val = prev_extra_map.get("BullPower") if isinstance(prev_extra_map, dict) else None
+                bear_val = extra_map.get("BearPower")
+                prev_bear_val = prev_extra_map.get("BearPower") if isinstance(prev_extra_map, dict) else None
+
+                bull_delta_abs = None
+                if not _is_missing(bull_val) and not _is_missing(prev_bull_val):
+                    try:
+                        bull_delta_abs = float(bull_val) - float(prev_bull_val)
+                    except Exception:
+                        bull_delta_abs = None
+                bull_delta_pct = safe_pct_delta(bull_val, prev_bull_val)
+
+                bear_delta_abs = None
+                if not _is_missing(bear_val) and not _is_missing(prev_bear_val):
+                    try:
+                        bear_delta_abs = float(bear_val) - float(prev_bear_val)
+                    except Exception:
+                        bear_delta_abs = None
+                bear_delta_pct = safe_pct_delta(bear_val, prev_bear_val)
+
+                if not _is_missing(bull_val):
+                    bull_suffix = ""
+                    if bull_delta_abs is not None or bull_delta_pct is not None:
+                        bull_suffix = (
+                            f" ({format_signed_number(bull_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(bull_delta_pct, decimals=1)}' if bull_delta_pct is not None else ''})"
+                        )
+                    parts.append(f"Bull: {format_signed_number(bull_val, decimals=2)}{bull_suffix}")
+
+                if not _is_missing(bear_val):
+                    bear_suffix = ""
+                    if bear_delta_abs is not None or bear_delta_pct is not None:
+                        bear_suffix = (
+                            f" ({format_signed_number(bear_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(bear_delta_pct, decimals=1)}' if bear_delta_pct is not None else ''})"
+                        )
+                    parts.append(f"Bear: {format_signed_number(bear_val, decimals=2)}{bear_suffix}")
+
+                if parts:
+                    bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
             # ----------------------------
-            # Preformatted hover fragments (Indicator-row)
+            # Preformatted hover fragments ('Indicator'-row)
             # ----------------------------
             delta_abs_fmt = format_signed_number(delta_abs, decimals=2)
             delta_pct_suffix = f" ({format_signed_percent(delta_pct, decimals=2)})" if delta_pct is not None else ""
@@ -1026,17 +1170,17 @@ def build_plotly_heatmap_inputs(
                     if _is_missing(band_val):
                         continue
 
-                    pct_to_band = None
+                    pct_vs_price = None
                     if current_price not in (None, 0):
                         try:
-                            pct_to_band = ((float(band_val) / float(current_price)) - 1.0) * 100.0
+                            pct_vs_price = ((float(band_val) / float(current_price)) - 1.0) * 100.0
                         except Exception:
-                            pct_to_band = None
+                            pct_vs_price = None
 
-                    if pct_to_band is None:
+                    if pct_vs_price is None:
                         parts.append(f"{label_txt}: {float(band_val):.2f}")
                     else:
-                        parts.append(f"{label_txt}: {float(band_val):.2f} ({pct_to_band:+.1f}%)")
+                        parts.append(f"{label_txt}: {float(band_val):.2f} ({pct_vs_price:+.1f}% vs. Price)")
 
                 if parts:
                     band_context_block = "<br>" + "<br>".join(parts) + "<br>"
@@ -1075,6 +1219,8 @@ def build_plotly_heatmap_inputs(
                     "volume_vs_avg_block": volume_vs_avg_block,
                     "band_context_block": band_context_block,
 					"macd_context_block": macd_context_block,
+                    "stoch_context_block": stoch_context_block, 
+                    "bullbear_context_block": bullbear_context_block,
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -1119,7 +1265,9 @@ def make_rolling_heatmap_figure(
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
         "%{customdata.signal_line}"
-		"%{customdata.macd_context_block}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.stoch_context_block}"
+        "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"
@@ -1146,13 +1294,21 @@ def make_rolling_heatmap_figure(
         )
     )
 
+    # Display all row labels on ''rolling signals heatmap'
+    row_count = max(len(hm.y), 1)
+    dynamic_height = max(450, 28 * row_count + 140)
+
     fig.update_layout(
         title=title,
-        margin=dict(l=20, r=20, t=80, b=20),   # 't': use to add padding btwn plotly icons & heatmap
-        height=450,
+        margin=dict(l=150, r=20, t=80, b=20),   # larger left margin for row labels
+        height=dynamic_height,
     )
 
     fig.update_xaxes(side="top", type="category")    # Move date to top of heatmap
-    fig.update_yaxes(autorange="reversed")
+    fig.update_yaxes(
+        autorange="reversed",
+        automargin=True,
+        tickfont=dict(size=11),
+    )
 
     return fig

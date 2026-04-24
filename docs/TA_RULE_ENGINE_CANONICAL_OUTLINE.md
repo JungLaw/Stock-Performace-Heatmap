@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.6 
+- Version: 3.2.7 
 - Created: 1/12/26
-- Last update: 4/16/2026
+- Last update: 4/22/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -193,18 +193,18 @@ Examples:
 * Regime classification
 * Composite signals
 
-**Status:** 🟡 NEXT ACTIVE WORKSTREAM (Wave 1 defined; implementation pending)
+**Status:** ✅ WAVE 1 COMPLETE
 
-**Wave 1 scope (authoritative):**
+**Wave 1 completed scope (authoritative):**
 * Bollinger semantic activation
 * VWMA rule semantics
 
-**Wave 1 boundary:**
-* Option F must consume existing numeric primitives from the indicator dataframe
-* semantic meaning must be created through the rulebook / signal-classifier path
+**Wave 1 boundary (preserved):**
+* Option F consumed existing numeric primitives from the indicator dataframe
+* semantic meaning was created through the rulebook / signal-classifier path
 * UI layers may display semantic outputs but must not invent semantics locally
 
-**Deferred beyond Wave 1:**
+**Deferred beyond completed Wave 1:**
 * composites
 * cross-confirmation
 * regime logic
@@ -216,11 +216,12 @@ Examples:
 ---
 #### Option F Sequencing (authoritative)
 
-Option F should proceed in semantic tiers:
+Option F proceeds in semantic tiers:
 
 **Wave 1 — single-family semantic activation**
 - Bollinger semantics
 - VWMA semantics
+- **Status: complete**
 
 **Wave 2 — multi-indicator semantics**
 - composites
