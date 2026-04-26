@@ -231,7 +231,7 @@ def build_compute_config(
     # Option E slope emission configuration.
     if include_slope:
         enabled_slope_families = [
-            fam for fam in ("EMA", "VWMA", "HMA")
+            fam for fam in ("SMA", "EMA", "VWMA", "HMA")
             if fam in cfg and cfg[fam]
         ]
 
@@ -244,6 +244,7 @@ def build_compute_config(
             "families": enabled_slope_families,
             "canonical_pattern": "{base_col}_slope__{method}_{window}",
             "compatibility_aliases": [
+                "SMA_<len>_slope",
                 "EMA_<len>_slope",
                 "VWMA_slope",
                 "HMA_slope",

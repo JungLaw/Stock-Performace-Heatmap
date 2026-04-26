@@ -622,15 +622,21 @@ class DatabaseIntegratedTechnicalCalculator:
             logger.info("=== DEBUG CONFIG PATH MARKER v1 ===")
             logger.info(f"[TA_RULES_ENGINE] enabled={TA_RULES_ENGINE} config_type={type(config)} config_is_none={config is None}")
 
-            # Show only the Bollinger config slice if present
             try:
                 if isinstance(config, dict):
                     bb = config.get("BB")
+                    slope_cfg = config.get("SLOPE")
+                    sma_cfg = config.get("SMA")
+                    atrp_cfg = config.get("ATRP")
+
                     logger.info(f"[TA_RULES_ENGINE] BB config slice: {bb}")
+                    logger.info(f"[TA_RULES_ENGINE] SMA config slice: {sma_cfg}")
+                    logger.info(f"[TA_RULES_ENGINE] ATRP config slice: {atrp_cfg}")
+                    logger.info(f"[TA_RULES_ENGINE] SLOPE config slice: {slope_cfg}")
                 else:
                     logger.info("[TA_RULES_ENGINE] No config dict passed to preprocessor (will use preprocessor defaults).")
             except Exception as e:
-                logger.warning(f"[TA_RULES_ENGINE] Unable to log Bollinger config slice: {e}")       
+                logger.warning(f"[TA_RULES_ENGINE] Unable to log config slices: {e}")
 
         df_ind = self._compute_indicators_with_engine(df, config=config)
 
@@ -655,6 +661,19 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             logger.info("=== END columns ===")
 
+        if DEBUG_DF_COLUMNS:
+            logger.info("=== Columns containing SMA / slope / ATRP ===")
+            logger.info(
+                sorted(
+                    c for c in df_ind.columns
+                    if (
+                        "SMA" in c
+                        or "slope" in c
+                        or "ATRP" in c
+                    )
+                )
+            )
+            logger.info("=== END columns: SMA/Slope/ATRP===")
         # ============================================
         # BASELINE SNAPSHOT (TEMP — pre-Option E/F)
         # ============================================
@@ -828,12 +847,12 @@ class DatabaseIntegratedTechnicalCalculator:
 
     def calculate_rule_engine_signals_optionc(
         self,
-        ticker: str,
+        ticker: str,     
         feature_scope: str = "heatmap",
         rules_path: Union[str, Path] = "master_rules_normalized.json",
         save_to_db: bool = False,
         config: Dict[str, Any] | None = None,
-        indicators: list[str] | None = None,
+        indicators: list[str] | None = None,   #indicators=["SMA"],  # confirm df.columns contains SMA metrics to compute score  
         use_meta_coverage: bool = False,
         return_type: str = "scores",     # "rolling", "both"
         ohlcv_request: Dict[str, Any] | None = None,
@@ -886,6 +905,17 @@ class DatabaseIntegratedTechnicalCalculator:
 
 #        # DELETE
         print("SCORES DEBUG families present:", sorted(scores.keys()))
+        if "SMA" in scores:
+            print("SMA SCORE PARAMS DEBUG:", sorted(scores["SMA"].keys()))
+            for pk, series in scores["SMA"].items():
+                try:
+                    print(
+                        f"SMA SCORE SERIES DEBUG {pk}: "
+                        f"non_null={int(series.notna().sum())} "
+                        f"tail={series.dropna().tail(5).tolist()}"
+                    )
+                except Exception as e:
+                    print(f"SMA SCORE SERIES DEBUG {pk}: error={e}")
 
         if return_type not in ("scores", "rolling"):
             raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
@@ -1260,6 +1290,36 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "200",
                 "display_key": "EMA_200",
                 "value_col": "EMA_200",
+            },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "10",
+                "display_key": "SMA_10",
+                "value_col": "SMA_10",
+            },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "20",
+                "display_key": "SMA_20",
+                "value_col": "SMA_20",
+            },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "50",
+                "display_key": "SMA_50",
+                "value_col": "SMA_50",
+            },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "100",
+                "display_key": "SMA_100",
+                "value_col": "SMA_100",
+            },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "200",
+                "display_key": "SMA_200",
+                "value_col": "SMA_200",
             },
             {
                 "engine_indicator": "HMA",

@@ -379,10 +379,7 @@ def compute_all_indicators(
     #   {BASECOL}_slope__linreg_{W}
     #
     # Compatibility aliases used by current rulebook consumers:
-    #   EMA_{n}_slope, HMA_{n}_slope, VWMA_slope, HMA_slope
-    #
-    # Scope lock:
-    #   SMA slope remains deferred and is not emitted in this wave.
+    #   SMA_{n}_slope, EMA_{n}_slope, HMA_{n}_slope, VWMA_slope, HMA_slope
     # ====================================================
     slope_cfg = cfg.get("SLOPE", None)
     if isinstance(slope_cfg, dict):
@@ -391,7 +388,7 @@ def compute_all_indicators(
         emit_aliases = bool(slope_cfg.get("emit_aliases", True))
         slope_families = [
             str(fam).upper()
-            for fam in (slope_cfg.get("families") or ["EMA", "VWMA", "HMA"])
+            for fam in (slope_cfg.get("families") or ["SMA", "EMA", "VWMA", "HMA"])
         ]
 
         if method not in {"linreg"}:
@@ -441,9 +438,11 @@ def compute_all_indicators(
                 window
             )
 
-            # Parameterized compatibility aliases for EMA and HMA.
+            # Parameterized compatibility aliases for SMA, EMA, and HMA.
             if emit_aliases and (
-                base_col.startswith("EMA_") or base_col.startswith("HMA_")
+                base_col.startswith("SMA_")
+                or base_col.startswith("EMA_")
+                or base_col.startswith("HMA_")
             ):
                 df[f"{base_col}_slope"] = df[canon]
 

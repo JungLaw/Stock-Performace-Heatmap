@@ -72,8 +72,33 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "EMA_200": {
         "display_name": "EMA (200)",
-        "definition": "Exponential Moving Average over a very long window.",
+        "definition": "EMA over a very long window.",
         "how_to_read": "Very long-term trend reference; often used as a regime filter.",
+    },
+    "SMA_10": {
+        "display_name": "SMA(10)",
+        "definition": "SMA averages closing prices equally over the last 10 periods.",
+        "how_to_read": "Short-term trend reference. Smoother than very short EMA variants, but slower to react.",
+    },
+    "SMA_20": {
+        "display_name": "SMA(20)",
+        "definition": "SMA averages closing prices equally over the last 20 periods.",
+        "how_to_read": "Common short-to-medium trend reference. Often used as a baseline trend and pullback level.",
+    },
+    "SMA_50": {
+        "display_name": "SMA(50)",
+        "definition": "SMA averages closing prices equally over the last 50 periods.",
+        "how_to_read": "Medium-term trend reference. Smoother than SMA(20), with fewer short-term swings.",
+    },
+    "SMA_100": {
+        "display_name": "SMA(100)",
+        "definition": "SMA averages closing prices equally over the last 100 periods.",
+        "how_to_read": "Longer-term trend reference. Useful for broader trend direction and structural support/resistance zones.",
+    },
+    "SMA_200": {
+        "display_name": "SMA(200)",
+        "definition": "SMA averages closing prices equally over the last 200 periods.",
+        "how_to_read": "Very long-term trend reference. Commonly used as a regime-level trend filter.",
     },
     "HMA_9": {
         "display_name": "HMA (9)",
@@ -761,6 +786,8 @@ def build_plotly_heatmap_inputs(
             return "OBV"
         if indicator_key.startswith("EMA_"):
             return "EMA"
+        if indicator_key.startswith("SMA_"):
+            return "SMA"
         if indicator_key.startswith("HMA_"):
             return "HMA"
         if indicator_key.startswith("CCI_"):
