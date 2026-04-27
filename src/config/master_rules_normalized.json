@@ -1,5 +1,5 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -452,11 +452,11 @@
               "notes": "Loose 2-bar slope for strong signals; neutral band fixed across timeframes."
             },
             "14": {
-              "strong_buy": "RSI_14 > 60 and rising_2bar(RSI_14)",
-              "buy": "RSI_14 > 55",
-              "neutral": "45 <= RSI_14 <= 55",
-              "sell": "RSI_14 < 45",
-              "strong_sell": "RSI_14 < 40 and falling_2bar(RSI_14)",
+              "strong_buy": "RSI_14 < 25 and rising_2bar(RSI_14)",
+              "buy": "RSI_14 < 30",
+              "neutral": "30 <= RSI_14 <= 70",
+              "sell": "RSI_14 > 70",
+              "strong_sell": "RSI_14 > 85 and falling_2bar(RSI_14)",
               "notes": "Same thresholds maintain consistency across charts."
             },
             "21": {

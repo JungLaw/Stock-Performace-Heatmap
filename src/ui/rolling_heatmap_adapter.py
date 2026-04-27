@@ -986,11 +986,12 @@ def build_plotly_heatmap_inputs(
                         "volume_5d_avg": vol_avg,
                         "volume_vs_5d_avg_pct": vol_rel,
 
-                        # no indicator-specific content
+                        # Custom indicator-specific content
                         "macd_context_block": "",
                         "stoch_context_block": "",
                         "bullbear_context_block": "",
                         "band_context_block": "",
+                        "ma_context_block": "",
 
                         # no rule semantics
                         "rule_expr": "",
@@ -1077,6 +1078,8 @@ def build_plotly_heatmap_inputs(
             macd_context_block = ""
             stoch_context_block = ""
             bullbear_context_block = ""
+            band_context_block = ""
+            ma_context_block = ""
 
             # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
@@ -1216,7 +1219,6 @@ def build_plotly_heatmap_inputs(
             # indicator rows do not use volume hover fields
             volume_block = ""
             volume_vs_avg_block = ""
-            band_context_block = ""
 
             # BOLLINGERS: Custom hover content (deltas)
             #if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
@@ -1248,6 +1250,45 @@ def build_plotly_heatmap_inputs(
 
                 if parts:
                     band_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+            # MVA: Custom hover content (deltas)
+            if (
+                key.startswith("SMA_")
+                or key.startswith("EMA_")
+                or key.startswith("VWMA_")
+                or key.startswith("HMA_")
+            ):
+                current_price = price_by_date.get(d_raw)
+
+                try:
+                    current_price = float(current_price) if not _is_missing(current_price) else None
+                except Exception:
+                    current_price = None
+
+                try:
+                    ma_value = float(v) if not _is_missing(v) else None
+                except Exception:
+                    ma_value = None
+
+                diff_abs = None
+                diff_pct = None
+
+                if current_price is not None and ma_value not in (None, 0):
+                    try:
+                        diff_abs = current_price - ma_value
+                    except Exception:
+                        diff_abs = None
+
+                    try:
+                        diff_pct = ((current_price / ma_value) - 1.0) * 100.0
+                    except Exception:
+                        diff_pct = None
+
+                if diff_abs is not None:
+                    pct_suffix = f" ({diff_pct:+.1f}%)" if diff_pct is not None else ""
+                    ma_context_block = (
+                        f"<br>Price vs. MA: {diff_abs:+.2f}{pct_suffix}<br>"
+                    )
 
             # z must be numeric; use NaN for missing
             z_row.append(float(s) if s is not None else float("nan"))
@@ -1282,6 +1323,7 @@ def build_plotly_heatmap_inputs(
                     "volume_block": volume_block,
                     "volume_vs_avg_block": volume_vs_avg_block,
                     "band_context_block": band_context_block,
+                    "ma_context_block": ma_context_block,
 					"macd_context_block": macd_context_block,
                     "stoch_context_block": stoch_context_block, 
                     "bullbear_context_block": bullbear_context_block,
@@ -1324,7 +1366,8 @@ def make_rolling_heatmap_figure(
         "<b>%{customdata.display_name}</b><br>"
         "Date: %{customdata.date}<br>"
         "<br>"
-        "Price: %{customdata.formatted_value}<br>"  #"%{customdata.date}: %{customdata.formatted_value}<br>"  #for 'date: price'
+        "Value: %{customdata.formatted_value}<br>"
+        "%{customdata.ma_context_block}"
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
