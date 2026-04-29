@@ -550,18 +550,75 @@ def infer_trend(curr: Any, prev: Any, tolerance: float = 1e-12) -> str:
 
 def _humanize_indicator_token(token: str) -> str:
     """
-    Convert a raw rule token like EMA_20 into EMA(20), RSI_14 into RSI(14),
-    UO_7_14_28 into UO(7,14,28), etc.
+    Convert raw indicator tokens into a cleaner display form.
+
+    Examples:
+      EMA_20           -> EMA(20)
+      RSI_14           -> RSI(14)
+      UO_7_14_28       -> UO(7,14,28)
+      EMA_13_13        -> EMA(13)      # repeated-parameter alias
+      EMA_21_21        -> EMA(21)      # repeated-parameter alias
+      MACD_12_26_9     -> MACD(12,26,9)
+
+    Important:
+    - This is presentation-only.
+    - It should not change rule semantics.
+    - It focuses on root indicator tokens, not extended derivation suffixes
+      such as _slope / _signal / _hist in this phase.
     """
     if not token or "_" not in token:
+        return token
+
+    # Already humanized / display-like token; leave it alone.
+    if "(" in token and ")" in token:
         return token
 
     parts = token.split("_")
     head, tail = parts[0], parts[1:]
 
+    # Root repeated-parameter alias collapse:
+    # EMA_13_13 -> EMA(13), EMA_21_21 -> EMA(21), etc.
+    # Restrict this to known moving-average alias families where the repeated
+    # form is known to be a presentation alias rather than a true multi-param series.
+    if head in {"EMA", "SMA", "VWMA", "HMA"} and len(tail) == 2 and tail[0] == tail[1]:
+        if tail[0].replace(".", "", 1).isdigit():
+            return f"{head}({tail[0]})"
+
+    # Standard numeric-parameter families:
+    # RSI_10 -> RSI(10), SMA_100 -> SMA(100), MACD_12_26_9 -> MACD(12,26,9), etc.
     if all(p.replace(".", "", 1).isdigit() for p in tail):
         return f"{head}({','.join(tail)})"
+
     return token
+
+
+# Hover text clean-up: 
+def should_fallback_to_raw_rule(expr: str) -> bool:
+    """
+    Return True when a rule expression is complex enough that the
+    presentation-only translator is more likely to degrade readability
+    than improve it.
+
+    Hybrid strategy:
+    - simple rules -> translated English-ish text
+    - complex rules -> raw rule expression
+    """
+    if not expr:
+        return False
+
+    expr = str(expr)
+
+    complex_markers = [
+        "abs(",
+        "* ATRP_",
+        "*ATRP_",
+        "/SMA_",
+        "/EMA_",
+        "/VWMA_",
+        "/HMA_",
+    ]
+
+    return any(marker in expr for marker in complex_markers)
 
 
 def translate_rule_text(expr: str) -> str:
@@ -581,12 +638,19 @@ def translate_rule_text(expr: str) -> str:
         "Close < ": "Price is below ",
         "close > ": "Price is above ",
         "close < ": "Price is below ",
-        " >= 0": " is non-negative",
-        " <= 0": " is non-positive",
-        "_slope > 0": " is rising",
-        "_slope < 0": " is falling",
-        "rising_2bar(": "has risen for 2 bars: ",
-        "falling_2bar(": "has fallen for 2 bars: ",
+
+        # NOTE:
+        # Do NOT translate '>= 0' / '<= 0' generically here.
+        # Those replacements corrupt chained comparisons such as:
+        #   -0.10 <= CMF_21 <= 0.10
+        # by partially matching the second comparator.
+        #
+        # Keep slope thresholds raw for now as well; prettifying derived
+        # suffix expressions belongs to a later pass.
+        #
+        # "_slope > 0": " is rising",
+        # "_slope < 0": " is falling",
+
         "abs(Close/": "Price is close to ",
         "abs(close/": "Price is close to ",
     }
@@ -594,12 +658,45 @@ def translate_rule_text(expr: str) -> str:
     for old, new in simple_replacements.items():
         text = text.replace(old, new)
 
-    for raw in sorted(INDICATOR_DEFS.keys(), key=len, reverse=True):
-        text = text.replace(raw, _humanize_indicator_token(raw))
+    # Humanize root indicator tokens directly from the rule text, not only from
+    # INDICATOR_DEFS keys. This catches cases like:
+    #   RSI_10        -> RSI(10)
+    #   SMA_100       -> SMA(100)
+    #   EMA_13_13     -> EMA(13)
+    #   MACD_12_26_9  -> MACD(12,26,9)
+    import re
 
-    text = text.replace("ATRP_", "ATR%(")
-    text = text.replace(") ", ") ")
+    token_pattern = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_(?:\d+(?:\.\d+)?)(?:_(?:\d+(?:\.\d+)?))*\b")
+
+    def _token_repl(match: re.Match) -> str:
+        raw = match.group(0)
+        return _humanize_indicator_token(raw)
+
+    text = token_pattern.sub(_token_repl, text)
+
+    # Helper-call cleanup:
+    # Convert:
+    #   rising_2bar(SMA_100)
+    # to:
+    #   has risen for 2 bars: SMA(100)
+    #
+    # and similarly for falling_2bar(...), without leaving a stray trailing ')'.
+    text = re.sub(
+        r"rising_2bar\(([^)]+)\)",
+        r"has risen for 2 bars: \1",
+        text,
+    )
+    text = re.sub(
+        r"falling_2bar\(([^)]+)\)",
+        r"has fallen for 2 bars: \1",
+        text,
+    )
+
+    # Keep ATRP display readable as a first-pass presentation alias.
+    text = re.sub(r"\bATRP_(\d+(?:\.\d+)?)\b", r"ATR%(\1)", text)
+
     return text
+
 
 # ----------------------------
 # Indicator family / doc helpers (Phase III education UX)
@@ -855,7 +952,18 @@ def build_plotly_heatmap_inputs(
 
             rule_expr = str(rule_block.get(rule_state, "") or "")
             rule_notes = str(rule_block.get("notes", "") or "")
-            rule_text = translate_rule_text(rule_expr) if rule_expr else ""
+
+            if rule_expr:
+                if should_fallback_to_raw_rule(rule_expr):
+                    # Keep complex expressions raw to preserve readability and accuracy.
+                    # Token normalization / helper cleanup will still be handled in the
+                    # translator path for simpler rules only.
+                    rule_text = rule_expr
+                else:
+                    rule_text = translate_rule_text(rule_expr)
+            else:
+                rule_text = ""
+
             return rule_expr, rule_notes, rule_text
 
         return "", "", ""

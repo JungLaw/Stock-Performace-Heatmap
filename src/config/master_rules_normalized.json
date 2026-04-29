@@ -1,5 +1,5 @@
 {
-  "version": "0.2.2",
+  "version": "0.2.3",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -131,11 +131,11 @@
               "notes": "Long SMA rarely accelerates; thresholds lowered."
             },
             "200": {
-              "strong_buy": "Close > SMA_200 and SMA_200_slope > 0.001 and rising_2bar(SMA_200)",
-              "buy": "Close > SMA_200 and SMA_200_slope > 0",
-              "neutral": "abs(Close/SMA_200 - 1) <= 1.0 * ATRP_200",
-              "sell": "Close < SMA_200 and SMA_200_slope < 0",
-              "strong_sell": "Close < SMA_200 and SMA_200_slope < -0.001 and falling_2bar(SMA_200)",
+              "strong_buy": "Close > SMA_200 and (SMA_200_slope > 0.001) and rising_2bar(SMA_200)",
+              "buy": "Close > SMA_200 and (SMA_200_slope > 0)",
+              "neutral": "abs(Close/SMA_200 - 1) <= (1.0 * ATRP_200)",
+              "sell": "Close < SMA_200 and (SMA_200_slope < 0)",
+              "strong_sell": "Close < SMA_200 and (SMA_200_slope < -0.001) and falling_2bar(SMA_200)",
               "k": 0.1,
               "notes": "Long SMA rarely accelerates; thresholds lowered."
             }
@@ -526,7 +526,7 @@
               "neutral": "abs(STOCHK_5_3_3 - STOCHD_5_3_3) <= 5 or (45 <= STOCHK_5_3_3 <= 55)",
               "sell": "STOCHK_5_3_3 < STOCHD_5_3_3",
               "strong_sell": "STOCHK_5_3_3 < STOCHD_5_3_3 and falling_2bar(STOCHK_5_3_3) and STOCHK_5_3_3 < 40",
-              "notes": "Loose slope confirmation; \u00c2\u00b15 tick micro-cross filter hugely reduces noise."
+              "notes": "Loose slope confirmation; 5 tick micro-cross filter hugely reduces noise."
             },
             "14_3_3": {
               "strong_buy": "STOCHK_14_3_3 > STOCHD_14_3_3 and rising_2bar(STOCHK_14_3_3) and STOCHK_14_3_3 > 60",
@@ -1172,7 +1172,7 @@
               "neutral": "-0.10 <= CMF_10 <= 0.10",
               "sell": "CMF_10 < -0.10",
               "strong_sell": "CMF_10 < -0.20 and falling_2bar(CMF_10)",
-              "notes": "Volume\u00e2\u20ac\u201cprice confirmation. \u00c2\u00b10.1 zone is robust."
+              "notes": "Volume price confirmation. 0.1 zone is robust."
             },
             "21": {
               "strong_buy": "CMF_21 > 0.20 and rising_2bar(CMF_21)",
