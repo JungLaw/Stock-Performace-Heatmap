@@ -628,7 +628,8 @@ class DatabaseIntegratedTechnicalCalculator:
                     slope_cfg = config.get("SLOPE")
                     sma_cfg = config.get("SMA")
                     atrp_cfg = config.get("ATRP")
-
+                    
+                    logger.info(f"[TA_RULES_ENGINE] HMA config slice: {config.get('HMA')}")
                     logger.info(f"[TA_RULES_ENGINE] BB config slice: {bb}")
                     logger.info(f"[TA_RULES_ENGINE] SMA config slice: {sma_cfg}")
                     logger.info(f"[TA_RULES_ENGINE] ATRP config slice: {atrp_cfg}")
@@ -646,7 +647,7 @@ class DatabaseIntegratedTechnicalCalculator:
 
         # Or (recommended) filtered view:
         if DEBUG_DF_COLUMNS:
-            logger.info("=== Columns containing BB/MACD/CCI/UO/Ultimate ===")
+            logger.info("=== Columns containing BB/MACD/CCI/UO/Ultimate/HMA ===")
             logger.info(
                 sorted(
                     c for c in df_ind.columns
@@ -656,6 +657,7 @@ class DatabaseIntegratedTechnicalCalculator:
                         or "CCI" in c
                         or "UO" in c
                         or "Ultimate" in c
+                        or "HMA" in c
                     )
                 )
             )
@@ -1028,6 +1030,12 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "ROC",
+                "param_key": "14",
+                "display_key": "ROC_14",
+                "value_col": "ROC_14",
+            },
+            {
+                "engine_indicator": "ROC",
                 "param_key": "20",
                 "display_key": "ROC_20",
                 "value_col": "ROC_20",
@@ -1339,6 +1347,12 @@ class DatabaseIntegratedTechnicalCalculator:
                 "display_key": "HMA_50",
                 "value_col": "HMA_50",
             },                       
+            {
+                "engine_indicator": "HMA",
+                "param_key": "55",
+                "display_key": "HMA_55",
+                "value_col": "HMA_55",
+            },    
             {
                 "engine_indicator": "CCI",
                 "param_key": "10",

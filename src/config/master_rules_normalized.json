@@ -1,5 +1,5 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -370,6 +370,9 @@
           ],
           [
             50
+          ],
+          [
+            55
           ]
         ],
         "feature_scopes": {
@@ -397,6 +400,14 @@
               "sell": "Close < HMA_50 and HMA_slope < 0",
               "strong_sell": "Close < HMA_50 and HMA_slope < -0.001 and falling_2bar(HMA_50)",
               "notes": "Long-term HMA reacts slowly; slope thresholds adjust accordingly."
+            },
+            "55": {
+              "strong_buy": "Close > HMA_55 and HMA_slope > 0.001 and rising_2bar(HMA_55)",
+              "buy": "Close > HMA_55 and HMA_slope > 0",
+              "neutral": "abs(Close/HMA_55 - 1) <= 1.0 * ATRP_50",
+              "sell": "Close < HMA_55 and HMA_slope < 0",
+              "strong_sell": "Close < HMA_55 and HMA_slope < -0.001 and falling_2bar(HMA_55)",
+              "notes": "Particularly effective as a dynamic support/resistance level in trending markets."
             }
           },
           "overlay": {
@@ -726,6 +737,9 @@
             12
           ],
           [
+            14
+          ],
+          [
             20
           ],
           [
@@ -749,6 +763,14 @@
               "sell": "ROC_12 < -0.03",
               "strong_sell": "ROC_12 < -0.07",
               "notes": "Longer ROC slightly larger thresholds."
+            },
+            "14": {
+              "strong_buy": "ROC_14 > 0.07",
+              "buy": "ROC_14 > 0.03",
+              "neutral": "-0.03 <= ROC_14 <= 0.03",
+              "sell": "ROC_14 < -0.03",
+              "strong_sell": "ROC_14 < -0.07",
+              "notes": "Measures the momentum of price changes. Compares the current price to a price 'n' periods ago."
             },
             "20": {
               "strong_buy": "ROC_20 > 0.07",
@@ -942,6 +964,7 @@
           [20],
           [21],
           [50],
+          [55],
           [100],
           [200]
         ],

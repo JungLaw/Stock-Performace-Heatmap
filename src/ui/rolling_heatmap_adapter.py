@@ -115,6 +115,11 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Hull Moving Average over a longer window.",
         "how_to_read": "Smoother trend reference with reduced lag relative to longer SMAs/EMAs.",
     },
+    "HMA_55": {
+        "display_name": "HMA(55)",
+        "definition": "Behaves like a 'living' trend line — it turns faster than a SMA(50) but w/o the whipsaw of a short EMA.",
+        "how_to_read": "Smoother trend reference with reduced lag relative to longer SMAs/EMAs.",
+    },
     "VWMA_10": {
         "display_name": "VWMA (10)",
         "definition": "Volume Weighted Moving Average weights price by volume over the last 10 periods.",
@@ -200,6 +205,11 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "display_name": "ROC (12)",
         "definition": "Measures the momentum of price changes. ROC measures %Δ versus N periods ago.",
         "how_to_read": "Positive = up vs N periods ago; negative = down vs N periods ago.",
+    },
+    "ROC_14": {
+        "display_name": "ROC(14)",
+        "definition": "Measures the momentum of price changes. ROC measures %Δ versus 14 periods ago.",
+        "how_to_read": "+ROC: rising prices and potentially strong buying pressure (uptrend); -ROC: falling prices and potentially strong selling pressure (downtrend); 0: suggests balanced momentum",
     },
     "ROC_20": {
         "display_name": "ROC (20)",
