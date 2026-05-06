@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.7 
+- Version: 3.2.8 
 - Created: 1/12/26
-- Last update: 4/22/2026
+- Last update: 5/6/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -422,7 +422,39 @@ Rolling heatmap core is functional and validated.
 - All UX enhancements are additive and contract-safe
 
 ---
+#### Phase III Extension — Rolling Heatmap Selection & Catalog Architecture (v1)
 
+**Purpose:**  
+Introduce a row-selection / grouping architecture for the Rolling Signals Heatmap without redefining numeric truth, semantic meaning, or adapter-owned presentation metadata.
+
+**This workstream governs:**
+- row classification mapping
+- curated preset membership
+- Custom default row-set ownership
+- selection-resolution logic
+- UI control wiring above the existing manual display/remove and row-order controls
+
+**Canonical interaction model**
+- `Category → Scope → Window`
+- `Scope` optional
+- `Window` filter
+- `Family` first-class filter
+- selection modes:
+  - `Custom`
+  - `Category`
+  - `Preset`
+
+**Guardrails**
+This Phase III extension must not:
+- reopen Option E numeric formulas
+- reopen Option F semantic tiers
+- alter Scenario B acquisition / persistence behavior
+- migrate `INDICATOR_DEFS` display / education ownership into the selection catalog layer
+
+**Interpretation**
+This is a UI selection architecture workstream, not a semantic-wave continuation.
+
+---
 ## Phase Transition — Option E Wave 1 Complete → Option F Activation
 
 **Prerequisites satisfied:**
@@ -521,7 +553,6 @@ The following items remain unresolved and require explicit policy decisions befo
 No structural DB changes should occur until these decisions are finalized.
 
 ---
-
 ## Current Project State (Snapshot)
 
 * Phase I: ✅ Complete
@@ -530,12 +561,19 @@ No structural DB changes should occur until these decisions are finalized.
   * Core engine: ✅
   * Option D: ✅
   * Option E: ✅ Wave 1 complete
-  * Option F: ⏸️ deferred pending explicit reopening
+  * Option F: ✅ Wave 1 complete
+  * Later semantic tiers remain deferred:
+    - composites
+    - cross-confirmation
+    - regime logic
+  * SMA slope / SMA semantic reopen remains later numeric backlog / review item
 
 * Phase III:
 
   * Rolling heatmap acquisition (Scenario B): ✅ complete
   * Layout & semantics: ✅ complete
+  * Rolling Heatmap Selection & Catalog Architecture (v1): ▶ next active workstream
+
 * Phase IV: 🔒 future
 
 ---
@@ -543,16 +581,29 @@ No structural DB changes should occur until these decisions are finalized.
 ## What Comes Next (Immediately)
 
 **Next active workstream (in order):**
-1) **Option E — Derived numeric primitives**
-   - EMA slope
-   - validation against numeric baseline
-   - additive-only numeric derivation work
+1) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)**
+   - authoritative row classification mapping
+   - curated preset / Custom membership
+   - selection-resolution logic
+   - UI wiring for:
+     - `Custom`
+     - `Category`
+     - `Preset`
+   - preservation of the current manual display/remove and row-order controls as the downstream override layer
 
-2) **Option E backlog continuation**
-   - additional slopes / derived metrics
-   - normalization primitives
-   - band-derived numeric outputs
+2) **Later semantic continuation (deferred; not part of the active workstream)**
+   - Option F Wave 2:
+     - composites
+     - cross-confirmation
+   - Option F Wave 3:
+     - regime logic
 
-Only after Option E stabilization:
-- Phase II continuation via **Option F**
-- Later semantic expansion via **Phase IV**
+3) **Later numeric backlog / review**
+   - SMA slope / SMA semantic reopen
+
+**Important boundary**
+The active next workstream is a **Phase III UI selection architecture** task.
+It must not reopen:
+- Option E numeric formulas
+- Option F completed Wave 1 semantics
+- Scenario B data acquisition behavior
