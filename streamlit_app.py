@@ -1,4 +1,4 @@
-# Stamp: Wed, April 23, 2026 7:42PM
+# Stamp: Sun, May 10, 2026 3:11PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -26,6 +26,22 @@ from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
+
+# Rolling Heatmap Selection & Catalog architecture
+# Grouping/selection truth lives in src/ui modules; streamlit_app.py only
+# renders controls, stores session state, and passes resolved row_key sets
+# into the existing downstream manual-control/render path.
+from ui.rolling_heatmap_presets import CUSTOM_DEFAULT as RH_CUSTOM_DEFAULT
+from ui.rolling_heatmap_selection import (
+    describe_empty_selection,
+    get_category_names,
+    get_family_names,
+    get_preset_names,
+    get_scope_names,
+    get_selection_modes,
+    get_window_names,
+    resolve_row_selection,
+)
 
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
     """
@@ -107,6 +123,35 @@ def initialize_session_state():
         st.session_state.sector_visible_tickers = []   # Will be populated on first run
     if 'custom_visible_tickers' not in st.session_state:
         st.session_state.custom_visible_tickers = []   # Will be populated on first run
+
+    # Rolling Heatmap Selection & Catalog session state.
+    # These keys support the Phase III row-selection architecture only.
+    # They do not define numeric truth, semantic truth, display metadata,
+    # or rolling payload contents.
+    if 'rh_selection_mode' not in st.session_state:
+        st.session_state.rh_selection_mode = 'Custom'
+
+    if 'rh_custom_rows' not in st.session_state:
+        st.session_state.rh_custom_rows = list(RH_CUSTOM_DEFAULT)
+
+    if 'rh_selected_category' not in st.session_state:
+        st.session_state.rh_selected_category = None
+
+    if 'rh_selected_scope' not in st.session_state:
+        st.session_state.rh_selected_scope = 'All'
+
+    if 'rh_selected_window' not in st.session_state:
+        st.session_state.rh_selected_window = 'All'
+
+    if 'rh_selected_family' not in st.session_state:
+        st.session_state.rh_selected_family = 'All'
+
+    if 'rh_selected_preset' not in st.session_state:
+        preset_names = get_preset_names()
+        st.session_state.rh_selected_preset = preset_names[0] if preset_names else None
+
+    if 'rh_last_resolved_base_keys' not in st.session_state:
+        st.session_state.rh_last_resolved_base_keys = []
 
 def is_bucket_ticker(ticker: str) -> bool:
     """
