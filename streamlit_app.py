@@ -1,4 +1,4 @@
-# Stamp: Sun, May 10, 2026 3:11PM
+# Stamp: Wed, May 13, 2026 5:20PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -2010,19 +2010,245 @@ def show_technical_analysis_dashboard():
             ]
             default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
 
+            # -------------------------------
+            # Phase III Rolling Heatmap: Selection Mode integration
+            # -------------------------------
+            # Contract path:
+            # Selection Mode -> mode-specific controls -> resolved base row-key set
+            # -> manual display/remove override -> row-order override -> heatmap render.
+            #
+            # Important Streamlit rule:
+            # Do not assign to st.session_state[widget_key] after a widget with that key
+            # has been instantiated. Initialize/validate state before rendering widgets,
+            # then read widget return values.
+
+            mode_options = get_selection_modes()
+            if not mode_options:
+                mode_options = ["Custom", "Category", "Preset"]
+
+            current_mode = st.session_state.get("rh_selection_mode", "Custom")
+            if current_mode not in mode_options:
+                current_mode = "Custom"
+
+            selection_mode = st.selectbox(
+                "Selection Mode",
+                options=mode_options,
+                index=mode_options.index(current_mode),
+                key="rh_selection_mode",
+                help="Choose the base row set. Manual display/remove and row-order still apply afterward.",
+            )
+
+            resolved_base_keys = []
+
+            if selection_mode == "Custom":
+                # Custom is an editable saved/session row set. Restore-default must
+                # resolve from the catalog-owned RH_CUSTOM_DEFAULT.
+                cc1, cc2 = st.columns([0.75, 0.25])
+                with cc1:
+                    st.caption(
+                        "Custom mode uses your saved/default row set. "
+                        "Manual add/remove below updates the session Custom set."
+                    )
+                with cc2:
+                    if st.button(
+                        "Restore Default Custom",
+                        key="rh_restore_default_custom",
+                        use_container_width=True,
+                    ):
+                        st.session_state.rh_custom_rows = list(RH_CUSTOM_DEFAULT)
+                        st.session_state.pop("rh_custom_selected_keys", None)
+                        st.session_state.pop("rh_row_order", None)
+                        st.rerun()
+
+                resolved_base_keys = resolve_row_selection(
+                    selection_mode="Custom",
+                    custom_rows=st.session_state.get("rh_custom_rows", list(RH_CUSTOM_DEFAULT)),
+                )
+
+                current_multiselect_key = "rh_custom_selected_keys"
+
+            elif selection_mode == "Preset":
+                preset_options = get_preset_names()
+
+                if not preset_options:
+                    st.warning("No rolling heatmap presets are available.")
+                    selected_preset = None
+                    resolved_base_keys = []
+                    current_multiselect_key = "rh_preset_selected_keys__none"
+                else:
+                    stored_preset = st.session_state.get("rh_selected_preset")
+                    if stored_preset not in preset_options:
+                        # Safe: this occurs before the widget is instantiated.
+                        st.session_state.rh_selected_preset = preset_options[0]
+                        stored_preset = preset_options[0]
+
+                    selected_preset = st.selectbox(
+                        "Choose a preset",
+                        options=preset_options,
+                        index=preset_options.index(stored_preset),
+                        key="rh_selected_preset",
+                        help="Overview presets are curated; thematic presets are generated from the selection catalog.",
+                    )
+
+                    resolved_base_keys = resolve_row_selection(
+                        selection_mode="Preset",
+                        preset_name=selected_preset,
+                    )
+
+                    preset_key_part = str(selected_preset).replace(" ", "_").replace("/", "_")
+                    current_multiselect_key = f"rh_preset_selected_keys__{preset_key_part}"
+
+            elif selection_mode == "Category":
+                category_options = get_category_names()
+
+                if not category_options:
+                    st.warning("No row categories are available.")
+                    selected_category = None
+                    selected_scope = "All"
+                    selected_window = "All"
+                    selected_family = "All"
+                    resolved_base_keys = []
+                    current_multiselect_key = "rh_category_selected_keys__none"
+                else:
+                    stored_category = st.session_state.get("rh_selected_category")
+                    if stored_category not in category_options:
+                        # Safe: this occurs before the widget is instantiated.
+                        st.session_state.rh_selected_category = category_options[0]
+                        stored_category = category_options[0]
+
+                    c1, c2, c3, c4 = st.columns(4)
+
+                    with c1:
+                        selected_category = st.selectbox(
+                            "Category",
+                            options=category_options,
+                            index=category_options.index(stored_category),
+                            key="rh_selected_category",
+                        )
+
+                    scope_values = get_scope_names(selected_category)
+                    scope_options = ["All"] + [s for s in scope_values if s != "All"]
+                    stored_scope = st.session_state.get("rh_selected_scope", "All")
+                    if stored_scope not in scope_options:
+                        st.session_state.rh_selected_scope = "All"
+                        stored_scope = "All"
+
+                    with c2:
+                        selected_scope = st.selectbox(
+                            "Scope",
+                            options=scope_options,
+                            index=scope_options.index(stored_scope),
+                            key="rh_selected_scope",
+                            help="Optional narrowing filter.",
+                        )
+
+                    window_values = get_window_names(selected_category)
+                    window_options = ["All"] + [w for w in window_values if w != "All"]
+                    stored_window = st.session_state.get("rh_selected_window", "All")
+                    if stored_window not in window_options:
+                        st.session_state.rh_selected_window = "All"
+                        stored_window = "All"
+
+                    with c3:
+                        selected_window = st.selectbox(
+                            "Window",
+                            options=window_options,
+                            index=window_options.index(stored_window),
+                            key="rh_selected_window",
+                            help="Optional ST / MT / LT filter. 'All' means no Window filter.",
+                        )
+
+                    family_values = get_family_names(selected_category)
+                    family_options = ["All"] + [f for f in family_values if f != "All"]
+                    stored_family = st.session_state.get("rh_selected_family", "All")
+                    if stored_family not in family_options:
+                        st.session_state.rh_selected_family = "All"
+                        stored_family = "All"
+
+                    with c4:
+                        selected_family = st.selectbox(
+                            "Family",
+                            options=family_options,
+                            index=family_options.index(stored_family),
+                            key="rh_selected_family",
+                            help="Optional family filter, including grouped families such as MVA and Oscillators.",
+                        )
+
+                    resolved_base_keys = resolve_row_selection(
+                        selection_mode="Category",
+                        category=selected_category,
+                        scope=selected_scope,
+                        window=selected_window,
+                        family=selected_family,
+                    )
+
+                    category_key_part = str(selected_category).replace(" ", "_").replace("/", "_")
+                    scope_key_part = str(selected_scope).replace(" ", "_").replace("/", "_")
+                    window_key_part = str(selected_window).replace(" ", "_").replace("/", "_")
+                    family_key_part = str(selected_family).replace(" ", "_").replace("/", "_")
+                    current_multiselect_key = (
+                        "rh_category_selected_keys__"
+                        f"{category_key_part}__{scope_key_part}__{window_key_part}__{family_key_part}"
+                    )
+
+            else:
+                st.warning(f"Unknown Selection Mode: {selection_mode}")
+                resolved_base_keys = []
+                current_multiselect_key = "rh_unknown_selected_keys"
+
+            # Compatibility filtering only: grouping truth remains in the catalog /
+            # selection modules; INDICATOR_DEFS is used here only as the current
+            # display/render-compatible row universe.
+            resolved_base_keys = [k for k in resolved_base_keys if k in available_keys]
+            st.session_state.rh_last_resolved_base_keys = list(resolved_base_keys)
+
+            # Initialize the active multiselect state before creating the widget.
+            # Because current_multiselect_key changes by mode/preset/category filters,
+            # Streamlit treats each resolved context as a distinct widget and loads
+            # the correct base row set.
+            if current_multiselect_key not in st.session_state:
+                st.session_state[current_multiselect_key] = list(resolved_base_keys)
+            else:
+                st.session_state[current_multiselect_key] = [
+                    k for k in st.session_state[current_multiselect_key] if k in available_keys
+                ]
+
+            if not resolved_base_keys:
+                st.warning(
+                    describe_empty_selection(
+                        selection_mode=selection_mode,
+                        category=st.session_state.get("rh_selected_category"),
+                        scope=st.session_state.get("rh_selected_scope"),
+                        window=st.session_state.get("rh_selected_window"),
+                        family=st.session_state.get("rh_selected_family"),
+                        preset_name=st.session_state.get("rh_selected_preset"),
+                    )
+                )
+
             selected_keys = st.multiselect(
                 "Indicators to display/remove",
                 options=available_keys,
-                default=default_keys,
-                help="v1: controls which indicators are shown; defaults are a stable starter set.",
+                key=current_multiselect_key,
+                help="Manual downstream override. Starts from the selected row set, then you can add/remove visible rows.",
             )
+
+            if selection_mode == "Custom":
+                st.session_state.rh_custom_rows = list(selected_keys)
+
+            with st.expander("Selection Debug", expanded=False):
+                st.write(f"Selection Mode: {selection_mode}")
+                st.write(f"Resolved base keys count: {len(resolved_base_keys)}")
+                st.write(f"Multiselect session key: {current_multiselect_key}")
+                st.write(f"Selected keys count: {len(selected_keys)}")
+                st.write(f"Resolved base keys: {resolved_base_keys}")
 
             # ---- Phase III (UI-only): Session-only row order persistence (Option 2) ----
             # Goal: order persists across ticker changes/reruns in the same session, but resets on new session.
 
-            # Initialize row order once per session (from defaults).
+             # Initialize row order once per session from the current post-manual
+            # display/remove selection.
             if "rh_row_order" not in st.session_state:
-                st.session_state.rh_row_order = list(default_keys)
+                st.session_state.rh_row_order = list(selected_keys)    
 
             # Reconcile row order with current selection:
             #  - remove deselected keys

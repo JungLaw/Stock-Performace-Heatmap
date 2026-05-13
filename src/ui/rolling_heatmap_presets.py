@@ -53,9 +53,14 @@ except ImportError:  # pragma: no cover
 # Custom is a saved/editable selection set at runtime, but restore-default
 # behavior must resolve back to this catalog-owned definition.
 CUSTOM_DEFAULT: List[str] = [
+
+    "RSI_14",            # Momentum
+
     # Trend / directional bias
     "EMA_20",
     "EMA_50",
+    "SMA_50",    
+    "SMA_100",
     "SMA_200",
     "VWMA_20",
 
@@ -64,9 +69,8 @@ CUSTOM_DEFAULT: List[str] = [
     "MACD_12_26_9",
 
     # Momentum
-    "RSI_14",
-    "STOCH_14_3_3",
-    "ROC_20",
+    "STOCH_14_3_3",      # Momentum
+    "ROC_20",            # Momentum
 
     # Volatility
     "BB_PCT_B",
@@ -128,6 +132,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
 
         # Medium-term momentum
         "RSI_14",
+        "RSI_21",
         "STOCH_14_3_3",
         "WILLR_14",
         "ROC_20",

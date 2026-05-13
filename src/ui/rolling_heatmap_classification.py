@@ -1,3 +1,4 @@
+# Stamp: Wed, May 13, 2026 5:38PM
 # src/ui/rolling_heatmap_classification.py
 """
 Rolling Heatmap row-classification catalog.
