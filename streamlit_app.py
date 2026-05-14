@@ -1,4 +1,4 @@
-# Stamp: Wed, May 13, 2026 5:20PM
+# Stamp: Wed, May 13, 2026 5:38PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1688,672 +1688,702 @@ def show_technical_analysis_dashboard():
             st.caption(f"Analysis generated: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
         
         st.markdown("---")
+
+        # ------------------------------------------------------------
+        # Technical Analysis Dashboard section layout
+        # ------------------------------------------------------------
+        # Containers are declared in the desired visual order. Existing
+        # section logic can execute later while rendering into these
+        # containers, preserving dependencies such as current_price for
+        # Pivot Points.
+        technical_indicators_container = st.container()
+        rolling_heatmap_container = st.container()
+        week52_container = st.container()
+        moving_averages_container = st.container()
+        pivot_points_container = st.container()
         
         # PLACEHOLDER: Display technical analysis components
         # These will be implemented in subsequent steps
         
         # Moving Averages Table
-        st.subheader("📈 Moving Averages Analysis")
-        if 'moving_averages' in data:
-            display_moving_averages_table(data['moving_averages'])
+        with moving_averages_container:
+            st.markdown("---")
+            st.subheader("📈 Moving Averages Analysis")
+            if 'moving_averages' in data:
+                display_moving_averages_table(data['moving_averages'])
         
-        # Technical Indicators Table  
-        st.subheader("📊 Technical Indicators")
-        if 'technical_indicators' in data:
-            display_technical_indicators_cards(data['technical_indicators'])
-        else:
-            st.warning("Technical indicators data not available")
+        # Technical Indicators Table
+        with technical_indicators_container:
+            st.subheader("📊 Technical Indicators")
+            if 'technical_indicators' in data:
+                display_technical_indicators_cards(data['technical_indicators'])
+            else:
+                st.warning("Technical indicators data not available")
         
         # 52-Week High Analysis
-        st.subheader("📊 52-Week High Analysis")
-        
-        # Get current price for display
-        current_price = data.get('current_price', 0)
-        timestamp_str = datetime.now().strftime('%m/%d/%Y, %I:%M %p')
-        
-        # Display current price
-        st.markdown(f"**Current Price:** ${current_price:.2f} ({timestamp_str})")
-        st.markdown("---")
-        
-        # Display 52-week analysis table if data available
-        if 'price_extremes_data' in st.session_state and st.session_state.price_extremes_data:
-            periods_data = st.session_state.price_extremes_data
+        with week52_container:
+            st.subheader("📊 52-Week High Analysis")
             
-            # Create display table with restructured columns
-            table_rows = []
-            period_order = ['52w', '52w_close', '6m', '3m', '1m', 'ytd']
-            period_labels = {
-                '52w': '52W',
-                '52w_close': '52W (Close)',
-                '6m': '6M',
-                '3m': '3M',
-                '1m': '1M',
-                'ytd': 'YTD'
-            }
+            # Get current price for display
+            current_price = data.get('current_price', 0)
+            timestamp_str = datetime.now().strftime('%m/%d/%Y, %I:%M %p')
             
-            for period in period_order:
-                if period in periods_data:
-                    p_data = periods_data[period]
-                    
-                    # Calculate current vs levels
-                    vs_high = ((current_price - p_data['high_price']) / p_data['high_price']) * 100
-                    vs_5pct = ((current_price - p_data['level_minus_5pct']) / p_data['level_minus_5pct']) * 100
-                    vs_10pct = ((current_price - p_data['level_minus_10pct']) / p_data['level_minus_10pct']) * 100
-                    vs_15pct = ((current_price - p_data['level_minus_15pct']) / p_data['level_minus_15pct']) * 100
-                    vs_20pct = ((current_price - p_data['level_minus_20pct']) / p_data['level_minus_20pct']) * 100
-                    vs_33pct = ((current_price - p_data['level_minus_33pct']) / p_data['level_minus_33pct']) * 100
-                    vs_low = ((current_price - p_data['low_price']) / p_data['low_price']) * 100
-                    
-                    row = {
-                        'Period': period_labels[period],
-                        'High': f"${p_data['high_price']:.2f}",
-                        '% Chg (High)': f"{vs_high:+.1f}%",
-                        '-5%': f"${p_data['level_minus_5pct']:.2f}",
-                        '% Chg (-5%)': f"{vs_5pct:+.1f}%",
-                        '-10%': f"${p_data['level_minus_10pct']:.2f}",
-                        '% Chg (-10%)': f"{vs_10pct:+.1f}%",
-                        '-15%': f"${p_data['level_minus_15pct']:.2f}",
-                        '% Chg (-15%)': f"{vs_15pct:+.1f}%",
-                        '-20%': f"${p_data['level_minus_20pct']:.2f}",
-                        '% Chg (-20%)': f"{vs_20pct:+.1f}%",
-                        '-33%': f"${p_data['level_minus_33pct']:.2f}",
-                        '% Chg (-33%)': f"{vs_33pct:+.1f}%",
-                        'Low': f"${p_data['low_price']:.2f}",
-                        '% Chg (Low)': f"{vs_low:+.1f}%"
-                    }
-                    table_rows.append(row)
+            # Display current price
+            st.markdown(f"**Current Price:** ${current_price:.2f} ({timestamp_str})")
+            st.markdown("---")
             
-            if table_rows:
-                df = pd.DataFrame(table_rows)
-                # TODO: Add styling for negative percentages (red color)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Custom input section BELOW table
-        st.markdown("---")
-        st.markdown("**Update 52W High** (optional)")
-        
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            custom_52w_high = st.number_input(
-                "Custom 52W high:",
-                min_value=0.01,
-                value=None,
-                step=None,  # Removes +/- buttons
-                format="%.2f",
-                placeholder="e.g., 195.30",
-                help="Enter intraday high exceeding 52W closing high",
-                key="custom_52w_high_input"
-            )
-        
-        with col2:
-            custom_date = st.date_input(
-                "Date of high:",
-                value=None,
-                help="Date when the custom high occurred",
-                key="custom_52w_date_input"
-            )
-        
-        with col3:
-            st.markdown("<br>", unsafe_allow_html=True)  # Spacer for alignment
-            if st.button("🔄 Update", key="update_52w", use_container_width=True):
-                if custom_52w_high:
-                    with st.spinner("Updating 52-week analysis..."):
-                        extremes_result = st.session_state.technical_calculator.calculate_52_week_analysis(
-                            ticker,
-                            user_52w_high=custom_52w_high,
-                            save_to_db=resolved_save_to_db,
-                        )
+            # Display 52-week analysis table if data available
+            if 'price_extremes_data' in st.session_state and st.session_state.price_extremes_data:
+                periods_data = st.session_state.price_extremes_data
+                
+                # Create display table with restructured columns
+                table_rows = []
+                period_order = ['52w', '52w_close', '6m', '3m', '1m', 'ytd']
+                period_labels = {
+                    '52w': '52W',
+                    '52w_close': '52W (Close)',
+                    '6m': '6M',
+                    '3m': '3M',
+                    '1m': '1M',
+                    'ytd': 'YTD'
+                }
+                
+                for period in period_order:
+                    if period in periods_data:
+                        p_data = periods_data[period]
                         
-                        if extremes_result.get('error'):
-                            st.error(f"❌ {extremes_result['message']}")
-                        elif extremes_result.get('success'):
-                            st.session_state.price_extremes_data = extremes_result['periods']
-                            st.success("✅ 52-week analysis updated")
-                            st.rerun()
-                else:
-                    st.warning("⚠️ Enter a custom high value first")
+                        # Calculate current vs levels
+                        vs_high = ((current_price - p_data['high_price']) / p_data['high_price']) * 100
+                        vs_5pct = ((current_price - p_data['level_minus_5pct']) / p_data['level_minus_5pct']) * 100
+                        vs_10pct = ((current_price - p_data['level_minus_10pct']) / p_data['level_minus_10pct']) * 100
+                        vs_15pct = ((current_price - p_data['level_minus_15pct']) / p_data['level_minus_15pct']) * 100
+                        vs_20pct = ((current_price - p_data['level_minus_20pct']) / p_data['level_minus_20pct']) * 100
+                        vs_33pct = ((current_price - p_data['level_minus_33pct']) / p_data['level_minus_33pct']) * 100
+                        vs_low = ((current_price - p_data['low_price']) / p_data['low_price']) * 100
+                        
+                        row = {
+                            'Period': period_labels[period],
+                            'High': f"${p_data['high_price']:.2f}",
+                            '% Chg (High)': f"{vs_high:+.1f}%",
+                            '-5%': f"${p_data['level_minus_5pct']:.2f}",
+                            '% Chg (-5%)': f"{vs_5pct:+.1f}%",
+                            '-10%': f"${p_data['level_minus_10pct']:.2f}",
+                            '% Chg (-10%)': f"{vs_10pct:+.1f}%",
+                            '-15%': f"${p_data['level_minus_15pct']:.2f}",
+                            '% Chg (-15%)': f"{vs_15pct:+.1f}%",
+                            '-20%': f"${p_data['level_minus_20pct']:.2f}",
+                            '% Chg (-20%)': f"{vs_20pct:+.1f}%",
+                            '-33%': f"${p_data['level_minus_33pct']:.2f}",
+                            '% Chg (-33%)': f"{vs_33pct:+.1f}%",
+                            'Low': f"${p_data['low_price']:.2f}",
+                            '% Chg (Low)': f"{vs_low:+.1f}%"
+                        }
+                        table_rows.append(row)
+                
+                if table_rows:
+                    df = pd.DataFrame(table_rows)
+                    # TODO: Add styling for negative percentages (red color)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Custom input section BELOW table
+            st.markdown("---")
+            st.markdown("**Update 52W High** (optional)")
+            
+            col1, col2, col3 = st.columns([2, 2, 1])
+            
+            with col1:
+                custom_52w_high = st.number_input(
+                    "Custom 52W high:",
+                    min_value=0.01,
+                    value=None,
+                    step=None,  # Removes +/- buttons
+                    format="%.2f",
+                    placeholder="e.g., 195.30",
+                    help="Enter intraday high exceeding 52W closing high",
+                    key="custom_52w_high_input"
+                )
+            
+            with col2:
+                custom_date = st.date_input(
+                    "Date of high:",
+                    value=None,
+                    help="Date when the custom high occurred",
+                    key="custom_52w_date_input"
+                )
+            
+            with col3:
+                st.markdown("<br>", unsafe_allow_html=True)  # Spacer for alignment
+                if st.button("🔄 Update", key="update_52w", use_container_width=True):
+                    if custom_52w_high:
+                        with st.spinner("Updating 52-week analysis..."):
+                            extremes_result = st.session_state.technical_calculator.calculate_52_week_analysis(
+                                ticker,
+                                user_52w_high=custom_52w_high,
+                                save_to_db=resolved_save_to_db,
+                            )
+                            
+                            if extremes_result.get('error'):
+                                st.error(f"❌ {extremes_result['message']}")
+                            elif extremes_result.get('success'):
+                                st.session_state.price_extremes_data = extremes_result['periods']
+                                st.success("✅ 52-week analysis updated")
+                                st.rerun()
+                    else:
+                        st.warning("⚠️ Enter a custom high value first")
         
         # Pivot Points Analysis
-        st.markdown("---")
-        st.subheader("📍 Pivot Points Analysis")
-        
-        # Determine save_to_db setting (same logic as main analysis)
-        is_bucket = is_bucket_ticker(ticker)
-        should_save_to_db = is_bucket or st.session_state.get('ta_save_to_db_checkbox', False)
-        
-        # Calculate pivot points if not already cached in session
-        if 'pivot_points_data' not in st.session_state or st.session_state.get('pivot_points_ticker') != ticker:
-            with st.spinner("Calculating pivot points..."):
-                try:
-                    pivot_data = st.session_state.technical_calculator.calculate_pivot_points(
-                        ticker=ticker,
-                        target_date=None,  # Auto-detect previous trading day
-                        save_to_db=resolved_save_to_db   #should_save_to_db
-                    )
-                    st.session_state.pivot_points_data = pivot_data
-                    st.session_state.pivot_points_ticker = ticker
-                except Exception as e:
-                    st.error(f"Error calculating pivot points: {str(e)}")
-                    st.session_state.pivot_points_data = {'error': True, 'message': str(e)}
-        
-        # Display pivot points
-        if 'pivot_points_data' in st.session_state:
-            display_pivot_points(
-                ticker=ticker,
-                pivot_data=st.session_state.pivot_points_data,
-                current_price=current_price
-            )
-        else:
-            st.info("Pivot points data not available")
+        with pivot_points_container:
+            st.markdown("---")
+            st.subheader("📍 Pivot Points Analysis")
+            
+            # Determine save_to_db setting (same logic as main analysis)
+            is_bucket = is_bucket_ticker(ticker)
+            should_save_to_db = is_bucket or st.session_state.get('ta_save_to_db_checkbox', False)
+            
+            # Calculate pivot points if not already cached in session
+            if 'pivot_points_data' not in st.session_state or st.session_state.get('pivot_points_ticker') != ticker:
+                with st.spinner("Calculating pivot points..."):
+                    try:
+                        pivot_data = st.session_state.technical_calculator.calculate_pivot_points(
+                            ticker=ticker,
+                            target_date=None,  # Auto-detect previous trading day
+                            save_to_db=resolved_save_to_db   #should_save_to_db
+                        )
+                        st.session_state.pivot_points_data = pivot_data
+                        st.session_state.pivot_points_ticker = ticker
+                    except Exception as e:
+                        st.error(f"Error calculating pivot points: {str(e)}")
+                        st.session_state.pivot_points_data = {'error': True, 'message': str(e)}
+            
+            # Display pivot points
+            if 'pivot_points_data' in st.session_state:
+                display_pivot_points(
+                    ticker=ticker,
+                    pivot_data=st.session_state.pivot_points_data,
+                    current_price=current_price
+                )
+            else:
+                st.info("Pivot points data not available")
 
         # Rolling Heatmap
-        st.subheader("🔥 Rolling Signal Heatmap")
-        if "rolling_signals" in data:
-            from src.ui.rolling_heatmap_adapter import (
-                INDICATOR_DEFS,
-                build_plotly_heatmap_inputs,
-                make_rolling_heatmap_figure,
-                get_indicator_doc_slug,
-            )
-
-            technical_calculator = st.session_state.technical_calculator
-
-            # --- Phase III (UI-only): Rolling heatmap controls (local to heatmap section) ---
-            # D1: Only recompute rolling_signals when rolling params change (not on every rerun).
-            cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 1.4])
-
-            with cA:
-                rolling_days = st.selectbox(
-                    "Rolling window (trading days)",
-                    options=[10, 20, 30, 60],
-                    index=0,
-                    key="rh_days_selector",
-                    help="Controls how many trading days the rolling heatmap displays.",
+        with rolling_heatmap_container:
+            st.subheader("🔥 Rolling Signal Heatmap")
+            if "rolling_signals" in data:
+                from src.ui.rolling_heatmap_adapter import (
+                    INDICATOR_DEFS,
+                    build_plotly_heatmap_inputs,
+                    make_rolling_heatmap_figure,
+                    get_indicator_doc_slug,
                 )
 
-            with cB:
-                anchor_mode = st.radio(
-                    "Anchor mode",
-                    options=["asof", "start"],
-                    index=0,
-                    horizontal=True,
-                    key="rh_anchor_mode",
-                    help="As-of: window ends on anchor date. Start: window begins on anchor date.",
-                )
+                technical_calculator = st.session_state.technical_calculator
 
-            with cC:
-                cache_enabled = st.toggle(
-                    "Save in-session",
-                    value=False,
-                    key="rh_cache_enabled",
-                    help="Caches rolling inputs per ticker for faster browsing within this session only. "
-                        "'On': deep-dive into multiple dates/windows. 'Off': sampling many tickers once each.",
-                )
+                # --- Phase III (UI-only): Rolling heatmap controls (local to heatmap section) ---
+                # D1: Only recompute rolling_signals when rolling params change (not on every rerun).
+                cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 1.4])
 
-            with cD:
-                use_anchor_date = st.checkbox(
-                    "Use anchor date",
-                    value=False,
-                    key="rh_use_anchor_date",
-                    help="If unchecked, the builder uses the latest available trading day (as-of) "
-                        "or the earliest available trading day (start), depending on Anchor mode.",
-                )
-
-            anchor_date = None
-            if use_anchor_date:
-                anchor_label = "As-of date" if anchor_mode == "asof" else "Start date"
-                anchor_date = st.date_input(
-                    anchor_label,
-                    key="rh_anchor_date",
-                    help="Pick the anchor date used to resolve the rolling window.",
-                )
-
-            # Compute-gating: only rebuild rolling_signals when parameters change.
-            # This prevents unnecessary recompute on row-order clicks, expanders, etc.
-            rolling_params = (
-                str(ticker).upper().strip(),
-                int(rolling_days),
-                str(anchor_mode),
-                anchor_date,               # datetime.date or None
-                bool(cache_enabled),
-            )
-
-            if "rh_last_params" not in st.session_state:
-                st.session_state.rh_last_params = None
-            if "rh_last_signals" not in st.session_state:
-                st.session_state.rh_last_signals = None
-
-            need_rebuild = (st.session_state.rh_last_params != rolling_params) or (st.session_state.rh_last_signals is None)
-
-            if need_rebuild:
-                with st.spinner("Building rolling heatmap…"):
-                    rolling_signals = technical_calculator.build_rolling_heatmap_signals(
-                        ticker=ticker,
-                        window_days=int(rolling_days),
-                        anchor_mode=str(anchor_mode),
-                        anchor_date=anchor_date,          # date | None
-                        cache_enabled=bool(cache_enabled),
-                        base_buffer_days=None,            # defer tuning; safe default inside builder
+                with cA:
+                    rolling_days = st.selectbox(
+                        "Rolling window (trading days)",
+                        options=[10, 20, 30, 60],
+                        index=0,
+                        key="rh_days_selector",
+                        help="Controls how many trading days the rolling heatmap displays.",
                     )
-                st.session_state.rh_last_params = rolling_params
-                st.session_state.rh_last_signals = rolling_signals
-            else:
-                rolling_signals = st.session_state.rh_last_signals
 
-            # Inject/override only the rolling_signals used by the heatmap renderer
-            data = dict(data)  # shallow copy so we don't mutate session_state object unexpectedly
-            data["rolling_signals"] = rolling_signals
-
-            available_keys = list(INDICATOR_DEFS.keys())
-
-            # v1 defaults (edit this list freely; any missing keys are ignored safely)
-            DEFAULT_KEYS = [
-                "RSI_14",
-#                "RSI_10",
-                "RSI_21", "RSI_30",
-                "SMA_50",   #"SMA_10",  "SMA_20",
-                "SMA_100",
-                "SMA_200",
-                #"EMA_5",
-                #"EMA_10",
-                "EMA_13",
-                "EMA_20", 
-                "EMA_50",
-                #"EMA_100",
-                #"EMA_200",
-                #"HMA_9",
-#                "HMA_21",
-                #"HMA_50",
-                "WILLR_5",
-                "WILLR_14",
-                "WILLR_20",
-                "CMF_10",  
-                "CMF_21",
-                "CMF_50",  
-                "CMF_30", 
-                #"UO_5_10_15",
-                "UO_7_14_28",
-                #"UO_10_20_40",
-                #"CCI_10"
-                "CCI_14",
-                #"CCI_20"
-                "MFI_10",
-                "MFI_14",
-                "MFI_30",
-                #"ROC_9",
-                "ROC_12",
-                "ROC_14",
-                "ROC_20",
-                "ROC_50",
-                "BB_PCT_B_ST",
-                "BB_PCT_B",
-                "BB_PCT_B_LT",
-                "BB_BW_ST",
-                "BB_BW",
-                "BB_BW_LT",
-                #"ADX_9",
-                "ADX_14",
-                #"ADX_20",
-                #"OBV",
-                "HMA_9",
-                "HMA_21",  
-                "HMA_50",
-                "HMA_55",
-                "VWMA_10", "VWMA_20", "VWMA_50",  
-                "MACD_12_26_9", "MACD_8_17_5", "MACD_20_50_10", 
-                "STOCH_14_3_3", "STOCH_5_3_3", "STOCH_21_5_5",
-                "BullBearPower_10", "BullBearPower_13", "BullBearPower_21",
-                # "MACD_5_34_1"
-                # If you want to include the UI-mock expansion, uncomment these:
-                # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
-            ]
-            default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
-
-            # -------------------------------
-            # Phase III Rolling Heatmap: Selection Mode integration
-            # -------------------------------
-            # Contract path:
-            # Selection Mode -> mode-specific controls -> resolved base row-key set
-            # -> manual display/remove override -> row-order override -> heatmap render.
-            #
-            # Important Streamlit rule:
-            # Do not assign to st.session_state[widget_key] after a widget with that key
-            # has been instantiated. Initialize/validate state before rendering widgets,
-            # then read widget return values.
-
-            mode_options = get_selection_modes()
-            if not mode_options:
-                mode_options = ["Custom", "Category", "Preset"]
-
-            current_mode = st.session_state.get("rh_selection_mode", "Custom")
-            if current_mode not in mode_options:
-                current_mode = "Custom"
-
-            selection_mode = st.selectbox(
-                "Selection Mode",
-                options=mode_options,
-                index=mode_options.index(current_mode),
-                key="rh_selection_mode",
-                help="Choose the base row set. Manual display/remove and row-order still apply afterward.",
-            )
-
-            resolved_base_keys = []
-
-            if selection_mode == "Custom":
-                # Custom is an editable saved/session row set. Restore-default must
-                # resolve from the catalog-owned RH_CUSTOM_DEFAULT.
-                cc1, cc2 = st.columns([0.75, 0.25])
-                with cc1:
-                    st.caption(
-                        "Custom mode uses your saved/default row set. "
-                        "Manual add/remove below updates the session Custom set."
+                with cB:
+                    anchor_mode = st.radio(
+                        "Anchor mode",
+                        options=["asof", "start"],
+                        index=0,
+                        horizontal=True,
+                        key="rh_anchor_mode",
+                        help="As-of: window ends on anchor date. Start: window begins on anchor date.",
                     )
-                with cc2:
-                    if st.button(
-                        "Restore Default Custom",
-                        key="rh_restore_default_custom",
-                        use_container_width=True,
-                    ):
-                        st.session_state.rh_custom_rows = list(RH_CUSTOM_DEFAULT)
-                        st.session_state.pop("rh_custom_selected_keys", None)
-                        st.session_state.pop("rh_row_order", None)
-                        st.rerun()
 
-                resolved_base_keys = resolve_row_selection(
-                    selection_mode="Custom",
-                    custom_rows=st.session_state.get("rh_custom_rows", list(RH_CUSTOM_DEFAULT)),
+                with cC:
+                    cache_enabled = st.toggle(
+                        "Save in-session",
+                        value=False,
+                        key="rh_cache_enabled",
+                        help="Caches rolling inputs per ticker for faster browsing within this session only. "
+                            "'On': deep-dive into multiple dates/windows. 'Off': sampling many tickers once each.",
+                    )
+
+                with cD:
+                    use_anchor_date = st.checkbox(
+                        "Use anchor date",
+                        value=False,
+                        key="rh_use_anchor_date",
+                        help="If unchecked, the builder uses the latest available trading day (as-of) "
+                            "or the earliest available trading day (start), depending on Anchor mode.",
+                    )
+
+                anchor_date = None
+                if use_anchor_date:
+                    anchor_label = "As-of date" if anchor_mode == "asof" else "Start date"
+                    anchor_date = st.date_input(
+                        anchor_label,
+                        key="rh_anchor_date",
+                        help="Pick the anchor date used to resolve the rolling window.",
+                    )
+
+                # Compute-gating: only rebuild rolling_signals when parameters change.
+                # This prevents unnecessary recompute on row-order clicks, expanders, etc.
+                rolling_params = (
+                    str(ticker).upper().strip(),
+                    int(rolling_days),
+                    str(anchor_mode),
+                    anchor_date,               # datetime.date or None
+                    bool(cache_enabled),
                 )
 
-                current_multiselect_key = "rh_custom_selected_keys"
+                if "rh_last_params" not in st.session_state:
+                    st.session_state.rh_last_params = None
+                if "rh_last_signals" not in st.session_state:
+                    st.session_state.rh_last_signals = None
 
-            elif selection_mode == "Preset":
-                preset_options = get_preset_names()
+                need_rebuild = (st.session_state.rh_last_params != rolling_params) or (st.session_state.rh_last_signals is None)
 
-                if not preset_options:
-                    st.warning("No rolling heatmap presets are available.")
-                    selected_preset = None
-                    resolved_base_keys = []
-                    current_multiselect_key = "rh_preset_selected_keys__none"
+                if need_rebuild:
+                    with st.spinner("Building rolling heatmap…"):
+                        rolling_signals = technical_calculator.build_rolling_heatmap_signals(
+                            ticker=ticker,
+                            window_days=int(rolling_days),
+                            anchor_mode=str(anchor_mode),
+                            anchor_date=anchor_date,          # date | None
+                            cache_enabled=bool(cache_enabled),
+                            base_buffer_days=None,            # defer tuning; safe default inside builder
+                        )
+                    st.session_state.rh_last_params = rolling_params
+                    st.session_state.rh_last_signals = rolling_signals
                 else:
-                    stored_preset = st.session_state.get("rh_selected_preset")
-                    if stored_preset not in preset_options:
-                        # Safe: this occurs before the widget is instantiated.
-                        st.session_state.rh_selected_preset = preset_options[0]
-                        stored_preset = preset_options[0]
+                    rolling_signals = st.session_state.rh_last_signals
 
-                    selected_preset = st.selectbox(
-                        "Choose a preset",
-                        options=preset_options,
-                        index=preset_options.index(stored_preset),
-                        key="rh_selected_preset",
-                        help="Overview presets are curated; thematic presets are generated from the selection catalog.",
-                    )
+                # Inject/override only the rolling_signals used by the heatmap renderer
+                data = dict(data)  # shallow copy so we don't mutate session_state object unexpectedly
+                data["rolling_signals"] = rolling_signals
 
-                    resolved_base_keys = resolve_row_selection(
-                        selection_mode="Preset",
-                        preset_name=selected_preset,
-                    )
+                available_keys = list(INDICATOR_DEFS.keys())
 
-                    preset_key_part = str(selected_preset).replace(" ", "_").replace("/", "_")
-                    current_multiselect_key = f"rh_preset_selected_keys__{preset_key_part}"
-
-            elif selection_mode == "Category":
-                category_options = get_category_names()
-
-                if not category_options:
-                    st.warning("No row categories are available.")
-                    selected_category = None
-                    selected_scope = "All"
-                    selected_window = "All"
-                    selected_family = "All"
-                    resolved_base_keys = []
-                    current_multiselect_key = "rh_category_selected_keys__none"
-                else:
-                    stored_category = st.session_state.get("rh_selected_category")
-                    if stored_category not in category_options:
-                        # Safe: this occurs before the widget is instantiated.
-                        st.session_state.rh_selected_category = category_options[0]
-                        stored_category = category_options[0]
-
-                    c1, c2, c3, c4 = st.columns(4)
-
-                    with c1:
-                        selected_category = st.selectbox(
-                            "Category",
-                            options=category_options,
-                            index=category_options.index(stored_category),
-                            key="rh_selected_category",
-                        )
-
-                    scope_values = get_scope_names(selected_category)
-                    scope_options = ["All"] + [s for s in scope_values if s != "All"]
-                    stored_scope = st.session_state.get("rh_selected_scope", "All")
-                    if stored_scope not in scope_options:
-                        st.session_state.rh_selected_scope = "All"
-                        stored_scope = "All"
-
-                    with c2:
-                        selected_scope = st.selectbox(
-                            "Scope",
-                            options=scope_options,
-                            index=scope_options.index(stored_scope),
-                            key="rh_selected_scope",
-                            help="Optional narrowing filter.",
-                        )
-
-                    window_values = get_window_names(selected_category)
-                    window_options = ["All"] + [w for w in window_values if w != "All"]
-                    stored_window = st.session_state.get("rh_selected_window", "All")
-                    if stored_window not in window_options:
-                        st.session_state.rh_selected_window = "All"
-                        stored_window = "All"
-
-                    with c3:
-                        selected_window = st.selectbox(
-                            "Window",
-                            options=window_options,
-                            index=window_options.index(stored_window),
-                            key="rh_selected_window",
-                            help="Optional ST / MT / LT filter. 'All' means no Window filter.",
-                        )
-
-                    family_values = get_family_names(selected_category)
-                    family_options = ["All"] + [f for f in family_values if f != "All"]
-                    stored_family = st.session_state.get("rh_selected_family", "All")
-                    if stored_family not in family_options:
-                        st.session_state.rh_selected_family = "All"
-                        stored_family = "All"
-
-                    with c4:
-                        selected_family = st.selectbox(
-                            "Family",
-                            options=family_options,
-                            index=family_options.index(stored_family),
-                            key="rh_selected_family",
-                            help="Optional family filter, including grouped families such as MVA and Oscillators.",
-                        )
-
-                    resolved_base_keys = resolve_row_selection(
-                        selection_mode="Category",
-                        category=selected_category,
-                        scope=selected_scope,
-                        window=selected_window,
-                        family=selected_family,
-                    )
-
-                    category_key_part = str(selected_category).replace(" ", "_").replace("/", "_")
-                    scope_key_part = str(selected_scope).replace(" ", "_").replace("/", "_")
-                    window_key_part = str(selected_window).replace(" ", "_").replace("/", "_")
-                    family_key_part = str(selected_family).replace(" ", "_").replace("/", "_")
-                    current_multiselect_key = (
-                        "rh_category_selected_keys__"
-                        f"{category_key_part}__{scope_key_part}__{window_key_part}__{family_key_part}"
-                    )
-
-            else:
-                st.warning(f"Unknown Selection Mode: {selection_mode}")
-                resolved_base_keys = []
-                current_multiselect_key = "rh_unknown_selected_keys"
-
-            # Compatibility filtering only: grouping truth remains in the catalog /
-            # selection modules; INDICATOR_DEFS is used here only as the current
-            # display/render-compatible row universe.
-            resolved_base_keys = [k for k in resolved_base_keys if k in available_keys]
-            st.session_state.rh_last_resolved_base_keys = list(resolved_base_keys)
-
-            # Initialize the active multiselect state before creating the widget.
-            # Because current_multiselect_key changes by mode/preset/category filters,
-            # Streamlit treats each resolved context as a distinct widget and loads
-            # the correct base row set.
-            if current_multiselect_key not in st.session_state:
-                st.session_state[current_multiselect_key] = list(resolved_base_keys)
-            else:
-                st.session_state[current_multiselect_key] = [
-                    k for k in st.session_state[current_multiselect_key] if k in available_keys
+                # v1 defaults (edit this list freely; any missing keys are ignored safely)
+                DEFAULT_KEYS = [
+                    "RSI_14",
+    #                "RSI_10",
+                    "RSI_21", "RSI_30",
+                    "SMA_50",   #"SMA_10",  "SMA_20",
+                    "SMA_100",
+                    "SMA_200",
+                    #"EMA_5",
+                    #"EMA_10",
+                    "EMA_13",
+                    "EMA_20", 
+                    "EMA_50",
+                    #"EMA_100",
+                    #"EMA_200",
+                    #"HMA_9",
+    #                "HMA_21",
+                    #"HMA_50",
+                    "WILLR_5",
+                    "WILLR_14",
+                    "WILLR_20",
+                    "CMF_10",  
+                    "CMF_21",
+                    "CMF_50",  
+                    "CMF_30", 
+                    #"UO_5_10_15",
+                    "UO_7_14_28",
+                    #"UO_10_20_40",
+                    #"CCI_10"
+                    "CCI_14",
+                    #"CCI_20"
+                    "MFI_10",
+                    "MFI_14",
+                    "MFI_30",
+                    #"ROC_9",
+                    "ROC_12",
+                    "ROC_14",
+                    "ROC_20",
+                    "ROC_50",
+                    "BB_PCT_B_ST",
+                    "BB_PCT_B",
+                    "BB_PCT_B_LT",
+                    "BB_BW_ST",
+                    "BB_BW",
+                    "BB_BW_LT",
+                    #"ADX_9",
+                    "ADX_14",
+                    #"ADX_20",
+                    #"OBV",
+                    "HMA_9",
+                    "HMA_21",  
+                    "HMA_50",
+                    "HMA_55",
+                    "VWMA_10", "VWMA_20", "VWMA_50",  
+                    "MACD_12_26_9", "MACD_8_17_5", "MACD_20_50_10", 
+                    "STOCH_14_3_3", "STOCH_5_3_3", "STOCH_21_5_5",
+                    "BullBearPower_10", "BullBearPower_13", "BullBearPower_21",
+                    # "MACD_5_34_1"
+                    # If you want to include the UI-mock expansion, uncomment these:
+                    # "EMA_20", "EMA_50", "HMA_21", "UO_7_14_28", "CCI_14", "OBV",
                 ]
+                default_keys = [k for k in DEFAULT_KEYS if k in available_keys]
 
-            if not resolved_base_keys:
-                st.warning(
-                    describe_empty_selection(
-                        selection_mode=selection_mode,
-                        category=st.session_state.get("rh_selected_category"),
-                        scope=st.session_state.get("rh_selected_scope"),
-                        window=st.session_state.get("rh_selected_window"),
-                        family=st.session_state.get("rh_selected_family"),
-                        preset_name=st.session_state.get("rh_selected_preset"),
+                # -------------------------------
+                # Phase III Rolling Heatmap: Selection Mode integration
+                # -------------------------------
+                # Contract path:
+                # Selection Mode -> mode-specific controls -> resolved base row-key set
+                # -> manual display/remove override -> row-order override -> heatmap render.
+                #
+                # Important Streamlit rule:
+                # Do not assign to st.session_state[widget_key] after a widget with that key
+                # has been instantiated. Initialize/validate state before rendering widgets,
+                # then read widget return values.
+
+                mode_options = get_selection_modes()
+                if not mode_options:
+                    mode_options = ["Custom", "Category", "Preset"]
+
+                current_mode = st.session_state.get("rh_selection_mode", "Custom")
+                if current_mode not in mode_options:
+                    current_mode = "Custom"
+
+                selection_mode = st.selectbox(
+                    "Selection Mode",
+                    options=mode_options,
+                    index=mode_options.index(current_mode),
+                    key="rh_selection_mode",
+                    help="Choose the base row set. Manual display/remove and row-order still apply afterward.",
+                )
+
+                resolved_base_keys = []
+
+                if selection_mode == "Custom":
+                    # Custom is an editable saved/session row set. Restore-default must
+                    # resolve from the catalog-owned RH_CUSTOM_DEFAULT.
+                    cc1, cc2 = st.columns([0.75, 0.25])
+                    with cc1:
+                        st.caption(
+                            "Custom mode uses your saved/default row set. "
+                            "Manual add/remove below updates the session Custom set."
+                        )
+                    with cc2:
+                        if st.button(
+                            "Restore Default Custom",
+                            key="rh_restore_default_custom",
+                            use_container_width=True,
+                        ):
+                            st.session_state.rh_custom_rows = list(RH_CUSTOM_DEFAULT)
+                            st.session_state.pop("rh_custom_selected_keys", None)
+                            st.session_state.pop("rh_row_order", None)
+                            st.rerun()
+
+                    resolved_base_keys = resolve_row_selection(
+                        selection_mode="Custom",
+                        custom_rows=st.session_state.get("rh_custom_rows", list(RH_CUSTOM_DEFAULT)),
                     )
-                )
 
-            selected_keys = st.multiselect(
-                "Indicators to display/remove",
-                options=available_keys,
-                key=current_multiselect_key,
-                help="Manual downstream override. Starts from the selected row set, then you can add/remove visible rows.",
-            )
+                    current_multiselect_key = "rh_custom_selected_keys"
 
-            if selection_mode == "Custom":
-                st.session_state.rh_custom_rows = list(selected_keys)
+                elif selection_mode == "Preset":
+                    preset_options = get_preset_names()
 
-            with st.expander("Selection Debug", expanded=False):
-                st.write(f"Selection Mode: {selection_mode}")
-                st.write(f"Resolved base keys count: {len(resolved_base_keys)}")
-                st.write(f"Multiselect session key: {current_multiselect_key}")
-                st.write(f"Selected keys count: {len(selected_keys)}")
-                st.write(f"Resolved base keys: {resolved_base_keys}")
+                    if not preset_options:
+                        st.warning("No rolling heatmap presets are available.")
+                        selected_preset = None
+                        resolved_base_keys = []
+                        current_multiselect_key = "rh_preset_selected_keys__none"
+                    else:
+                        stored_preset = st.session_state.get("rh_selected_preset")
+                        if stored_preset not in preset_options:
+                            # Safe: this occurs before the widget is instantiated.
+                            st.session_state.rh_selected_preset = preset_options[0]
+                            stored_preset = preset_options[0]
 
-            # ---- Phase III (UI-only): Session-only row order persistence (Option 2) ----
-            # Goal: order persists across ticker changes/reruns in the same session, but resets on new session.
+                        selected_preset = st.selectbox(
+                            "Choose a preset",
+                            options=preset_options,
+                            index=preset_options.index(stored_preset),
+                            key="rh_selected_preset",
+                            help="Overview presets are curated; thematic presets are generated from the selection catalog.",
+                        )
 
-             # Initialize row order once per session from the current post-manual
-            # display/remove selection.
-            if "rh_row_order" not in st.session_state:
-                st.session_state.rh_row_order = list(selected_keys)    
+                        resolved_base_keys = resolve_row_selection(
+                            selection_mode="Preset",
+                            preset_name=selected_preset,
+                        )
 
-            # Reconcile row order with current selection:
-            #  - remove deselected keys
-            #  - append newly selected keys at the end
-            current_order = [k for k in st.session_state.rh_row_order if k in selected_keys]
-            newly_selected = [k for k in selected_keys if k not in current_order]
-            st.session_state.rh_row_order = current_order + newly_selected
-            st.session_state.rh_row_order = list(dict.fromkeys(st.session_state.rh_row_order))
+                        preset_key_part = str(selected_preset).replace(" ", "_").replace("/", "_")
+                        current_multiselect_key = f"rh_preset_selected_keys__{preset_key_part}"
 
-            # Row reordering UI (mouse clicks; no external components)
-            with st.expander("Change Indicator Order", expanded=False):
-                st.caption("Use ↑ / ↓ to reorder rows for this session. Order resets on a new session.")
+                elif selection_mode == "Category":
+                    category_options = get_category_names()
 
-                # Use INDICATOR_DEFS for friendly labels in the reorder panel
-                defs = INDICATOR_DEFS
+                    if not category_options:
+                        st.warning("No row categories are available.")
+                        selected_category = None
+                        selected_scope = "All"
+                        selected_window = "All"
+                        selected_family = "All"
+                        resolved_base_keys = []
+                        current_multiselect_key = "rh_category_selected_keys__none"
+                    else:
+                        stored_category = st.session_state.get("rh_selected_category")
+                        if stored_category not in category_options:
+                            # Safe: this occurs before the widget is instantiated.
+                            st.session_state.rh_selected_category = category_options[0]
+                            stored_category = category_options[0]
 
-                # Sync the row order between heatmap & ordering drop-down
-                order_view = list(st.session_state.rh_row_order)
-                for idx, key in enumerate(order_view):
-                    label = defs.get(key, {}).get("display_name", key)
+                        c1, c2, c3, c4 = st.columns(4)
 
-                    c1, c2, c3 = st.columns([0.08, 0.08, 0.84])
+                        with c1:
+                            selected_category = st.selectbox(
+                                "Category",
+                                options=category_options,
+                                index=category_options.index(stored_category),
+                                key="rh_selected_category",
+                            )
 
-                    up_disabled = idx == 0
-                    down_disabled = idx == (len(st.session_state.rh_row_order) - 1)
+                        scope_values = get_scope_names(selected_category)
+                        scope_options = ["All"] + [s for s in scope_values if s != "All"]
+                        stored_scope = st.session_state.get("rh_selected_scope", "All")
+                        if stored_scope not in scope_options:
+                            st.session_state.rh_selected_scope = "All"
+                            stored_scope = "All"
 
-                    if c1.button("↑", key=f"rh_up_{idx}_{key}", disabled=up_disabled):
-                        order = list(st.session_state.rh_row_order)
-                        order[idx - 1], order[idx] = order[idx], order[idx - 1]
-                        st.session_state.rh_row_order = order
-                        st.rerun()
+                        with c2:
+                            selected_scope = st.selectbox(
+                                "Scope",
+                                options=scope_options,
+                                index=scope_options.index(stored_scope),
+                                key="rh_selected_scope",
+                                help="Optional narrowing filter.",
+                            )
 
-                    if c2.button("↓", key=f"rh_down_{idx}_{key}", disabled=down_disabled):
-                        order = list(st.session_state.rh_row_order)
-                        order[idx], order[idx + 1] = order[idx + 1], order[idx]
-                        st.session_state.rh_row_order = order
-                        st.rerun()
+                        window_values = get_window_names(selected_category)
+                        window_options = ["All"] + [w for w in window_values if w != "All"]
+                        stored_window = st.session_state.get("rh_selected_window", "All")
+                        if stored_window not in window_options:
+                            st.session_state.rh_selected_window = "All"
+                            stored_window = "All"
 
-                    c3.write(label)
+                        with c3:
+                            selected_window = st.selectbox(
+                                "Window",
+                                options=window_options,
+                                index=window_options.index(stored_window),
+                                key="rh_selected_window",
+                                help="Optional ST / MT / LT filter. 'All' means no Window filter.",
+                            )
 
-            # Ordered keys for rendering
-            ordered_selected_keys = st.session_state.rh_row_order
+                        family_values = get_family_names(selected_category)
+                        family_options = ["All"] + [f for f in family_values if f != "All"]
+                        stored_family = st.session_state.get("rh_selected_family", "All")
+                        if stored_family not in family_options:
+                            st.session_state.rh_selected_family = "All"
+                            stored_family = "All"
 
-            rolling_payload = _extract_rolling_signals_from_data(data)
+                        with c4:
+                            selected_family = st.selectbox(
+                                "Family",
+                                options=family_options,
+                                index=family_options.index(stored_family),
+                                key="rh_selected_family",
+                                help="Optional family filter, including grouped families such as MVA and Oscillators.",
+                            )
 
-            # ----------------------------------------
-            # Hover-only OHLCV / indicator context
-            # ----------------------------------------
-            hover_ohlcv_df = None
-            try:
-                hover_ohlcv_df = technical_calculator.calculate_optionc_indicators(
-                    ticker=ticker,
-                    save_to_db=False,
-                    ohlcv_request={
-                        "mode": "rolling_heatmap_scenario_b",
-                        "window_days": int(rolling_days),
-                        "anchor_mode": str(anchor_mode),
-                        "anchor_date": anchor_date,
-                        "historical_buffer_days": 435,
-                    },
-                )
-            except Exception:
+                        resolved_base_keys = resolve_row_selection(
+                            selection_mode="Category",
+                            category=selected_category,
+                            scope=selected_scope,
+                            window=selected_window,
+                            family=selected_family,
+                        )
+
+                        category_key_part = str(selected_category).replace(" ", "_").replace("/", "_")
+                        scope_key_part = str(selected_scope).replace(" ", "_").replace("/", "_")
+                        window_key_part = str(selected_window).replace(" ", "_").replace("/", "_")
+                        family_key_part = str(selected_family).replace(" ", "_").replace("/", "_")
+                        current_multiselect_key = (
+                            "rh_category_selected_keys__"
+                            f"{category_key_part}__{scope_key_part}__{window_key_part}__{family_key_part}"
+                        )
+
+                else:
+                    st.warning(f"Unknown Selection Mode: {selection_mode}")
+                    resolved_base_keys = []
+                    current_multiselect_key = "rh_unknown_selected_keys"
+
+                # Compatibility filtering only: grouping truth remains in the catalog /
+                # selection modules; INDICATOR_DEFS is used here only as the current
+                # display/render-compatible row universe.
+                resolved_base_keys = [k for k in resolved_base_keys if k in available_keys]
+                st.session_state.rh_last_resolved_base_keys = list(resolved_base_keys)
+
+                # Initialize the active multiselect state before creating the widget.
+                # Because current_multiselect_key changes by mode/preset/category filters,
+                # Streamlit treats each resolved context as a distinct widget and loads
+                # the correct base row set.
+                if current_multiselect_key not in st.session_state:
+                    st.session_state[current_multiselect_key] = list(resolved_base_keys)
+                else:
+                    st.session_state[current_multiselect_key] = [
+                        k for k in st.session_state[current_multiselect_key] if k in available_keys
+                    ]
+
+                if not resolved_base_keys:
+                    st.warning(
+                        describe_empty_selection(
+                            selection_mode=selection_mode,
+                            category=st.session_state.get("rh_selected_category"),
+                            scope=st.session_state.get("rh_selected_scope"),
+                            window=st.session_state.get("rh_selected_window"),
+                            family=st.session_state.get("rh_selected_family"),
+                            preset_name=st.session_state.get("rh_selected_preset"),
+                        )
+                    )
+
+                # ------------------------------------------------------------
+                # Visual layout placeholders
+                # ------------------------------------------------------------
+                # The manual controls must execute before heatmap rendering so
+                # ordered_selected_keys is current. These containers let the heatmap
+                # appear above the manual controls while preserving the execution order.
+                heatmap_container = st.empty()
+                manual_controls_container = st.container()
+
+                with manual_controls_container:
+                    selected_keys = st.multiselect(
+                        "Indicators to display/remove",
+                        options=available_keys,
+                        key=current_multiselect_key,
+                        help="Manual downstream override. Starts from the selected row set, then you can add/remove visible rows.",
+                    )
+
+                    if selection_mode == "Custom":
+                        st.session_state.rh_custom_rows = list(selected_keys)
+
+                    # ---- Phase III (UI-only): Session-only row order persistence (Option 2) ----
+                    # Goal: order persists across ticker changes/reruns in the same session, but resets on new session.
+
+                    # Initialize row order once per session from the current post-manual
+                    # display/remove selection.
+                    if "rh_row_order" not in st.session_state:
+                        st.session_state.rh_row_order = list(selected_keys)
+
+                    # Reconcile row order with current selection:
+                    #  - remove deselected keys
+                    #  - append newly selected keys at the end
+                    current_order = [k for k in st.session_state.rh_row_order if k in selected_keys]
+                    newly_selected = [k for k in selected_keys if k not in current_order]
+                    st.session_state.rh_row_order = current_order + newly_selected
+                    st.session_state.rh_row_order = list(dict.fromkeys(st.session_state.rh_row_order))
+
+                    # Row reordering UI (mouse clicks; no external components)
+                    with st.expander("Change Indicator Order", expanded=False):
+                        st.caption("Use ↑ / ↓ to reorder rows for this session. Order resets on a new session.")
+
+                        # Use INDICATOR_DEFS for friendly labels in the reorder panel
+                        defs = INDICATOR_DEFS
+
+                        # Sync the row order between heatmap & ordering drop-down
+                        order_view = list(st.session_state.rh_row_order)
+                        for idx, key in enumerate(order_view):
+                            label = defs.get(key, {}).get("display_name", key)
+
+                            c1, c2, c3 = st.columns([0.08, 0.08, 0.84])
+
+                            up_disabled = idx == 0
+                            down_disabled = idx == (len(st.session_state.rh_row_order) - 1)
+
+                            if c1.button("↑", key=f"rh_up_{idx}_{key}", disabled=up_disabled):
+                                order = list(st.session_state.rh_row_order)
+                                order[idx - 1], order[idx] = order[idx], order[idx - 1]
+                                st.session_state.rh_row_order = order
+                                st.rerun()
+
+                            if c2.button("↓", key=f"rh_down_{idx}_{key}", disabled=down_disabled):
+                                order = list(st.session_state.rh_row_order)
+                                order[idx], order[idx + 1] = order[idx + 1], order[idx]
+                                st.session_state.rh_row_order = order
+                                st.rerun()
+
+                            c3.write(label)
+
+                    with st.expander("Selection Debug", expanded=False):
+                        st.write(f"Selection Mode: {selection_mode}")
+                        st.write(f"Resolved base keys count: {len(resolved_base_keys)}")
+                        st.write(f"Multiselect session key: {current_multiselect_key}")
+                        st.write(f"Selected keys count: {len(selected_keys)}")
+                        st.write(f"Resolved base keys: {resolved_base_keys}")
+
+                # Ordered keys for rendering
+                ordered_selected_keys = st.session_state.rh_row_order
+
+                rolling_payload = _extract_rolling_signals_from_data(data)
+
+                # ----------------------------------------
+                # Hover-only OHLCV / indicator context
+                # ----------------------------------------
                 hover_ohlcv_df = None
+                try:
+                    hover_ohlcv_df = technical_calculator.calculate_optionc_indicators(
+                        ticker=ticker,
+                        save_to_db=False,
+                        ohlcv_request={
+                            "mode": "rolling_heatmap_scenario_b",
+                            "window_days": int(rolling_days),
+                            "anchor_mode": str(anchor_mode),
+                            "anchor_date": anchor_date,
+                            "historical_buffer_days": 435,
+                        },
+                    )
+                except Exception:
+                    hover_ohlcv_df = None
 
-            hm = build_plotly_heatmap_inputs(
-                rolling_payload=rolling_payload,
-                indicator_keys=ordered_selected_keys,
-                ohlcv_df=hover_ohlcv_df,
-            )
-            # populate rolling heatmap & add title, if desired
-            fig = make_rolling_heatmap_figure(hm, title="")
-            
-            st.plotly_chart(fig, use_container_width=True)
+                hm = build_plotly_heatmap_inputs(
+                    rolling_payload=rolling_payload,
+                    indicator_keys=ordered_selected_keys,
+                    ohlcv_df=hover_ohlcv_df,
+                )
+                # populate rolling heatmap & add title, if desired
+                fig = make_rolling_heatmap_figure(hm, title="")
+                
+                with heatmap_container.container():
+                    st.plotly_chart(fig, use_container_width=True)
 
-            # ----------------------------------------
-            # Educational expander (row-stable only)
-            # ----------------------------------------
-            with st.expander("📘 Indicator Definitions", expanded=False):
-                for key in ordered_selected_keys:
-                    info = INDICATOR_DEFS.get(key, {})
-                    display_name = info.get("display_name", key)
-                    definition = info.get("definition", "")
-                    how_to_read = info.get("how_to_read", "")
+                # ----------------------------------------
+                # Educational expander (row-stable only)
+                # ----------------------------------------
+                with st.expander("📘 Indicator Definitions", expanded=False):
+                    for key in ordered_selected_keys:
+                        info = INDICATOR_DEFS.get(key, {})
+                        display_name = info.get("display_name", key)
+                        definition = info.get("definition", "")
+                        how_to_read = info.get("how_to_read", "")
 
-                    st.markdown(f"**{display_name}**")
-                    if definition:
-                        st.write(f"Definition: {definition}")
-                    if how_to_read:
-                        st.write(f"How to Read: {how_to_read}")
+                        st.markdown(f"**{display_name}**")
+                        if definition:
+                            st.write(f"Definition: {definition}")
+                        if how_to_read:
+                            st.write(f"How to Read: {how_to_read}")
 
-                    # Optional family-level long-form overview
-                    doc_slug = get_indicator_doc_slug(key)
-                    markdown_text = load_indicator_markdown(doc_slug)
+                        # Optional family-level long-form overview
+                        doc_slug = get_indicator_doc_slug(key)
+                        markdown_text = load_indicator_markdown(doc_slug)
 
-                    if markdown_text:
-                        with st.expander(f"Learn more about {doc_slug}", expanded=False):
-                            st.markdown(markdown_text)
+                        if markdown_text:
+                            with st.expander(f"Learn more about {doc_slug}", expanded=False):
+                                st.markdown(markdown_text)
 
-                    st.markdown("---")
+                        st.markdown("---")
 
-            # Optional debug view (safe to keep, collapsed)
-            with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
-                st.json(data.get("rolling_signals", {}))                
-        else:
-            st.info("No rolling signals available yet for this ticker.")
+                # Optional debug view (safe to keep, collapsed)
+                with st.expander("Raw Rolling Signals Data (debug)", expanded=False):
+                    st.json(data.get("rolling_signals", {}))                
+            else:
+                st.info("No rolling signals available yet for this ticker.")
 
     elif ticker:
         st.info(f"👆 Click 'Analyze Stock' to get technical analysis for {ticker}")
