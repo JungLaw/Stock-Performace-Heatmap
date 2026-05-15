@@ -459,6 +459,20 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
     # -----------------------------------------------------------------
     # Volatility / risk calibration
     # -----------------------------------------------------------------
+    "ATR_5": {
+        "family": "ATR",
+        "category": "Volatility",
+        "scope": "Risk Calibration",
+        "window": "ST",
+        "tags": [],
+    },
+#    "ATR_9": {
+#        "family": "ATR",
+#        "category": "Volatility",
+#        "scope": "Risk Calibration",
+#        "window": "ST",
+#        "tags": [],
+#    },
     "ATR_10": {
         "family": "ATR",
         "category": "Volatility",
@@ -466,11 +480,53 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "window": "ST",
         "tags": [],
     },
+#    "ATR_13": {
+#        "family": "ATR",
+#        "category": "Volatility",
+#        "scope": "Risk Calibration",
+#        "window": "ST",
+#        "tags": [],
+#    },
     "ATR_14": {
         "family": "ATR",
         "category": "Volatility",
         "scope": "Risk Calibration",
         "window": "MT",
+        "tags": [],
+    },    
+    "ATR_20": {
+        "family": "ATR",
+        "category": "Volatility",
+        "scope": "Risk Calibration",
+        "window": "MT",
+        "tags": [],
+    },
+#    "ATR_21": {
+#        "family": "ATR",
+#        "category": "Volatility",
+#        "scope": "Risk Calibration",
+#        "window": "MT",
+#        "tags": [],
+#    },
+    "ATR_50": {
+        "family": "ATR",
+        "category": "Volatility",
+        "scope": "Risk Calibration",
+        "window": "LT",
+        "tags": [],
+    },
+    "ATR_100": {
+        "family": "ATR",
+        "category": "Volatility",
+        "scope": "Risk Calibration",
+        "window": "LT",
+        "tags": [],
+    },
+    "ATR_200": {
+        "family": "ATR",
+        "category": "Volatility",
+        "scope": "Risk Calibration",
+        "window": "LT",
         "tags": [],
     },
     # -----------------------------------------------------------------

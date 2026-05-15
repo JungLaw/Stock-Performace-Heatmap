@@ -1,4 +1,4 @@
-# Stamp: Wed, April 23, 2026 7:42PM
+# Stamp: Sun, May 10, 2026 3:11PM
 from __future__ import annotations
 
 import pandas as pd
@@ -36,9 +36,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ADX": [14],   # ADX_14, DIp_14, DIn_14
     "HMA": [21],
     # Expanded to satisfy BullBearPower(10/13/21) dependencies (ATR/ATRP_10/13/21)
-    "ATR": [10, 12, 13, 14, 21],   # add 10/13/21; keep 12/14
-    "ATRP": [10, 12, 13, 14, 21],  # (ATR% vs price); add 10/13/21; keep 12/14 
-    
+    # ATR_50 / ATRP_50 added for long-term Rolling Heatmap volatility support.
+    "ATR": [10, 12, 13, 14, 21, 50],   # add 10/13/21; keep 12/14; add 50 for LT heatmap
+    "ATRP": [10, 12, 13, 14, 21, 50],  # (ATR% vs price); add 10/13/21; keep 12/14; add 50 for LT heatmap    
+
     # Momentum / oscillators
     "CCI": [14, 20],   # CCI_20 (window 20)
     "ROC": [9, 12, 20, 50],   

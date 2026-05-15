@@ -252,15 +252,55 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "how_to_read": "Long-term Bollinger width measure. Higher values mean wider long-term bands; lower values mean tighter long-term bands.",
     },    
     # Volatility / risk calibration
-    "ATR_10": {
-        "display_name": "ATR (10)",
-        "definition": "Average True Range measures recent absolute price range / volatility over 10 periods.",
+    "ATR_5": {
+        "display_name": "ATR (5)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 5 periods.",
         "how_to_read": "Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
     },
+    "ATR_9": {
+        "display_name": "ATR (9)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 9 periods.",
+        "how_to_read": "ST volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+    },
+    "ATR_10": {
+        "display_name": "ATR(10)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 10 periods.",
+        "how_to_read": "ST volatility reference. Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
+    },
+    "ATR_13": {
+        "display_name": "ATR (13)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 13 periods.",
+        "how_to_read": "ST volatility reference. Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
+    },
     "ATR_14": {
-        "display_name": "ATR (14)",
+        "display_name": "ATR(14)",
         "definition": "Average True Range measures recent absolute price range / volatility over 14 periods.",
-        "how_to_read": "Common medium-term volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+        "how_to_read": "Intermediate volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+    },
+    "ATR_20": {
+        "display_name": "ATR (20)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 20 periods.",
+        "how_to_read": "Intermediate volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+    },
+    "ATR_21": {
+        "display_name": "ATR (21)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 21 periods.",
+        "how_to_read": "Intermediate volatility reference. Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
+    },
+    "ATR_50": {
+        "display_name": "ATR(50)",
+        "definition": "Average True Range measures longer-term absolute price range / volatility over 50 periods.",
+        "how_to_read": "LT volatility reference. Higher ATR means larger sustained price ranges; lower ATR means quieter longer-term movement.",
+    },
+    "ATR_100": {
+        "display_name": "ATR (100)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 100 periods.",
+        "how_to_read": "LT volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+    },
+    "ATR_200": {
+        "display_name": "ATR (200)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 200 periods.",
+        "how_to_read": "LT volatility reference. Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
     },
     # Trend strength
     "ADX_9": {
@@ -916,6 +956,8 @@ def build_plotly_heatmap_inputs(
             return "BullBearPower"
         if indicator_key.startswith("VWMA_"):
             return "VWMA"
+        if indicator_key.startswith("ATR_"):
+            return "ATR"
         if indicator_key.startswith("BB_PCT_B") or indicator_key.startswith("BB_BW"):
             return "Bollinger"
         return None

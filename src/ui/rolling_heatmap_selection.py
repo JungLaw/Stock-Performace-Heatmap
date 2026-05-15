@@ -1,3 +1,4 @@
+# Stamp: Thu, May 14, 2026 6:22PM
 # src/ui/rolling_heatmap_selection.py
 """
 Rolling Heatmap row-selection resolution.

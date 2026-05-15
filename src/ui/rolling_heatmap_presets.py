@@ -193,7 +193,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         # Long-term volatility
         "BB_PCT_B_LT",
         "BB_BW_LT",
-        #"ATR_50",
+        "ATR_50",
 
         # Long-term volume / accumulation-distribution
         "MFI_30",
