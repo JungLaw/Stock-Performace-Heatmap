@@ -1,6 +1,8 @@
+# Stamp: Thu, May 14, 2026 6:22PM
 # src/ui/rolling_heatmap_presets.py
 """
 Rolling Heatmap curated preset and Custom membership catalog.
+Version: 1.2
 
 Purpose:
     Own curated row-key memberships for the Phase III Rolling Heatmap
@@ -53,30 +55,37 @@ except ImportError:  # pragma: no cover
 # Custom is a saved/editable selection set at runtime, but restore-default
 # behavior must resolve back to this catalog-owned definition.
 CUSTOM_DEFAULT: List[str] = [
-
     "RSI_14",            # Momentum
 
     # Trend / directional bias
-    "EMA_20",
+    "EMA_20",     # "EMA_20",
     "EMA_50",
-    "SMA_50",    
+    "SMA_50",
     "SMA_100",
     "SMA_200",
     "VWMA_20",
+    "HMA_55",
 
-    # Trend strength / trend momentum
+    # Trend / conviction
     "ADX_14",
-    "MACD_12_26_9",
+    "BullBearPower_13",
 
-    # Momentum
-    "STOCH_14_3_3",      # Momentum
-    "ROC_20",            # Momentum
+    # Momentum / exhaustion
+    "STOCH_14_3_3",
+    "WILLR_14",
+    "CCI_20",
+    "UO_7_14_28",
+
+    # Momentum / thrust
+    "MACD_12_26_9",
+    "ROC_12",
 
     # Volatility
     "BB_PCT_B",
     "BB_BW",
+    "ATR_14",
 
-    # Volume / flow
+    # Volume / accumulation-distribution
     "MFI_14",
     "CMF_21",
     "OBV",
@@ -93,86 +102,102 @@ CUSTOM_DEFAULT: List[str] = [
 OVERVIEW_PRESETS: Mapping[str, List[str]] = {
     "ST Overview": [
         # Short-term trend / directional bias
+        "SMA_10",
+        "SMA_20",
         "EMA_10",
         "EMA_20",
-        "HMA_9",
         "VWMA_10",
+        "HMA_9",
 
-        # Short-term trend strength / pressure
+        # Short-term trend / conviction
         "ADX_9",
-        "MACD_5_34_1",
         "BullBearPower_10",
 
-        # Short-term momentum
+        # Short-term momentum / exhaustion
         "RSI_10",
         "STOCH_5_3_3",
         "WILLR_5",
+        "CCI_10",
+        "UO_5_10_15",
+
+        # Short-term momentum / thrust
+        "MACD_8_17_5",
         "ROC_9",
 
         # Short-term volatility
         "BB_PCT_B_ST",
         "BB_BW_ST",
+        "ATR_10", # "ATR_5", "ATR_9", "ATR_10", "ATR_13", "ATR_12"  
 
-        # Short-term volume / money flow
+        # Short-term volume / accumulation-distribution
         "MFI_10",
         "CMF_10",
     ],
 
     "MT Overview": [
         # Medium-term trend / directional bias
-        "EMA_50",
         "SMA_50",
-        "HMA_21",
+        "EMA_50",
         "VWMA_20",
+        "HMA_21",
 
-        # Medium-term trend strength / pressure
+        # Medium-term trend / conviction
         "ADX_14",
-        "MACD_12_26_9",
-        "BullBearPower_21",
+        "BullBearPower_13",
 
-        # Medium-term momentum
+        # Medium-term momentum / exhaustion
         "RSI_14",
-        "RSI_21",
         "STOCH_14_3_3",
         "WILLR_14",
-        "ROC_20",
+        "CCI_14",
+        "UO_7_14_28",
+
+        # Medium-term momentum / thrust
+        "MACD_12_26_9",
+        "ROC_14",
 
         # Medium-term volatility
         "BB_PCT_B",
         "BB_BW",
+        "ATR_14", # "ATR_20", "ATR_21"
 
-        # Medium-term volume / money flow
+        # Medium-term volume / accumulation-distribution
         "MFI_14",
         "CMF_21",
-        "OBV",
     ],
 
     "LT Overview": [
         # Long-term trend / directional bias
-        "EMA_100",
-        "EMA_200",
         "SMA_100",
         "SMA_200",
+        "EMA_100",
+        "EMA_200",
         "VWMA_50",
+        "HMA_55",
 
-        # Long-term trend strength
+        # Long-term trend / conviction
         "ADX_20",
-        "MACD_20_50_10",
+        "BullBearPower_21",
 
-        # Long-term momentum
-        "RSI_30",
+        # Long-term momentum / exhaustion
+        "RSI_21",
         "STOCH_21_5_5",
         "WILLR_20",
+        "CCI_20",
+        "UO_10_20_40",
+
+        # Long-term momentum / thrust
+        "MACD_20_50_10",
         "ROC_50",
 
         # Long-term volatility
         "BB_PCT_B_LT",
         "BB_BW_LT",
+        #"ATR_50",
 
-        # Long-term volume / money flow
+        # Long-term volume / accumulation-distribution
         "MFI_30",
         "CMF_50",
-        "OBV",
     ],
 }
 

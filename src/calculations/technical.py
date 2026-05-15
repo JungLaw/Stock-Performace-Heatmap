@@ -1,4 +1,4 @@
-# Stamp: Wed, April 23, 2026 7:42PM
+# Stamp: Sun, May 10, 2026 3:11PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -1111,6 +1111,24 @@ class DatabaseIntegratedTechnicalCalculator:
                     "upper": "BB_50_2.5_upper",
                     "lower": "BB_50_2.5_lower",
                 },
+            },
+            # -------------------------
+            # Volatility — ATR display rows
+            # -------------------------
+            # ATR is emitted as a raw numeric/display row here. If semantic
+            # score coverage is absent, _build_optionc_rolling_signals()
+            # falls back to neutral score/color while preserving the value.
+            {
+                "engine_indicator": "ATR",
+                "param_key": "10",
+                "display_key": "ATR_10",
+                "value_col": "ATR_10",
+            },
+            {
+                "engine_indicator": "ATR",
+                "param_key": "14",
+                "display_key": "ATR_14",
+                "value_col": "ATR_14",
             },
             {
                 "engine_indicator": "Williams_R",

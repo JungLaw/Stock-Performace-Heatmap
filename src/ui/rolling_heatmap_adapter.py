@@ -251,6 +251,17 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Bollinger Bandwidth using Bollinger(50,2.5). Measures LT band width relative to the middle band.",
         "how_to_read": "Long-term Bollinger width measure. Higher values mean wider long-term bands; lower values mean tighter long-term bands.",
     },    
+    # Volatility / risk calibration
+    "ATR_10": {
+        "display_name": "ATR (10)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 10 periods.",
+        "how_to_read": "Higher ATR means larger recent price ranges. ATR is directional-neutral: it measures volatility, not bullish or bearish direction.",
+    },
+    "ATR_14": {
+        "display_name": "ATR (14)",
+        "definition": "Average True Range measures recent absolute price range / volatility over 14 periods.",
+        "how_to_read": "Common medium-term volatility reference. Higher ATR means larger recent price ranges; lower ATR means quieter price movement.",
+    },
     # Trend strength
     "ADX_9": {
         "display_name": "ADX (9)",
