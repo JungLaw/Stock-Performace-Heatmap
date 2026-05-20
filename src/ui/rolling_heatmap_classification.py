@@ -173,7 +173,13 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "window": "LT",
         "tags": [],
     },
-
+    "SMA_250": {
+        "family": "SMA",
+        "category": "Trend",
+        "scope": "Directional Bias",
+        "window": "LT",
+        "tags": [],
+    },
     "HMA_9": {
         "family": "HMA",
         "category": "Trend",
@@ -453,6 +459,30 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "family": "ROC",
         "category": "Momentum",
         "scope": "Thrust Detection",
+        "window": "LT",
+        "tags": [],
+    },    
+    # -----------------------------------------------------------------
+    # Momentum / detrended cycle exhaustion
+    # -----------------------------------------------------------------
+    "DPO_11": {
+        "family": "DPO",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
+        "window": "ST",
+        "tags": [],
+    },
+    "DPO_21": {
+        "family": "DPO",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
+        "window": "MT",
+        "tags": [],
+    },
+    "DPO_40": {
+        "family": "DPO",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
         "window": "LT",
         "tags": [],
     },

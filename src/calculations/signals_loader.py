@@ -1,4 +1,4 @@
-# Stamp: Sun, April 19, 2026 4:02PM
+# Stamp: Sun, May 10, 2026 3:11PM 
 # signals_loader.py
 
 import json
@@ -139,6 +139,7 @@ _RULEBOOK_TO_PREPROCESSOR_KEYS = {
     "ROC": "ROC",
     "CCI": "CCI",
     "Ultimate_Oscillator": "UO",
+    "DPO": "DPO",
     # Trend
     "SMA": "SMA",
     "EMA": "EMA",

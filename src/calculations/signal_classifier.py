@@ -1,4 +1,4 @@
-# Stamp: Tue, April 22, 2026 2:46PM
+# Stamp: Sun, May 10, 2026 3:11PM
 # signal_classifier.py
 """
 Signal classification and rule-engine evaluation.
@@ -57,6 +57,12 @@ INSTANCE_BINDINGS = {
     # DataFrame column is UO_<fast>_<medium>_<slow>
     "Ultimate_Oscillator": {
         "UO": "UO_{param_key}",
+    },
+
+    # DPO rules reference normalized percentage-point DPO via `DPO_PCT`.
+    # DataFrame column is DPO_PCT_<length>, e.g. DPO_PCT_21.
+    "DPO": {
+        "DPO_PCT": "DPO_PCT_{param_key}",
     },
 
     # (Future examples — DO NOT enable until confirmed in rulebook)

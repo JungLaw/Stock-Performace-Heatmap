@@ -1331,6 +1331,12 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "EMA",
+                "param_key": "8",
+                "display_key": "EMA_8",
+                "value_col": "EMA_8",
+            },
+            {
+                "engine_indicator": "EMA",
                 "param_key": "10",
                 "display_key": "EMA_10",
                 "value_col": "EMA_10",
@@ -1346,6 +1352,12 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "20",
                 "display_key": "EMA_20",
                 "value_col": "EMA_20",
+            },
+            {
+                "engine_indicator": "EMA",
+                "param_key": "21",
+                "display_key": "EMA_21",
+                "value_col": "EMA_21",
             },
             {
                 "engine_indicator": "EMA",
@@ -1395,6 +1407,18 @@ class DatabaseIntegratedTechnicalCalculator:
                 "display_key": "SMA_200",
                 "value_col": "SMA_200",
             },
+            {
+                "engine_indicator": "SMA",
+                "param_key": "250",
+                "display_key": "SMA_250",
+                "value_col": "SMA_250",
+            },
+#            {
+#                "engine_indicator": "SMA",
+#                "param_key": "300",
+#                "display_key": "SMA_300",
+#                "value_col": "SMA_300",
+#            },            
             {
                 "engine_indicator": "HMA",
                 "param_key": "9",
@@ -1457,6 +1481,44 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "10_20_40",
                 "display_key": "UO_10_20_40",
                 "value_col": "UO_10_20_40",
+            },
+            # -------------------------
+            # Momentum — DPO cycle/exhaustion rows
+            # -------------------------
+            # Display metric is DPO_PCT_<length>, where DPO_PCT is
+            # DPO / price * 100, stored in percentage points.
+            {
+                "engine_indicator": "DPO",
+                "param_key": "11",
+                "display_key": "DPO_11",
+                "value_col": "DPO_PCT_11",
+                "extra_value_cols": {
+                    "raw_dpo": "DPO_11",
+                    "dpo_delta": "DPO_DELTA_11",
+                    "dpo_delta_pct": "DPO_DELTA_PCT_11",
+                },
+            },
+            {
+                "engine_indicator": "DPO",
+                "param_key": "21",
+                "display_key": "DPO_21",
+                "value_col": "DPO_PCT_21",
+                "extra_value_cols": {
+                    "raw_dpo": "DPO_21",
+                    "dpo_delta": "DPO_DELTA_21",
+                    "dpo_delta_pct": "DPO_DELTA_PCT_21",
+                },
+            },
+            {
+                "engine_indicator": "DPO",
+                "param_key": "40",
+                "display_key": "DPO_40",
+                "value_col": "DPO_PCT_40",
+                "extra_value_cols": {
+                    "raw_dpo": "DPO_40",
+                    "dpo_delta": "DPO_DELTA_40",
+                    "dpo_delta_pct": "DPO_DELTA_PCT_40",
+                },
             },
         ]
 

@@ -1,4 +1,4 @@
-# Stamp: Sun, May 10, 2026 3:11PM
+# Stamp: Wed, May 20, 2026 5:26PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -99,6 +99,11 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "display_name": "SMA(200)",
         "definition": "SMA averages closing prices equally over the last 200 periods.",
         "how_to_read": "Very long-term trend reference. Commonly used as a regime-level trend filter.",
+    },
+    "SMA_250": {
+        "display_name": "SMA(250)",
+        "definition": "Rough proxy for one trading year.",
+        "how_to_read": "Gives a slightly smoother 'annual trend' view than 200 days.",
     },
     "HMA_9": {
         "display_name": "HMA (9)",
@@ -221,6 +226,22 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "definition": "Use longer periods, such as 36 or 200 days, for a smoother indicator that identifies long-term trend.",
         "how_to_read": "Strength: Highly responsive to price changes, giving traders quick insights into market dynamics.",
     },    
+    # Detrended Price Oscillator
+    "DPO_11": {
+        "display_name": "DPO (11)",
+        "definition": "Detrended Price Oscillator removes the longer trend component to highlight shorter-term cyclical price movement.",
+        "how_to_read": "Displayed as DPO / price × 100. Negative values suggest price is below its detrended cycle baseline; '+' values suggest price is above it.",
+    },
+    "DPO_21": {
+        "display_name": "DPO (21)",
+        "definition": "Detrended Price Oscillator removes the longer trend component to highlight intermediate cyclical price movement.",
+        "how_to_read": "Displayed as DPO / price × 100. '-' values suggest price is below its detrended cycle baseline; '+' values suggest price is above it.",
+    },
+    "DPO_40": {
+        "display_name": "DPO (40)",
+        "definition": "Detrended Price Oscillator removes the longer trend component to highlight longer cyclical price movement.",
+        "how_to_read": "Displayed as DPO / price × 100. Negative values suggest price is below its detrended cycle baseline; '+'  values suggest price is above it.",
+    },
     "BB_PCT_B_ST": {
         "display_name": "BB %B(ST)",
         "definition": "Bollinger %B using Bollinger(10,1.5). Shows where price sits within the ST band range.",
@@ -550,6 +571,8 @@ def format_hover_value(indicator_key: str, v: Any) -> str:
         return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
         return f"{fv:.3f}"
+    if indicator_key.startswith("DPO_"):
+        return f"{fv:+.2f}%"             # percent-point units   
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
         return _abbr(fv)
     return f"{fv:.2f}"
@@ -780,7 +803,6 @@ def get_indicator_family(row_key: str) -> str:
         return "VWMA"
     if row_key.startswith("HMA_"):
         return "HMA"
-
     if row_key.startswith("RSI_"):
         return "RSI"
     if row_key.startswith("MACD_"):
@@ -805,7 +827,8 @@ def get_indicator_family(row_key: str) -> str:
         return "CCI"
     if row_key.startswith("UO_"):
         return "UO"
-
+    if row_key.startswith("DPO_"):
+        return "DPO"
     if row_key == "OBV" or row_key.startswith("OBV_"):
         return "OBV"
     if row_key.startswith("BullBearPower_"):
@@ -960,6 +983,8 @@ def build_plotly_heatmap_inputs(
             return "ATR"
         if indicator_key.startswith("BB_PCT_B") or indicator_key.startswith("BB_BW"):
             return "Bollinger"
+        if indicator_key.startswith("DPO_"):
+            return "DPO"
         return None
 
     def _rulebook_param_key(indicator_key: str) -> Optional[str]:
@@ -1161,6 +1186,7 @@ def build_plotly_heatmap_inputs(
                         "macd_context_block": "",
                         "stoch_context_block": "",
                         "bullbear_context_block": "",
+                        "dpo_context_block": "",
                         "band_context_block": "",
                         "ma_context_block": "",
 
@@ -1249,6 +1275,7 @@ def build_plotly_heatmap_inputs(
             macd_context_block = ""
             stoch_context_block = ""
             bullbear_context_block = ""
+            dpo_context_block = ""
             band_context_block = ""
             ma_context_block = ""
 
@@ -1328,6 +1355,33 @@ def build_plotly_heatmap_inputs(
 
                 if parts:
                     stoch_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+            # DPO: Custom hover content (raw value + deltas)
+            if key.startswith("DPO_") and isinstance(extra_map, dict) and extra_map:
+                parts = []
+
+                raw_dpo = extra_map.get("raw_dpo")
+                dpo_delta = extra_map.get("dpo_delta")
+                dpo_delta_pct = extra_map.get("dpo_delta_pct")
+
+                if not _is_missing(v):
+                    parts.append(f"DPO % of price: {format_signed_number(v, decimals=2)}%")
+
+                if not _is_missing(raw_dpo):
+                    parts.append(f"Raw DPO: {format_signed_number(raw_dpo, decimals=2)}")
+
+                if not _is_missing(dpo_delta):
+                    parts.append(
+                        f"Raw DPO Δ vs prior day: {format_signed_number(dpo_delta, decimals=2)}"
+                    )
+
+                if not _is_missing(dpo_delta_pct):
+                    parts.append(
+                        f"DPO % Δ vs prior day: {format_signed_number(dpo_delta_pct, decimals=2)} pct pts"
+                    )
+
+                if parts:
+                    dpo_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
             # BULL BEAR: Custom hover content (deltas)
             if key.startswith("BullBearPower_") and isinstance(extra_map, dict) and extra_map:
@@ -1497,6 +1551,7 @@ def build_plotly_heatmap_inputs(
                     "ma_context_block": ma_context_block,
 					"macd_context_block": macd_context_block,
                     "stoch_context_block": stoch_context_block, 
+                    "dpo_context_block": dpo_context_block,
                     "bullbear_context_block": bullbear_context_block,
                     "meta": rolling_payload.get("meta", {}),
                 }
@@ -1545,6 +1600,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
+        "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
         "%{customdata.notes_block}"

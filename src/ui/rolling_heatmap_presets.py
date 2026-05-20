@@ -75,6 +75,7 @@ CUSTOM_DEFAULT: List[str] = [
     "WILLR_14",
     "CCI_20",
     "UO_7_14_28",
+    "DPO_21",
 
     # Momentum / thrust
     "MACD_12_26_9",
@@ -119,6 +120,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "WILLR_5",
         "CCI_10",
         "UO_5_10_15",
+        "DPO_11",
 
         # Short-term momentum / thrust
         "MACD_8_17_5",
@@ -151,6 +153,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "WILLR_14",
         "CCI_14",
         "UO_7_14_28",
+        "DPO_21",
 
         # Medium-term momentum / thrust
         "MACD_12_26_9",
@@ -170,6 +173,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         # Long-term trend / directional bias
         "SMA_100",
         "SMA_200",
+        "SMA_250",
         "EMA_100",
         "EMA_200",
         "VWMA_50",
@@ -185,6 +189,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "WILLR_20",
         "CCI_20",
         "UO_10_20_40",
+        "DPO_40",
 
         # Long-term momentum / thrust
         "MACD_20_50_10",

@@ -45,6 +45,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ROC": [9, 12, 20, 50],   
     "WILLR": [5, 14, 20],
     "UO": [(7, 14, 28)],
+    # Detrended Price Oscillator; values are also normalized to percent-points of price.
+    "DPO": [11, 21, 40],
     # Option B (Volume + ERI)
     # B1 — Core Volume
     "MFI": [10, 14, 30],
@@ -763,20 +765,43 @@ def compute_all_indicators(
             s_i, m_i, l_i = (int(triplet[0]), int(triplet[1]), int(triplet[2]))
             df[f"UO_{s_i}_{m_i}_{l_i}"] = np.nan     
 
-#    # ====================================================
-#    # Ultimate Oscillator (UO)
-#    # ====================================================
-#    for s, m, l in cfg.get("UO", []):
-#        s_i, m_i, l_i = int(s), int(m), int(l)
-#        uo_series = ta.uo(
-#            high=df["High"],
-#            low=df["Low"],
-#            close=df["Close"],
-#            fast=s_i,
-#            medium=m_i,
-#            slow=l_i,
-#        )
-#        df[f"UO_{s_i}_{m_i}_{l_i}"] = uo_series
+    # ====================================================
+    # DPO (Detrended Price Oscillator)
+    # ====================================================
+    # Canonical naming:
+    #   DPO_<length>            -> raw DPO value
+    #   DPO_PCT_<length>        -> DPO / price * 100, in percentage points
+    #   DPO_DELTA_<length>      -> raw DPO day-over-day change
+    #   DPO_DELTA_PCT_<length>  -> DPO_PCT day-over-day percentage-point change
+    #
+    # Use lookahead=False for rolling heatmap usage to avoid centered / future-looking values.
+    price_float = pd.to_numeric(price, errors="coerce").astype("float64")
+    safe_price = price_float.replace(0.0, np.nan)
+
+    for length in cfg.get("DPO", []):
+        l_i = int(length)
+
+        if hasattr(ta, "dpo"):
+            try:
+                dpo_series = ta.dpo(
+                    close=price_float,
+                    length=l_i,
+                    lookahead=False,
+                )
+            except TypeError:
+                # Defensive fallback for pandas-ta-classic versions whose dpo()
+                # signature differs unexpectedly.
+                dpo_series = pd.Series(np.nan, index=df.index, dtype="float64")
+        else:
+            dpo_series = pd.Series(np.nan, index=df.index, dtype="float64")
+
+        dpo_series = pd.to_numeric(dpo_series, errors="coerce").astype("float64")
+        dpo_pct = ((dpo_series / safe_price) * 100.0).astype("float64")
+
+        df[f"DPO_{l_i}"] = dpo_series
+        df[f"DPO_PCT_{l_i}"] = dpo_pct
+        df[f"DPO_DELTA_{l_i}"] = dpo_series.diff()
+        df[f"DPO_DELTA_PCT_{l_i}"] = dpo_pct.diff()
 
     # ====================================================
     # Option B — Core Volume Indicators (MFI / CMF / OBV)

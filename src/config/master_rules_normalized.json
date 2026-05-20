@@ -1,5 +1,5 @@
 {
-  "version": "0.2.4",
+  "version": "0.2.5",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -90,6 +90,12 @@
           ],
           [
             200
+          ],
+          [
+            250
+          ],
+          [
+            300
           ]
         ],
         "feature_scopes": {
@@ -171,6 +177,9 @@
             5
           ],
           [
+            8
+          ],
+          [
             10
           ],
           [
@@ -185,6 +194,9 @@
           [
             50
           ],
+          [
+            55
+          ],          
           [
             100
           ],
@@ -201,7 +213,7 @@
               "sell": "Close < EMA_5 and EMA_5_slope < 0",
               "strong_sell": "Close < EMA_5 and EMA_5_slope < -0.0025 and falling_2bar(EMA_5)",
               "k": 0.25,
-              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+              "notes": "EMA more responsive slightly higher slope threshold."
             },
             "10": {
               "strong_buy": "Close > EMA_10 and EMA_10_slope > 0.0025 and rising_2bar(EMA_10)",
@@ -210,7 +222,7 @@
               "sell": "Close < EMA_10 and EMA_10_slope < 0",
               "strong_sell": "Close < EMA_10 and EMA_10_slope < -0.0025 and falling_2bar(EMA_10)",
               "k": 0.25,
-              "notes": "EMA more responsive \u00e2\u2020\u2019 slightly higher slope threshold."
+              "notes": "EMA more responsive slightly higher slope threshold."
             },
             "13": {
               "strong_buy": "Close > EMA_13 and EMA_13_slope > 0.0025 and rising_2bar(EMA_13)",
@@ -950,6 +962,62 @@
           "type": "momentum",
           "description": "Ultimate Oscillator",
           "source": "internal_spec"
+        }
+      },
+      "DPO": {
+        "params": [
+          [
+            11
+          ],
+          [
+            21
+          ],
+          [
+            40
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "11": {
+              "strong_buy": "DPO_PCT < -2",
+              "buy": "DPO_PCT >= -2 and DPO_PCT < -1",
+              "neutral": "DPO_PCT >= -1 and DPO_PCT <= 1",
+              "sell": "DPO_PCT > 1 and DPO_PCT <= 2",
+              "strong_sell": "DPO_PCT > 2",
+              "notes": "'Strong Buy': Cycle Trough (Add) | 'Buy': Cycle Low (Favorable Entry) | 'Neutral': Mid-Cycle (No Edge) | 'Sell': Cycle Peak (Hold/Trim) | 'Strong Sell': Cycle Extended (trim/don't buy)"
+            },
+            "21": {
+              "strong_buy": "DPO_PCT < -2",
+              "buy": "DPO_PCT >= -2 and DPO_PCT < -1",
+              "neutral": "DPO_PCT >= -1 and DPO_PCT <= 1",
+              "sell": "DPO_PCT > 1 and DPO_PCT <= 2",
+              "strong_sell": "DPO_PCT > 2",
+              "notes": "'Strong Buy': Cycle Trough (Add) | 'Buy': Cycle Low (Favorable Entry) | 'Neutral': Mid-Cycle (No Edge) | 'Sell': Cycle Peak (Hold/Trim) | 'Strong Sell': Cycle Extended (trim/don't buy)"
+            },
+            "40": {
+              "strong_buy": "DPO_PCT < -2",
+              "buy": "DPO_PCT >= -2 and DPO_PCT < -1",
+              "neutral": "DPO_PCT >= -1 and DPO_PCT <= 1",
+              "sell": "DPO_PCT > 1 and DPO_PCT <= 2",
+              "strong_sell": "DPO_PCT > 2",
+              "notes": "DPO_PCT is DPO / price * 100, stored in percentage points. Initial heuristic thresholds for longer cycle exhaustion; DPO is not bounded and may need later calibration by asset volatility."
+            }
+          },
+          "overlay": {},
+          "alerts": {},
+          "custom": {
+            "21": {
+              "example_rule": "user_defined"
+            }
+          },
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "momentum",
+          "description": "Detrended Price Oscillator; cycle/exhaustion indicator normalized as percent of price for heatmap scoring.",
+          "source": "pandas-ta-classic dpo; internal heatmap normalization spec"
         }
       }
     },
