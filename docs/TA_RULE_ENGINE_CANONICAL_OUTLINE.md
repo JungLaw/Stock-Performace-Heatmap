@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.8 
+- Version: 3.2.9
 - Created: 1/12/26
-- Last update: 5/6/2026
+- Last update: 5/20/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -424,15 +424,25 @@ Rolling heatmap core is functional and validated.
 ---
 #### Phase III Extension — Rolling Heatmap Selection & Catalog Architecture (v1)
 
+**Status:** ✅ COMPLETE
+
 **Purpose:**  
 Introduce a row-selection / grouping architecture for the Rolling Signals Heatmap without redefining numeric truth, semantic meaning, or adapter-owned presentation metadata.
 
-**This workstream governs:**
-- row classification mapping
-- curated preset membership
-- Custom default row-set ownership
-- selection-resolution logic
-- UI control wiring above the existing manual display/remove and row-order controls
+**Completed scope:**
+- authoritative row classification catalog
+- curated Custom default membership
+- explicit ST / MT / LT Overview preset membership
+- generated thematic preset resolution
+- `Custom` / `Category` / `Preset` selection modes
+- `Category → Scope → Window` browsing model
+- optional `Family` filter, including grouped-family filters such as `MVA` and `Oscillators`
+- manual `Indicators to display/remove` override preserved
+- manual row-order override preserved
+- Rolling Signal Heatmap UI wiring through resolved canonical `row_key` sets
+- Technical Analysis Dashboard section reorder completed
+- ATR rolling heatmap support expanded and validated
+- DPO rolling heatmap support added and validated
 
 **Canonical interaction model**
 - `Category → Scope → Window`
@@ -444,15 +454,16 @@ Introduce a row-selection / grouping architecture for the Rolling Signals Heatma
   - `Category`
   - `Preset`
 
-**Guardrails**
-This Phase III extension must not:
-- reopen Option E numeric formulas
-- reopen Option F semantic tiers
-- alter Scenario B acquisition / persistence behavior
-- migrate `INDICATOR_DEFS` display / education ownership into the selection catalog layer
+**Closure constraints verified**
+- no Scenario B acquisition / persistence behavior changed
+- no DB schema changes introduced
+- no UI-local semantic scoring introduced
+- `rolling_heatmap_adapter.py::INDICATOR_DEFS` remains the display / education metadata owner
+- manual display/remove and row-order controls remain downstream override layers
+- deferred semantic tiers remain deferred
 
 **Interpretation**
-This is a UI selection architecture workstream, not a semantic-wave continuation.
+This completed workstream added a row-selection / grouping architecture and related Rolling Heatmap row support. It does not constitute Option F Wave 2, regime logic, composite logic, cross-confirmation logic, or Phase IV explanation / rationale work.
 
 ---
 ## Phase Transition — Option E Wave 1 Complete → Option F Activation
@@ -572,7 +583,7 @@ No structural DB changes should occur until these decisions are finalized.
 
   * Rolling heatmap acquisition (Scenario B): ✅ complete
   * Layout & semantics: ✅ complete
-  * Rolling Heatmap Selection & Catalog Architecture (v1): ▶ next active workstream
+  * Rolling Heatmap Selection & Catalog Architecture (v1): ✅ complete
 
 * Phase IV: 🔒 future
 
@@ -581,7 +592,10 @@ No structural DB changes should occur until these decisions are finalized.
 ## What Comes Next (Immediately)
 
 **Next active workstream (in order):**
-1) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)**
+No next active workstream is assigned in this completed-items pass.
+
+**Recently completed workstream:**
+1) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)** — ✅ COMPLETE
    - authoritative row classification mapping
    - curated preset / Custom membership
    - selection-resolution logic
@@ -590,20 +604,16 @@ No structural DB changes should occur until these decisions are finalized.
      - `Category`
      - `Preset`
    - preservation of the current manual display/remove and row-order controls as the downstream override layer
+   - expanded Rolling Heatmap row support, including validated ATR and DPO additions
 
-2) **Later semantic continuation (deferred; not part of the active workstream)**
-   - Option F Wave 2:
-     - composites
-     - cross-confirmation
-   - Option F Wave 3:
-     - regime logic
+2) **Deferred semantic continuation remains unchanged**
+- Option F Wave 2:
+  - composites
+  - cross-confirmation
+- Option F Wave 3:
+  - regime logic
 
-3) **Later numeric backlog / review**
-   - SMA slope / SMA semantic reopen
+3) **Later numeric backlog / review remains unchanged**
+- SMA slope / SMA semantic reopen
 
 **Important boundary**
-The active next workstream is a **Phase III UI selection architecture** task.
-It must not reopen:
-- Option E numeric formulas
-- Option F completed Wave 1 semantics
-- Scenario B data acquisition behavior

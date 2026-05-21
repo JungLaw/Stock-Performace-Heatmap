@@ -1,11 +1,36 @@
 # Master Checklist (Authoritative) — Phase 3  
 **TA Rule Engine (GPT)**  
 **Created**: 12/23/25
-**last update**: 5/6/26   
-**Version**: 1.9  
+**last update**: 5/20/26   
+**Version**: 2.0  
 
 ---
 ## Change Log
+
+### v2.0 — 5/20/26
+- Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) marked COMPLETE
+- Completed row-selection / grouping architecture recorded:
+  - authoritative row classification catalog
+  - curated Custom default membership
+  - explicit Overview preset memberships
+  - generated thematic preset resolution
+  - `Custom` / `Category` / `Preset` selection modes
+  - `Category → Scope → Window` model with optional `Family` filter
+  - manual display/remove override preserved
+  - manual row-order override preserved
+- Rolling Heatmap display support expanded and validated:
+  - ATR support added across compute / payload / adapter / classification / curated membership paths
+  - DPO support added across rulebook / compute / binding / payload / adapter / classification / curated membership paths
+- Technical Analysis Dashboard section reorder completed
+- No Scenario B acquisition / persistence behavior changed
+- No DB schema changes introduced
+- No UI-local semantic scoring introduced
+- Deferred semantic tiers carried forward unchanged:
+  - composites
+  - cross-confirmation
+  - regime logic
+- SMA slope / SMA semantic reopen retained as later numeric backlog / review item
+- No next active workstream assigned in this retrospective pass
 
 ### v1.9 — 5/6/26
 - Next active workstream assigned after completed Option F Wave 1:
@@ -65,7 +90,7 @@
 - Scenario B data plumbing implementation documented
 - DB-first missing-range acquisition rules finalized
 
-**Current Active Workstream:** Option F — Semantic & Relational Logic (Wave 1)
+**Current Active Workstream:** No next active workstream assigned in this completed-items pass.
 
 
 ---
@@ -79,9 +104,9 @@
 | Phase III UX                     | **Complete**                    |
 | Option E                         | **Wave 1 Complete**             |
 | Option F                         | **Wave 1 Complete**             |
-| Phase III Selection Architecture | **Next Active Workstream**      |
+| Phase III Selection Architecture | **Complete**      |
 
-**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; next active workstream assigned to Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)
+**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) complete; no next active workstream assigned in this completed-items pass.
 
 **Recently completed**:
 - Option B — Core indicator families
@@ -98,9 +123,21 @@
 - Option F Wave 1 — first-family semantic activation:
   - Bollinger semantic activation
   - VWMA rule semantics
+- Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1):
+  - authoritative row classification catalog
+  - curated Custom default membership
+  - explicit ST / MT / LT Overview preset membership
+  - generated thematic preset resolution
+  - `Custom` / `Category` / `Preset` UI controls
+  - `Category → Scope → Window` navigation with optional `Family` filter
+  - manual display/remove override preserved
+  - manual row-order override preserved
+  - Technical Analysis Dashboard section reorder completed
+  - ATR rolling heatmap support validated
+  - DPO rolling heatmap support validated
 
 **Next active workstream:**
-- Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)
+- Not assigned in this completed-items pass.
 
 **Deferred beyond completed Option F Wave 1:**
 - composites
@@ -177,10 +214,10 @@ Option F owns **semantic interpretation / relational logic**. Wave 1 is now comp
 ---
 ## Phase III UI Selection Architecture — Next Active Workstream
 
-This workstream follows completed Option F Wave 1 and governs the next forward-looking implementation state for the rolling heatmap.
+This workstream follows completed Option F Wave 1 and added the row-selection / grouping architecture for the Rolling Signal Heatmap.
 
-### Workstream purpose
-Add a row-selection architecture for the rolling signals heatmap so row sets can be resolved through:
+### Completed Workstream purpose
+Added a row-selection architecture for the rolling signals heatmap so row sets can be resolved through:
 - `Custom`
 - `Category`
 - `Preset`
@@ -212,7 +249,7 @@ without reopening:
 - `MT Momentum`
 - `LT Momentum`
 
-### Forward-looking guardrails
+### Closure guardrails verified
 - row identity remains `row_key`
 - grouping / selection metadata must be single-sourced
 - `rolling_heatmap_adapter.py::INDICATOR_DEFS` remains authoritative for:
@@ -220,11 +257,18 @@ without reopening:
   - `definition`
   - `how_to_read`
 - existing manual display/remove and row-order controls remain the downstream override layer
+- no Scenario B acquisition / persistence behavior changed
+- no DB schema changes introduced
+- no UI-local semantic scoring introduced
+- manual display/remove and row-order controls remain downstream override layers
 
 ### Deferred / later items carried forward unchanged
+Deferred semantic tiers carried forward unchanged:
 - composites
 - cross-confirmation
 - regime logic
+
+Deferred numeric backlog carried forward unchanged:
 - SMA slope / SMA semantic reopen remains later numeric backlog / review item
 
 ---
