@@ -7,8 +7,13 @@ Enhanced with display names for better user experience
 # 9/14/25: Have 3 emerging |3 developed | 2 'World's: All + Total |2 xcl. Japan
 COUNTRY_ETFS = [
     # Format: (ticker, display_name)
+    ('ACWI', 'All World'),
+    ('VT', 'Total World'),
     ('VTI', 'US Total Market'),
+    ('EFA', 'Developed Markets'),
+    ('IEFA', 'Developed Markets'),
     ('VEA', 'Developed Markets ex-US'),
+    ('IEMG', 'Emerging Markets'),
     ('VWO', 'Emerging Markets'),
     ('EEM', 'Emerging Markets'),
     ('VGK', 'Europe'),
@@ -44,11 +49,6 @@ COUNTRY_ETFS = [
     ('THD', 'Thailand'),
     ('TUR', 'Turkey'),
     ('RSX', 'Russia'),
-    ('EFA', 'Developed Markets'),
-    ('IEFA', 'Developed Markets'),
-    ('IEMG', 'Emerging Markets'),
-    ('ACWI', 'All World'),
-    ('VT', 'Total World'),
     ('QQQ', 'Nasdaq 100'),
     ('ONEQ', 'Nasdaq'),
     ('SPY', 'S&P 500'),
@@ -85,10 +85,11 @@ SECTOR_ETFS = [
     ('XHB', 'Homebuilders'),
     ('ITB', 'Home Construction'),
     ('XLRE', 'REITs (xcl. Home, Office)'),
-    ('VNQ', 'REITs'),    # 9/14    
-    ('VNQI', 'Intl. REITs'),   # 9/14 
+    ('VNQ', 'REITs'),    # 9/14/25    
+    ('VNQI', 'Intl. REITs'),   # 9/14/25 
  #  ('SMH', 'Semiconductors'),
     ('SOXX', 'Semiconductor Index'),
+ #   ('DRAM', 'Memory'),      # 5/21/26
     ('IBB', 'Biotech (MW,LC)'),
     ('XBI', 'Biotech (EW, <LC)'),
     ('ARKK', 'Innovation ETF'),
@@ -100,6 +101,7 @@ SECTOR_ETFS = [
     ('SKYY', 'Cloud Computing'),
     ('ICLN', 'Clean Energy (Global, LC)'),
     ('PBW', 'Clean Energy (US, <LC)'),
+    ('TAN', 'Solar'),   # Added 5/21/26
     ('GLD', 'Gold'),      # Moved: 9/14
     ('SLV', 'Silver'),     # Moved: 9/14
     ('NLR', 'Nuclear/Uran.'), # New: 9/14       
@@ -118,7 +120,7 @@ SECTOR_ETFS = [
 
 
 # Default custom tickers (remain as tickers only)
-CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'BABA', 'SPY', 'ONEQ', 'TSM', 'MU', 'GEV', 'VYMI', 'V']
+CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'TSM', 'MU', 'GEV', 'VYMI', 'V', 'BABA', 'SPY', 'ONEQ']
 
 # Helper functions to work with ticker/name pairs
 def get_tickers_only(ticker_list):
