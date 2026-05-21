@@ -4,7 +4,7 @@ Status: Incomplete
 - Shows whether an asset is gaining or losing momentum by comparing current prices to historical ones. 
 
 
-- Measures the momentum of rice changes. It compares the current price to a price '`n`' periods ago.
+- Measures the momentum of price changes. It compares the current price to a price '`n`' periods ago.
 
 ---
 **Basic Interpretation**:
@@ -15,8 +15,8 @@ Status: Incomplete
 ---
 > The ROC oscillates above and below a zero line, which serves as a critical threshold for interpreting momentum:
 
-- **Positive ROC (Above Zero Line):** Indicates upward price momentum. The higher the ROC, the stronger the bullish trend.
-- **Negative ROC (Below Zero Line):** Reflects downward price momentum, with increasingly negative values pointing to a stronger bearish trend.
+- **Positive ROC (Above Zero Line):** Indicates upward price momentum  and potentially strong buying pressure (uptrend). The higher the ROC, the stronger the bullish trend.
+- **Negative ROC (Below Zero Line):** Reflects downward price momentum (and potentially strong selling pressure (downtrend)), with increasingly negative values pointing to a stronger bearish trend.
 - **ROC at Zero:** Suggests no price change over the given period, often seen in consolidating or sideways markets.
 
 
