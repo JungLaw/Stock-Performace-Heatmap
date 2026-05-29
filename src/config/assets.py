@@ -1,3 +1,4 @@
+# Stamp: Thu, May 28, 2026 2:18PM
 """
 Asset Group Definitions for Heatmap Dashboard
 Enhanced with display names for better user experience
@@ -7,22 +8,22 @@ Enhanced with display names for better user experience
 # 9/14/25: Have 3 emerging |3 developed | 2 'World's: All + Total |2 xcl. Japan
 COUNTRY_ETFS = [
     # Format: (ticker, display_name)
-    ('ACWI', 'All World'),
-    ('VT', 'Total World'),
-    ('VTI', 'US Total Market'),
-    ('EFA', 'Developed Markets'),
-    ('IEFA', 'Developed Markets'),
-    ('VEA', 'Developed Markets ex-US'),
-    ('IEMG', 'Emerging Markets'),
-    ('VWO', 'Emerging Markets'),
-    ('EEM', 'Emerging Markets'),
+#    ('ACWI', 'All World'),
+    ('VT', 'World'),          # ~ACWI
+    ('VTI', 'US Market'),
+#    ('EFA', 'Developed Markets'),   # ~IEFA
+#    ('IEFA', 'Developed Markets'),  # Excludes Korea
+    ('VEA', 'Developed'),   # Includes Korea
+#    ('IEMG', 'Emerging Markets'),   # Includes Korea
+    ('VWO', 'Emerging'),          # Excludes Korea
+#    ('EEM', 'Emerging Markets'),    # ~IEMG
     ('VGK', 'Europe'),
-    ('VPL', 'Asia-Pacific ex-Japan'),
-    ('EPP', 'Asia-Pacific ex-Japan'),
+    ('VPL', 'Asia-Pacific'),
+#    ('EPP', 'Asia-Pacific ex-Japan'),    # Removed 5/24/26: 60% Australia
     ('EWJ', 'Japan'),
     ('EWZ', 'Brazil'),
     ('INDA', 'India'),
-    ('MCHI', 'China'),  # added 9/15    
+    ('MCHI', 'China'),  # added 9/15/25    
     ('FXI', 'China (lc)'),  # added 9/15
     ('KWEB', 'China (tech)'),  # added 9/15    
     ('EWU', 'United Kingdom'),
@@ -49,11 +50,11 @@ COUNTRY_ETFS = [
     ('THD', 'Thailand'),
     ('TUR', 'Turkey'),
     ('RSX', 'Russia'),
-    ('QQQ', 'Nasdaq 100'),
-    ('ONEQ', 'Nasdaq'),
+    ('DIA', 'Dow Jones'),
     ('SPY', 'S&P 500'),
     ('IWM', 'Russell 2000'),
-    ('DIA', 'Dow Jones'),
+    ('ONEQ', 'Nasdaq'),
+    ('QQQ', 'Nasdaq 100'),
     ('BND', 'US Bonds'),
     ('AGG', 'US Aggregate Bonds'),
     ('TLT', 'Long-Term Treasury'),
@@ -75,15 +76,15 @@ SECTOR_ETFS = [
     ('XLE', 'Energy'),
     ('XLV', 'Healthcare'),   # VHT, IYH
     ('XLI', 'Industrial'),
-    ('XLP', 'Consumer Staples'),
-    ('XLY', 'Consumer Discretionary'),
+    ('XLP', 'Staples'),
+    ('XLY', 'Discretionary'),
     ('XLU', 'Utilities'),
     ('XLC', 'Communications'),
     ('XLB', 'Materials'),
     ('XME', 'Metals & Mining'),
-    ('XRT', 'Retail'),
-    ('XHB', 'Homebuilders'),
-    ('ITB', 'Home Construction'),
+    ('XRT', 'Retail'),   
+    ('XHB', 'Homebuilders'),       # EW weighting 
+    ('ITB', 'Home Construction'),  # MC weighting 
     ('XLRE', 'REITs (xcl. Home, Office)'),
     ('VNQ', 'REITs'),    # 9/14/25    
     ('VNQI', 'Intl. REITs'),   # 9/14/25 
@@ -105,11 +106,16 @@ SECTOR_ETFS = [
     ('GLD', 'Gold'),      # Moved: 9/14
     ('SLV', 'Silver'),     # Moved: 9/14
     ('NLR', 'Nuclear/Uran.'), # New: 9/14       
-    ('QQQ', 'Nasdaq 100'),     # Copied: 9/14
-    ('ONEQ', 'Nasdaq'),         # Copied: 9/14
-    ('SPY', 'S&P 500'),         # Copied: 9/14
-    ('IWM', 'Russell 2000'),         # Copied: 9/14
     ('DIA', 'Dow Jones'),       # Copied: 9/14
+    ('ONEQ', 'Nasdaq'),         # Copied: 9/14
+    ('QQQ', 'Nasdaq 100'),      # Copied: 9/14
+    ('SPY', 'S&P 500'),         # Copied: 9/14  # SPYG | SPYV
+    ('SPYG', 'LC (Growth)'),    # Added 5/26/26    
+    ('SPYV', 'LC (Value)'),     # Added 5/26/26    
+    ('IJH', 'Midcap'),         # Added: 5/26/26  # IJK (growth), IJJ (value)
+    ('IWM', 'Smallcap (R2k)'),         # Copied: 9/14  # IWO (growth), IWN (value)
+    ('IWO', 'Smallcap (G)'),         # Copied: 9/14  # IWO (growth), IWN (value)
+    ('IWN', 'Smallcap (V)'),         # Copied: 9/14  # IWO (growth), IWN (value)
     ('BND', 'US Bonds'),    # Copied: 9/14
     ('AGG', 'US Aggregate Bonds'),    # Copied: 9/14
     ('TLT', 'Long-Term Treasury'),    # Copied: 9/14
