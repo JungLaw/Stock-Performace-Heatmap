@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.2.9
+- Version: 3.3.0
 - Created: 1/12/26
-- Last update: 5/20/2026
+- Last update: 5/26/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -466,6 +466,79 @@ Introduce a row-selection / grouping architecture for the Rolling Signals Heatma
 This completed workstream added a row-selection / grouping architecture and related Rolling Heatmap row support. It does not constitute Option F Wave 2, regime logic, composite logic, cross-confirmation logic, or Phase IV explanation / rationale work.
 
 ---
+#### Phase III Extension — Stock Comparison Dashboard v1
+
+**Status:** Implementation-prep active workstream
+
+**Current objective:**  
+Implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells.
+
+**Primary architecture label:**  
+SCD Signal Matrix Architecture
+
+**Primary interaction / navigation model**
+- `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+
+**Active v1 display mode**
+- **SCD Cross-Sectional Matrix View**
+  - rows = selected indicators
+  - columns = selected tickers
+  - cells = existing Rolling Heatmap value / signal / score
+  - color = existing semantic score color
+  - primary display = SCD Plotly Heatmap View
+  - secondary display = SCD Detail Table View
+    - copy/export/audit companion to the heatmap
+    - uses the same underlying matrix cells
+    - must not introduce ranking, aggregation, new scoring, or semantic reinterpretation
+
+**Recognized but deferred display mode**
+- **SCD Single-Indicator Time-Series Matrix View**
+  - rows = dates
+  - columns = selected tickers
+  - indicator = one selected technical indicator
+  - window = 25 trading days
+  - status = recognized but deferred from v1 implementation unless explicitly promoted
+
+**Scope boundary**
+This workstream is a Phase III UI / display workstream. It must reuse existing Rolling Heatmap row-selection, rule-engine payload, Scenario B acquisition behavior, and value / signal / score cells. It must not redefine numeric truth, semantic meaning, score meaning, data acquisition policy, or persistence behavior.
+
+**Active v1 includes**
+- SCD-specific ticker controls
+- SCD curated default ticker sets
+- reuse of existing asset universes:
+  - `assets::COUNTRY_ETFS`
+  - `assets::SECTOR_ETFS`
+  - `assets::CUSTOM_DEFAULT`
+- reuse of the existing Rolling Heatmap row-selection resolver
+- multi-ticker execution through the existing Rolling Heatmap / Option-C rule-engine path
+- latest-cell extraction per selected ticker and row_key
+- SCD Plotly Heatmap View
+- SCD Detail Table View
+
+**Active v1 excludes**
+- new semantic scoring
+- ticker ranking
+- aggregate technical strength score
+- relative within selected tickers color mode
+- composites
+- cross-confirmation
+- regime logic
+- new numeric formulas
+- new rulebook thresholds
+- new DB table
+- new persistence behavior
+- persistent SCD ticker-set management
+- AgGrid / pivot-table implementation
+
+**Deferred numeric backlog remains unchanged**
+- SMA slope / SMA semantic reopen
+
+**Deferred later-wave semantic tiers remain unchanged**
+- composites
+- cross-confirmation
+- regime logic
+
+---
 ## Phase Transition — Option E Wave 1 Complete → Option F Activation
 
 **Prerequisites satisfied:**
@@ -481,12 +554,15 @@ This completed workstream added a row-selection / grouping architecture and rela
 - System is now safe to proceed with first-wave semantic activation (Option F)
 - Numeric baselines remain available to detect unintended drift while semantic work is introduced
 
-**Next Active Workstream:**
+**Historical next active workstream at this transition:**
 → Option F — Semantic & Relational Logic (Wave 1)
 
 **Wave 1 initial targets:**
 - Bollinger semantics
 - VWMA rule semantics
+
+**Current status note:**
+Option F Wave 1 is now complete. This section is retained as historical phase-transition context and no longer defines the current active workstream.
 
 ## MAJOR PHASE IV — Semantic Presentation & Decision Support
 
@@ -584,6 +660,7 @@ No structural DB changes should occur until these decisions are finalized.
   * Rolling heatmap acquisition (Scenario B): ✅ complete
   * Layout & semantics: ✅ complete
   * Rolling Heatmap Selection & Catalog Architecture (v1): ✅ complete
+  * Stock Comparison Dashboard v1: ▶ implementation-prep active workstream
 
 * Phase IV: 🔒 future
 
@@ -591,11 +668,24 @@ No structural DB changes should occur until these decisions are finalized.
 
 ## What Comes Next (Immediately)
 
-**Next active workstream (in order):**
-No next active workstream is assigned in this completed-items pass.
+## What Comes Next (Immediately)
+
+**Next active workstream:**
+1) **Phase III Extension — Stock Comparison Dashboard v1** — implementation-prep active workstream
+   - implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells
+   - use the **SCD Signal Matrix Architecture**
+   - primary interaction / navigation model:
+     - `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+   - active v1 display mode:
+     - **SCD Cross-Sectional Matrix View**
+   - recognized but deferred display mode:
+     - **SCD Single-Indicator Time-Series Matrix View**
+   - color rule for first implementation:
+     - use existing semantic score color
+   - do not introduce new semantic scoring, ticker ranking, aggregate technical strength, relative color mode, composites, cross-confirmation, regime logic, new numeric formulas, new rulebook thresholds, new persistence behavior, or DB schema changes
 
 **Recently completed workstream:**
-1) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)** — ✅ COMPLETE
+2) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)** — ✅ COMPLETE
    - authoritative row classification mapping
    - curated preset / Custom membership
    - selection-resolution logic
@@ -606,14 +696,14 @@ No next active workstream is assigned in this completed-items pass.
    - preservation of the current manual display/remove and row-order controls as the downstream override layer
    - expanded Rolling Heatmap row support, including validated ATR and DPO additions
 
-2) **Deferred semantic continuation remains unchanged**
+**Deferred later-wave semantic tiers remain unchanged**
 - Option F Wave 2:
   - composites
   - cross-confirmation
 - Option F Wave 3:
   - regime logic
 
-3) **Later numeric backlog / review remains unchanged**
+**Deferred numeric backlog remains unchanged**
 - SMA slope / SMA semantic reopen
 
 **Important boundary**
