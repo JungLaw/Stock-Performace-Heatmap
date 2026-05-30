@@ -1,4 +1,4 @@
-# Stamp: Sat, May 30, 2026 1:49PM
+# Stamp: Sat, May 30, 2026 4:22PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -179,6 +179,15 @@ def initialize_session_state():
 
     if 'scd_last_resolved_row_keys' not in st.session_state:
         st.session_state.scd_last_resolved_row_keys = []
+
+    # Stock Comparison Dashboard v1 matrix transport state.
+    # This stores reshaped existing Rolling Heatmap cells only.
+    # It must not store new scores, rankings, aggregates, or semantic labels.
+    if 'scd_signal_matrix' not in st.session_state:
+        st.session_state.scd_signal_matrix = None
+
+    if 'scd_matrix_last_run' not in st.session_state:
+        st.session_state.scd_matrix_last_run = None
 
     # Rolling Heatmap Selection & Catalog session state.
     # These keys support the Phase III row-selection architecture only.
@@ -701,6 +710,250 @@ def _render_scd_indicator_selection_controls() -> list[str]:
 
     return selected_row_keys
 
+def _fetch_scd_rolling_payload_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+) -> Dict[str, Any]:
+    """
+    Fetch the existing Rolling Heatmap / Option-C rolling payload for one ticker.
+
+    SCD must not call yfinance directly and must not create a new acquisition
+    path. This function delegates to the existing technical calculator path,
+    using Scenario B-style OHLCV request semantics.
+    """
+    ticker = str(ticker).strip().upper()
+
+    ohlcv_request = {
+        "mode": "rolling_heatmap_scenario_b",
+        "window_days": int(window_days),
+        "anchor_mode": "asof",
+        "anchor_date": None,
+        "historical_buffer_days": 435,
+    }
+
+    return st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        use_meta_coverage=True,
+        return_type="rolling",
+        ohlcv_request=ohlcv_request,
+    )
+
+
+def _extract_latest_scd_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    rolling_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Extract the latest available existing Rolling Heatmap cell for row_key.
+
+    Cell identity:
+        ticker + row_key + latest available rolling payload date
+
+    This preserves existing value / signal / score / hover / extras where
+    available and does not compute new scores or semantic labels.
+    """
+    ticker = str(ticker).strip().upper()
+    row_key = str(row_key).strip()
+
+    dates = list(rolling_payload.get("dates", []))
+    short_term = rolling_payload.get("short_term")
+    data = short_term.get("data", {}) if isinstance(short_term, dict) else {}
+
+    for date_key in reversed(dates):
+        date_cells = data.get(date_key, {})
+        if not isinstance(date_cells, dict):
+            continue
+
+        source_cell = date_cells.get(row_key)
+        if not isinstance(source_cell, dict):
+            continue
+
+        cell = {
+            "ticker": ticker,
+            "row_key": row_key,
+            "date": date_key,
+            "value": source_cell.get("value"),
+            "signal": source_cell.get("signal"),
+            "score": source_cell.get("score"),
+            "hover": source_cell.get("hover"),
+            "status": "ok",
+        }
+
+        if "extras" in source_cell:
+            cell["extras"] = source_cell.get("extras")
+
+        return cell
+
+    return {
+        "ticker": ticker,
+        "row_key": row_key,
+        "date": None,
+        "value": None,
+        "signal": None,
+        "score": None,
+        "hover": f"No latest cell available for {row_key} on {ticker}.",
+        "status": "missing_cell",
+    }
+
+
+def _build_scd_cross_sectional_matrix(
+    *,
+    selected_tickers: list[str],
+    selected_row_keys: list[str],
+    window_days: int = 10,
+) -> Dict[str, Any]:
+    """
+    Build the SCD latest-cell cross-sectional matrix.
+
+    Shape:
+        matrix["cells"][row_key][ticker] = latest existing Rolling Heatmap cell
+
+    This function reshapes existing rolling payload cells only. It does not
+    compute new scores, rank tickers, aggregate signals, or reinterpret meaning.
+    """
+    tickers = _dedupe_preserve_order_str(selected_tickers)
+    row_keys = [str(row_key).strip() for row_key in selected_row_keys if str(row_key).strip()]
+
+    matrix = {
+        "status": "ok",
+        "window_days": int(window_days),
+        "tickers": tickers,
+        "row_keys": row_keys,
+        "cells": {row_key: {} for row_key in row_keys},
+        "ticker_status": {},
+        "errors": [],
+    }
+
+    if not tickers:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No SCD tickers selected.")
+        return matrix
+
+    if not row_keys:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No SCD indicator row keys selected.")
+        return matrix
+
+    for ticker in tickers:
+        try:
+            rolling_payload = _fetch_scd_rolling_payload_for_ticker(
+                ticker=ticker,
+                window_days=window_days,
+            )
+
+            if not isinstance(rolling_payload, dict) or not rolling_payload:
+                matrix["ticker_status"][ticker] = {
+                    "status": "empty",
+                    "message": "No rolling payload returned.",
+                }
+                for row_key in row_keys:
+                    matrix["cells"][row_key][ticker] = {
+                        "ticker": ticker,
+                        "row_key": row_key,
+                        "date": None,
+                        "value": None,
+                        "signal": None,
+                        "score": None,
+                        "hover": f"No rolling payload returned for {ticker}.",
+                        "status": "missing_payload",
+                    }
+                continue
+
+            payload_status = rolling_payload.get("status", "unknown")
+            payload_dates = list(rolling_payload.get("dates", []))
+
+            matrix["ticker_status"][ticker] = {
+                "status": payload_status,
+                "dates": payload_dates,
+                "latest_date": payload_dates[-1] if payload_dates else None,
+            }
+
+            for row_key in row_keys:
+                matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
+                    ticker=ticker,
+                    row_key=row_key,
+                    rolling_payload=rolling_payload,
+                )
+
+        except Exception as e:
+            message = f"{ticker}: {e}"
+            matrix["errors"].append(message)
+            matrix["ticker_status"][ticker] = {
+                "status": "error",
+                "message": str(e),
+            }
+
+            for row_key in row_keys:
+                matrix["cells"][row_key][ticker] = {
+                    "ticker": ticker,
+                    "row_key": row_key,
+                    "date": None,
+                    "value": None,
+                    "signal": None,
+                    "score": None,
+                    "hover": f"Error fetching rolling payload for {ticker}: {e}",
+                    "status": "error",
+                }
+
+    return matrix
+
+
+def _render_scd_matrix_debug_view(matrix: Optional[Dict[str, Any]]) -> None:
+    """
+    Render a WS4 debug/audit view of the internal SCD matrix.
+
+    Final Plotly heatmap and detail table rendering belong to WS5.
+    """
+    if not matrix:
+        st.info("No SCD matrix has been built yet.")
+        return
+
+    st.subheader("3) Cross-Sectional Signal Matrix — WS4 Debug View")
+
+    st.write("Matrix status:", matrix.get("status"))
+    st.write("Tickers:", matrix.get("tickers", []))
+    st.write("Indicator row keys:", matrix.get("row_keys", []))
+
+    if matrix.get("errors"):
+        st.warning("Some ticker payloads produced errors.")
+        st.write(matrix.get("errors"))
+
+    with st.expander("Ticker payload status", expanded=False):
+        st.json(matrix.get("ticker_status", {}))
+
+    preview_rows = []
+    for row_key in matrix.get("row_keys", []):
+        row = {"row_key": row_key}
+        for ticker in matrix.get("tickers", []):
+            cell = matrix.get("cells", {}).get(row_key, {}).get(ticker, {})
+            value = cell.get("value")
+            signal = cell.get("signal")
+            score = cell.get("score")
+            date = cell.get("date")
+
+            if cell.get("status") != "ok":
+                row[ticker] = cell.get("status")
+            elif value is None:
+                row[ticker] = f"{signal} | score={score} | {date}"
+            else:
+                try:
+                    row[ticker] = f"{float(value):.2f} | {signal} | score={score} | {date}"
+                except (TypeError, ValueError):
+                    row[ticker] = f"{value} | {signal} | score={score} | {date}"
+
+        preview_rows.append(row)
+
+    if preview_rows:
+        st.dataframe(pd.DataFrame(preview_rows), use_container_width=True)
+
+    with st.expander("Raw SCD matrix payload", expanded=False):
+        st.json(matrix)
+        
 def is_final_data_available_for_date(target_date: datetime) -> bool:
     """
     Check if final data is available for a given date
@@ -3058,7 +3311,49 @@ def show_stock_comparison_dashboard():
 
     selected_row_keys = _render_scd_indicator_selection_controls()
 
-    with st.expander("WS3 status", expanded=False):
+    st.subheader("3) Build Cross-Sectional Signal Matrix")
+
+    can_build_matrix = bool(selected_tickers) and bool(selected_row_keys)
+    if not can_build_matrix:
+        st.info("Select at least one ticker and one indicator row to build the SCD matrix.")
+
+    col_build, col_clear = st.columns([0.35, 0.65])
+
+    with col_build:
+        build_clicked = st.button(
+            "Build / Refresh SCD Matrix",
+            key="scd_build_matrix",
+            type="primary",
+            disabled=not can_build_matrix,
+            use_container_width=True,
+        )
+
+    with col_clear:
+        if st.button(
+            "Clear SCD Matrix",
+            key="scd_clear_matrix",
+            disabled=st.session_state.scd_signal_matrix is None,
+            use_container_width=True,
+        ):
+            st.session_state.scd_signal_matrix = None
+            st.session_state.scd_matrix_last_run = None
+            st.rerun()
+
+    if build_clicked:
+        with st.spinner("Building SCD matrix from existing Rolling Heatmap payloads..."):
+            st.session_state.scd_signal_matrix = _build_scd_cross_sectional_matrix(
+                selected_tickers=selected_tickers,
+                selected_row_keys=selected_row_keys,
+                window_days=10,
+            )
+            st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
+
+    if st.session_state.scd_matrix_last_run:
+        st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
+
+    _render_scd_matrix_debug_view(st.session_state.scd_signal_matrix)
+
+    with st.expander("WS4 status", expanded=False):
         st.write("Completed through this workstream:")
         st.markdown(
             """
@@ -3068,6 +3363,8 @@ def show_stock_comparison_dashboard():
             - Temporary SCD ticker additions
             - Default selected ticker cap of 10
             - SCD indicator-selection controls using the existing Rolling Heatmap resolver
+            - SCD rolling payload execution through the existing Option-C rule-engine path
+            - SCD latest-cell cross-sectional matrix assembly
             """
         )
         st.write("Selected tickers:", selected_tickers)
@@ -3076,14 +3373,13 @@ def show_stock_comparison_dashboard():
         st.write("Deferred to later workstreams:")
         st.markdown(
             """
-            - WS4: existing rolling payload execution and latest-cell matrix assembly
             - WS5: SCD Plotly Heatmap View and SCD Detail Table View
             """
         )
 
     st.info(
-        "WS3 resolves indicator rows only. Payload execution, latest-cell matrix "
-        "assembly, and SCD heatmap/detail rendering will be added in later workstreams."
+        "WS4 builds the internal latest-cell matrix only. Final SCD Plotly Heatmap "
+        "and Detail Table rendering will be added in WS5."
     )
 
 def main():
