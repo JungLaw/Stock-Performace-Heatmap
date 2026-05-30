@@ -119,8 +119,25 @@ SECTOR_ETFS = [
     # Potential additions: small cap, mid cap
 
 
-# Default custom tickers (remain as tickers only)
-CUSTOM_DEFAULT = ['AMZN', 'META', 'NVDA', 'AAPL', 'GOOGL', 'MSFT', 'TSM', 'MU', 'GEV', 'VYMI', 'V', 'BABA', 'SPY', 'ONEQ']
+# Default custom tickers with display names.
+# Keep this structure aligned with COUNTRY_ETFS and SECTOR_ETFS:
+# each entry is (ticker, display_name).
+CUSTOM_DEFAULT = [
+    ('AMZN', 'Amazon'),
+    ('META', 'Meta'),
+    ('NVDA', 'NVIDIA'),
+    ('AAPL', 'Apple'),
+    ('GOOGL', 'Alphabet'),
+    ('MSFT', 'Microsoft'),
+    ('TSM', 'TSMC'),
+    ('MU', 'Micron'),
+    ('GEV', 'GE Vernova'),
+    ('VYMI', 'Intl. High Div.'),
+    ('V', 'Visa'),
+    ('BABA', 'Alibaba'),
+    ('SPY', 'S&P 500'),
+    ('ONEQ', 'Nasdaq'),
+]
 
 # Helper functions to work with ticker/name pairs
 def get_tickers_only(ticker_list):
@@ -175,10 +192,10 @@ ASSET_GROUPS = {
     "custom": {
         "name": "Custom Tickers",
         "description": "User-defined list of stock tickers",
-        "tickers": CUSTOM_DEFAULT,
-        "ticker_names": {ticker: ticker for ticker in CUSTOM_DEFAULT},
+        "tickers": get_tickers_only(CUSTOM_DEFAULT),
+        "ticker_names": get_ticker_name_dict(CUSTOM_DEFAULT),
         "max_tickers": 10,
-        "use_display_names": False  # Flag to indicate tickers should be displayed as-is
+        "use_display_names": True  # Flag to indicate display names should be used
     }
 }
 
