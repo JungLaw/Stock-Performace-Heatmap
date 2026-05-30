@@ -152,6 +152,34 @@ def initialize_session_state():
     if 'scd_ticker_limit' not in st.session_state:
         st.session_state.scd_ticker_limit = 10
 
+    # Stock Comparison Dashboard v1 indicator-selection session state.
+    # These keys are SCD-specific but resolve through the existing Rolling
+    # Heatmap row-selection resolver and catalog.
+    if 'scd_selection_mode' not in st.session_state:
+        st.session_state.scd_selection_mode = 'Custom'
+
+    if 'scd_custom_rows' not in st.session_state:
+        st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+
+    if 'scd_selected_category' not in st.session_state:
+        st.session_state.scd_selected_category = None
+
+    if 'scd_selected_scope' not in st.session_state:
+        st.session_state.scd_selected_scope = 'All'
+
+    if 'scd_selected_window' not in st.session_state:
+        st.session_state.scd_selected_window = 'All'
+
+    if 'scd_selected_family' not in st.session_state:
+        st.session_state.scd_selected_family = 'All'
+
+    if 'scd_selected_preset' not in st.session_state:
+        preset_names = get_preset_names()
+        st.session_state.scd_selected_preset = preset_names[0] if preset_names else None
+
+    if 'scd_last_resolved_row_keys' not in st.session_state:
+        st.session_state.scd_last_resolved_row_keys = []
+
     # Rolling Heatmap Selection & Catalog session state.
     # These keys support the Phase III row-selection architecture only.
     # They do not define numeric truth, semantic truth, display metadata,
@@ -451,6 +479,227 @@ def _render_scd_ticker_controls() -> list[str]:
     )
 
     return selected_tickers
+
+def _render_scd_indicator_selection_controls() -> list[str]:
+    """
+    Render SCD-specific indicator row-selection controls.
+
+    SCD does not own indicator grouping metadata. This function only renders
+    SCD-specific controls and delegates row-key resolution to the existing
+    Rolling Heatmap selection resolver.
+    """
+    st.subheader("2) Indicator Selection")
+
+    mode_options = get_selection_modes()
+    if not mode_options:
+        mode_options = ["Custom", "Category", "Preset"]
+
+    current_mode = st.session_state.get("scd_selection_mode", "Custom")
+    if current_mode not in mode_options:
+        current_mode = "Custom"
+
+    selection_mode = st.selectbox(
+        "Selection Mode",
+        options=mode_options,
+        index=mode_options.index(current_mode),
+        key="scd_selection_mode",
+        help="Choose the base indicator row set for the Stock Comparison Dashboard.",
+    )
+
+    resolved_row_keys: list[str] = []
+
+    if selection_mode == "Custom":
+        cc1, cc2 = st.columns([0.75, 0.25])
+        with cc1:
+            st.caption(
+                "Custom mode uses the SCD session row set. Restore-default "
+                "resets to the catalog-owned Rolling Heatmap Custom default."
+            )
+        with cc2:
+            if st.button(
+                "Restore Default Custom",
+                key="scd_restore_default_custom_rows",
+                use_container_width=True,
+            ):
+                st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+                st.session_state.pop("scd_custom_selected_row_keys", None)
+                st.rerun()
+
+        resolved_row_keys = resolve_row_selection(
+            selection_mode="Custom",
+            custom_rows=st.session_state.get(
+                "scd_custom_rows",
+                list(RH_CUSTOM_DEFAULT),
+            ),
+        )
+
+        multiselect_key = "scd_custom_selected_row_keys"
+
+    elif selection_mode == "Preset":
+        preset_options = get_preset_names()
+
+        if not preset_options:
+            st.warning("No Rolling Heatmap presets are available.")
+            selected_preset = None
+            resolved_row_keys = []
+            multiselect_key = "scd_preset_selected_row_keys__none"
+        else:
+            stored_preset = st.session_state.get("scd_selected_preset")
+            if stored_preset not in preset_options:
+                st.session_state.scd_selected_preset = preset_options[0]
+                stored_preset = preset_options[0]
+
+            selected_preset = st.selectbox(
+                "Choose a preset",
+                options=preset_options,
+                index=preset_options.index(stored_preset),
+                key="scd_selected_preset",
+                help="Presets are resolved by the existing Rolling Heatmap selection catalog.",
+            )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Preset",
+                preset_name=selected_preset,
+            )
+
+            preset_key_part = str(selected_preset).replace(" ", "_").replace("/", "_")
+            multiselect_key = f"scd_preset_selected_row_keys__{preset_key_part}"
+
+    elif selection_mode == "Category":
+        category_options = get_category_names()
+
+        if not category_options:
+            st.warning("No row categories are available.")
+            selected_category = None
+            selected_scope = "All"
+            selected_window = "All"
+            selected_family = "All"
+            resolved_row_keys = []
+            multiselect_key = "scd_category_selected_row_keys__none"
+        else:
+            stored_category = st.session_state.get("scd_selected_category")
+            if stored_category not in category_options:
+                st.session_state.scd_selected_category = category_options[0]
+                stored_category = category_options[0]
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            with c1:
+                selected_category = st.selectbox(
+                    "Category",
+                    options=category_options,
+                    index=category_options.index(stored_category),
+                    key="scd_selected_category",
+                )
+
+            scope_options = ["All"] + get_scope_names(category=selected_category)
+            stored_scope = st.session_state.get("scd_selected_scope", "All")
+            if stored_scope not in scope_options:
+                stored_scope = "All"
+
+            with c2:
+                selected_scope = st.selectbox(
+                    "Scope",
+                    options=scope_options,
+                    index=scope_options.index(stored_scope),
+                    key="scd_selected_scope",
+                )
+
+            window_options = ["All"] + get_window_names(category=selected_category)
+            stored_window = st.session_state.get("scd_selected_window", "All")
+            if stored_window not in window_options:
+                stored_window = "All"
+
+            with c3:
+                selected_window = st.selectbox(
+                    "Window",
+                    options=window_options,
+                    index=window_options.index(stored_window),
+                    key="scd_selected_window",
+                )
+
+            family_options = ["All"] + get_family_names(category=selected_category)
+            stored_family = st.session_state.get("scd_selected_family", "All")
+            if stored_family not in family_options:
+                stored_family = "All"
+
+            with c4:
+                selected_family = st.selectbox(
+                    "Family",
+                    options=family_options,
+                    index=family_options.index(stored_family),
+                    key="scd_selected_family",
+                )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Category",
+                category=selected_category,
+                scope=selected_scope,
+                window=selected_window,
+                family=selected_family,
+            )
+
+            category_key_part = str(selected_category).replace(" ", "_").replace("/", "_")
+            scope_key_part = str(selected_scope).replace(" ", "_").replace("/", "_")
+            window_key_part = str(selected_window).replace(" ", "_").replace("/", "_")
+            family_key_part = str(selected_family).replace(" ", "_").replace("/", "_")
+            multiselect_key = (
+                "scd_category_selected_row_keys__"
+                f"{category_key_part}__{scope_key_part}__"
+                f"{window_key_part}__{family_key_part}"
+            )
+
+    else:
+        st.warning(f"Unsupported SCD selection mode: {selection_mode!r}")
+        resolved_row_keys = []
+        multiselect_key = "scd_selected_row_keys__unsupported"
+
+    resolved_row_keys = list(resolved_row_keys)
+
+    if not resolved_row_keys:
+        empty_message = describe_empty_selection(
+            selection_mode=selection_mode,
+            category=st.session_state.get("scd_selected_category"),
+            scope=st.session_state.get("scd_selected_scope"),
+            window=st.session_state.get("scd_selected_window"),
+            family=st.session_state.get("scd_selected_family"),
+            preset_name=st.session_state.get("scd_selected_preset"),
+        )
+        st.info(empty_message)
+        st.session_state.scd_last_resolved_row_keys = []
+        return []
+
+    # Build a local default without mutating the widget's Session State key
+    # before instantiating the widget. Mutating st.session_state[multiselect_key]
+    # here while also passing default=... causes Streamlit's default/session-state warning.
+    widget_default = [
+        row_key
+        for row_key in st.session_state.get(multiselect_key, resolved_row_keys)
+        if row_key in resolved_row_keys
+    ]
+
+    selected_row_keys = st.multiselect(
+        "Indicator rows",
+        options=resolved_row_keys,
+        default=widget_default,
+        key=multiselect_key,
+        help=(
+            "These are canonical Rolling Heatmap row_key values. "
+            "The final SCD matrix will use these row keys as indicator rows."
+        ),
+    )
+
+    selected_row_keys = list(selected_row_keys)
+
+    if selection_mode == "Custom":
+        st.session_state.scd_custom_rows = list(selected_row_keys)
+
+    st.session_state.scd_last_resolved_row_keys = list(selected_row_keys)
+
+    st.success(f"Selected for SCD: {len(selected_row_keys)} indicator row(s)")
+    st.caption(", ".join(selected_row_keys) if selected_row_keys else "No indicator rows selected.")
+
+    return selected_row_keys
 
 def is_final_data_available_for_date(target_date: datetime) -> bool:
     """
@@ -2807,8 +3056,10 @@ def show_stock_comparison_dashboard():
     st.info("Use the sidebar to choose the SCD ticker source, add/remove tickers, and set the selected ticker cap.")
     st.write("Selected tickers:", selected_tickers)
 
-    with st.expander("WS2 status", expanded=False):
-        st.write("Completed in this workstream:")
+    selected_row_keys = _render_scd_indicator_selection_controls()
+
+    with st.expander("WS3 status", expanded=False):
+        st.write("Completed through this workstream:")
         st.markdown(
             """
             - SCD-specific ticker source control
@@ -2816,22 +3067,23 @@ def show_stock_comparison_dashboard():
             - SCD-only selected ticker state
             - Temporary SCD ticker additions
             - Default selected ticker cap of 10
+            - SCD indicator-selection controls using the existing Rolling Heatmap resolver
             """
         )
         st.write("Selected tickers:", selected_tickers)
+        st.write("Selected indicator row keys:", selected_row_keys)
 
         st.write("Deferred to later workstreams:")
         st.markdown(
             """
-            - WS3: indicator-selection controls through `resolve_row_selection(...)`
             - WS4: existing rolling payload execution and latest-cell matrix assembly
             - WS5: SCD Plotly Heatmap View and SCD Detail Table View
             """
         )
 
     st.info(
-        "WS2 is ticker-control only. Indicator selection and matrix rendering "
-        "will be added in the next workstreams."
+        "WS3 resolves indicator rows only. Payload execution, latest-cell matrix "
+        "assembly, and SCD heatmap/detail rendering will be added in later workstreams."
     )
 
 def main():
