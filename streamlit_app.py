@@ -1,4 +1,4 @@
-# Stamp: Thu, May 28, 2026 2:18PM
+# Stamp: Sat, May 30, 2026 1:49PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -25,7 +25,14 @@ from calculations.performance import DatabaseIntegratedPerformanceCalculator
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
-from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT, get_tickers_only
+from config.assets import (
+    ASSET_GROUPS,
+    CUSTOM_DEFAULT,
+    get_tickers_only,
+    SCD_DEFAULT_COUNTRY_TICKERS,
+    SCD_DEFAULT_SECTOR_TICKERS,
+    SCD_DEFAULT_CUSTOM_TICKERS,
+)
 
 # Rolling Heatmap Selection & Catalog architecture
 # Grouping/selection truth lives in src/ui modules; streamlit_app.py only
@@ -124,6 +131,27 @@ def initialize_session_state():
     if 'custom_visible_tickers' not in st.session_state:
         st.session_state.custom_visible_tickers = []   # Will be populated on first run
 
+    # Stock Comparison Dashboard v1 ticker-selection session state.
+    # These keys are SCD-specific and must not collide with Performance /
+    # Volume ticker controls or Rolling Heatmap row-selection state.
+    if 'scd_ticker_source' not in st.session_state:
+        st.session_state.scd_ticker_source = 'custom'
+
+    if 'scd_selected_country_tickers' not in st.session_state:
+        st.session_state.scd_selected_country_tickers = list(SCD_DEFAULT_COUNTRY_TICKERS)
+
+    if 'scd_selected_sector_tickers' not in st.session_state:
+        st.session_state.scd_selected_sector_tickers = list(SCD_DEFAULT_SECTOR_TICKERS)
+
+    if 'scd_selected_custom_tickers' not in st.session_state:
+        st.session_state.scd_selected_custom_tickers = list(SCD_DEFAULT_CUSTOM_TICKERS)
+
+    if 'scd_temp_tickers' not in st.session_state:
+        st.session_state.scd_temp_tickers = []
+
+    if 'scd_ticker_limit' not in st.session_state:
+        st.session_state.scd_ticker_limit = 10
+
     # Rolling Heatmap Selection & Catalog session state.
     # These keys support the Phase III row-selection architecture only.
     # They do not define numeric truth, semantic truth, display metadata,
@@ -188,6 +216,241 @@ def is_bucket_ticker(ticker: str) -> bool:
             all_bucket_tickers.append(item)
     
     return ticker.upper() in [t.upper() for t in all_bucket_tickers]
+
+
+def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
+    """Return a display label while preserving ticker as the canonical identity."""
+    display_name = ticker_names.get(ticker, ticker)
+    if display_name and display_name != ticker:
+        return f"{display_name} ({ticker})"
+    return ticker
+
+
+def _get_scd_source_config(source: str) -> Dict[str, Any]:
+    """
+    Return existing asset-universe metadata for an SCD ticker source.
+
+    SCD consumes the existing ASSET_GROUPS universes. It does not create a new
+    asset universe or reorder canonical ticker lists.
+    """
+    source_key = source if source in {"country", "sector", "custom"} else "custom"
+    group = ASSET_GROUPS.get(source_key, {})
+
+    return {
+        "source": source_key,
+        "name": group.get("name", source_key.title()),
+        "tickers": list(group.get("tickers", [])),
+        "ticker_names": dict(group.get("ticker_names", {})),
+    }
+
+
+def _get_scd_selected_ticker_state_key(source: str) -> str:
+    """Return the SCD session-state key for the selected source."""
+    if source == "country":
+        return "scd_selected_country_tickers"
+    if source == "sector":
+        return "scd_selected_sector_tickers"
+    return "scd_selected_custom_tickers"
+
+
+def _dedupe_preserve_order_str(values) -> list[str]:
+    """Return uppercase non-empty strings with duplicates removed."""
+    seen = set()
+    out = []
+
+    for value in values:
+        ticker = str(value).strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        out.append(ticker)
+
+    return out
+
+
+def _get_scd_selected_tickers() -> list[str]:
+    """
+    Return the current SCD selected ticker set.
+
+    This is ticker-symbol identity only. Display names remain presentation
+    metadata and must not replace ticker symbols.
+    """
+    source = st.session_state.get("scd_ticker_source", "custom")
+    selected_key = _get_scd_selected_ticker_state_key(source)
+
+    selected = list(st.session_state.get(selected_key, []))
+    temp_tickers = list(st.session_state.get("scd_temp_tickers", []))
+
+    selected_tickers = _dedupe_preserve_order_str(selected + temp_tickers)
+    ticker_limit = int(st.session_state.get("scd_ticker_limit", 10))
+
+    return selected_tickers[:ticker_limit]
+
+def _render_scd_ticker_controls() -> list[str]:
+    """
+    Render SCD-specific ticker controls in the sidebar.
+
+    These controls intentionally mirror the Performance / Volume checkbox
+    interaction pattern while using SCD-only session-state keys.
+    """
+    source_options = ["country", "sector", "custom"]
+    source_labels = {
+        "country": "🌍 Country ETFs",
+        "sector": "🏭 Sector ETFs",
+        "custom": "🎯 Custom Stocks",
+    }
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📋 Stock Comparison Tickers")
+
+    current_source = st.session_state.get("scd_ticker_source", "custom")
+    if current_source not in source_options:
+        current_source = "custom"
+
+    selected_source = st.sidebar.radio(
+        "Ticker Source",
+        options=source_options,
+        format_func=lambda source: source_labels[source],
+        index=source_options.index(current_source),
+        key="scd_ticker_source_widget",
+    )
+
+    # Keep canonical SCD source state separate from widget state.
+    # This avoids stale source behavior when switching Country / Sector / Custom.
+    st.session_state.scd_ticker_source = selected_source
+
+    source_config = _get_scd_source_config(selected_source)
+    available_tickers = source_config["tickers"]
+    ticker_names = source_config["ticker_names"]
+    selected_key = _get_scd_selected_ticker_state_key(selected_source)
+
+    current_selected = [
+        ticker for ticker in st.session_state.get(selected_key, [])
+        if ticker in available_tickers
+    ]
+    st.session_state[selected_key] = current_selected
+
+    ticker_limit = st.sidebar.number_input(
+        "Selected ticker cap (max 10)",
+        min_value=1,
+        max_value=50,
+        value=int(st.session_state.get("scd_ticker_limit", 10)),
+        step=1,
+        key="scd_ticker_limit",
+        help="SCD v1 defaults to 10 selected tickers. Higher values may slow later payload execution.",
+    )
+
+    with st.sidebar.expander(f"📋 Show/Hide {source_config['name']}", expanded=True):
+        col_select, col_clear = st.columns(2)
+
+        with col_select:
+            if st.button("Select Defaults", key=f"scd_select_defaults_{selected_source}"):
+                if selected_source == "country":
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_COUNTRY_TICKERS
+                        if ticker in available_tickers
+                    ]
+                elif selected_source == "sector":
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_SECTOR_TICKERS
+                        if ticker in available_tickers
+                    ]
+                else:
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_CUSTOM_TICKERS
+                        if ticker in available_tickers
+                    ]
+                st.rerun()
+
+        with col_clear:
+            if st.button("Clear", key=f"scd_clear_source_{selected_source}"):
+                st.session_state[selected_key] = []
+                st.rerun()
+
+        for ticker in available_tickers:
+            is_selected = ticker in st.session_state[selected_key]
+            label = _format_scd_ticker_label(ticker, ticker_names)
+
+            if st.checkbox(
+                label,
+                value=is_selected,
+                key=f"scd_filter_{selected_source}_{ticker}",
+            ):
+                if ticker not in st.session_state[selected_key]:
+                    st.session_state[selected_key].append(ticker)
+            else:
+                if ticker in st.session_state[selected_key]:
+                    st.session_state[selected_key].remove(ticker)
+
+        st.caption(
+            f"Selected from source: {len(st.session_state[selected_key])}/"
+            f"{len(available_tickers)}"
+        )
+
+    with st.sidebar.expander("➕ Add Temporary SCD Tickers", expanded=False):
+        temp_input = st.text_area(
+            "Add temporary ticker(s):",
+            key="scd_temp_ticker_input",
+            placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
+            height=80,
+            help="Temporary SCD tickers apply only to this dashboard view.",
+        )
+
+        if st.button("Add Temporary Ticker(s)", key="scd_add_temp_tickers"):
+            parsed_tickers = _dedupe_preserve_order_str(
+                temp_input.replace(",", "\n").split("\n")
+            )
+            existing = _dedupe_preserve_order_str(st.session_state.scd_temp_tickers)
+            st.session_state.scd_temp_tickers = _dedupe_preserve_order_str(
+                existing + parsed_tickers
+            )
+
+            if parsed_tickers:
+                st.success(f"Added {len(parsed_tickers)} temporary ticker(s).")
+            else:
+                st.warning("Enter at least one ticker symbol.")
+
+        if st.session_state.scd_temp_tickers:
+            st.caption(
+                "Temporary tickers: "
+                + ", ".join(_dedupe_preserve_order_str(st.session_state.scd_temp_tickers))
+            )
+
+            tickers_to_remove = []
+            for ticker in _dedupe_preserve_order_str(st.session_state.scd_temp_tickers):
+                remove_col, label_col = st.columns([1, 4])
+                with remove_col:
+                    if st.button("❌", key=f"scd_remove_temp_{ticker}", help=f"Remove {ticker}"):
+                        tickers_to_remove.append(ticker)
+                with label_col:
+                    st.write(ticker)
+
+            for ticker in tickers_to_remove:
+                st.session_state.scd_temp_tickers = [
+                    existing
+                    for existing in st.session_state.scd_temp_tickers
+                    if existing != ticker
+                ]
+                st.rerun()
+
+            if st.button("Clear Temporary Tickers", key="scd_clear_temp_tickers"):
+                st.session_state.scd_temp_tickers = []
+                st.rerun()
+
+    selected_tickers = _get_scd_selected_tickers()
+
+    if len(st.session_state[selected_key]) + len(st.session_state.scd_temp_tickers) > ticker_limit:
+        st.sidebar.warning(
+            f"Ticker cap is {ticker_limit}. Only the first {ticker_limit} selected "
+            f"ticker(s), including temporary tickers, will be used."
+        )
+
+    st.sidebar.success(f"Selected for SCD: {len(selected_tickers)} ticker(s)")
+    st.sidebar.caption(
+        ", ".join(selected_tickers) if selected_tickers else "No tickers selected."
+    )
+
+    return selected_tickers
 
 def is_final_data_available_for_date(target_date: datetime) -> bool:
     """
@@ -2520,6 +2783,57 @@ def show_performance_heatmaps():
         "Data provided by Yahoo Finance via yfinance"
     )
 
+def show_stock_comparison_dashboard():
+    """
+    Render the Stock Comparison Dashboard v1 route shell.
+
+    WS2 scope: SCD-specific ticker controls only.
+    Indicator selection, rolling payload execution, matrix assembly, heatmap,
+    and detail table rendering are added in later workstreams.
+    """
+    st.title("📋 Stock Comparison Dashboard")
+    st.caption("Phase III Extension — Stock Comparison Dashboard v1")
+
+    st.markdown(
+        """
+        This dashboard will compare selected technical indicator rows across
+        selected tickers using the existing Rolling Heatmap value / signal / score path.
+        """
+    )
+
+    selected_tickers = _render_scd_ticker_controls()
+
+    st.subheader("1) Selected Ticker Set")
+    st.info("Use the sidebar to choose the SCD ticker source, add/remove tickers, and set the selected ticker cap.")
+    st.write("Selected tickers:", selected_tickers)
+
+    with st.expander("WS2 status", expanded=False):
+        st.write("Completed in this workstream:")
+        st.markdown(
+            """
+            - SCD-specific ticker source control
+            - SCD curated default ticker-set initialization
+            - SCD-only selected ticker state
+            - Temporary SCD ticker additions
+            - Default selected ticker cap of 10
+            """
+        )
+        st.write("Selected tickers:", selected_tickers)
+
+        st.write("Deferred to later workstreams:")
+        st.markdown(
+            """
+            - WS3: indicator-selection controls through `resolve_row_selection(...)`
+            - WS4: existing rolling payload execution and latest-cell matrix assembly
+            - WS5: SCD Plotly Heatmap View and SCD Detail Table View
+            """
+        )
+
+    st.info(
+        "WS2 is ticker-control only. Indicator selection and matrix rendering "
+        "will be added in the next workstreams."
+    )
+
 def main():
     """Main application function with page navigation"""
     # Page config
@@ -2579,15 +2893,7 @@ def main():
     elif st.session_state.selected_page == 'technical_analysis':
         show_technical_analysis_dashboard()
     elif st.session_state.selected_page == 'stock_comparison':
-        # Placeholder for Dashboard 2
-        st.title("📋 Stock Comparison Dashboard")
-        st.info("Dashboard 2: Multi-stock technical comparison coming soon...")
-        st.markdown("""
-        This dashboard will allow you to:
-        - Compare technical indicators across multiple stocks
-        - Use the existing bucket system (Country/Sector/Custom)
-        - Display technical heatmaps for comparative analysis
-        """)
+        show_stock_comparison_dashboard()
 
 if __name__ == "__main__":
     main()

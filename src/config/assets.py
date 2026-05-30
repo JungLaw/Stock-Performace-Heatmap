@@ -1,4 +1,4 @@
-# Stamp: Thu, May 28, 2026 2:18PM
+# Stamp: Sat, May 30, 2026 1:49PM
 """
 Asset Group Definitions for Heatmap Dashboard
 Enhanced with display names for better user experience
@@ -176,6 +176,21 @@ def get_ticker_name_dict(ticker_list):
         return {ticker: name for ticker, name in ticker_list}
     else:
         return {ticker: ticker for ticker in ticker_list}
+
+# Stock Comparison Dashboard v1 curated default selections.
+# These are initial selected subsets only; they do not replace, reorder,
+# or redefine the canonical COUNTRY_ETFS, SECTOR_ETFS, or CUSTOM_DEFAULT universes.
+SCD_DEFAULT_COUNTRY_TICKERS = [
+    'VT', 'VTI', 'VEA', 'VWO', 'VGK',
+    'VPL', 'EWJ', 'EWZ', 'INDA', 'MCHI',
+]
+
+SCD_DEFAULT_SECTOR_TICKERS = [
+    'XLF', 'XLK', 'XLE', 'XLV', 'XLI',
+    'XLP', 'XLY', 'XLU', 'XLC', 'XLB',
+]
+
+SCD_DEFAULT_CUSTOM_TICKERS = get_tickers_only(CUSTOM_DEFAULT)[:10]
 
 # Asset group metadata
 ASSET_GROUPS = {
