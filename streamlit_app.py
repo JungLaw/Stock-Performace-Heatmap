@@ -1,4 +1,4 @@
-# Stamp: Thu, May 14, 2026 6:22PM
+# Stamp: Thu, May 28, 2026 2:18PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -25,7 +25,7 @@ from calculations.performance import DatabaseIntegratedPerformanceCalculator
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
-from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT
+from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT, get_tickers_only
 
 # Rolling Heatmap Selection & Catalog architecture
 # Grouping/selection truth lives in src/ui modules; streamlit_app.py only
@@ -640,16 +640,25 @@ def create_sidebar_controls():
                     st.error("❌ Please enter both ticker and display name")
     
     else:  # custom bucket
-        # Initialize visible tickers if empty
+        # Initialize visible tickers if empty.
+        # CUSTOM_DEFAULT may contain either plain ticker strings or
+        # (ticker, display_name) tuples; session state must store ticker strings only.
+        custom_default_tickers = get_tickers_only(CUSTOM_DEFAULT)
+
         if not st.session_state.custom_visible_tickers:
-            st.session_state.custom_visible_tickers = list(CUSTOM_DEFAULT)
+            st.session_state.custom_visible_tickers = custom_default_tickers.copy()
         
         # Custom stock filtering
         with st.sidebar.expander("📋 Show/Hide Custom Stocks", expanded=True):
-            for ticker in CUSTOM_DEFAULT:
+            for item in CUSTOM_DEFAULT:
+                if isinstance(item, tuple):
+                    ticker, display_name = item
+                else:
+                    ticker, display_name = item, item
+
                 is_visible = ticker in st.session_state.custom_visible_tickers
                 if st.checkbox(
-                    f"{ticker}",
+                    f"{display_name} ({ticker})",
                     value=is_visible,
                     key=f"filter_custom_{ticker}"
                 ):
@@ -659,7 +668,10 @@ def create_sidebar_controls():
                     if ticker in st.session_state.custom_visible_tickers:
                         st.session_state.custom_visible_tickers.remove(ticker)
             
-            st.caption(f"Showing: {len(st.session_state.custom_visible_tickers)}/{len(CUSTOM_DEFAULT)} custom stocks")
+            st.caption(
+                f"Showing: {len(st.session_state.custom_visible_tickers)}/"
+                f"{len(custom_default_tickers)} custom stocks"
+            )
         
         # Add new Custom Stocks
         with st.sidebar.expander("➕ Add Custom Stocks", expanded=False):
@@ -2523,8 +2535,10 @@ def main():
     
     # Background update: Pre-load technical indicators for CUSTOM_DEFAULT tickers
     if 'technical_background_updated' not in st.session_state:
-        with st.spinner(f'Refreshing technical indicators for {len(CUSTOM_DEFAULT)} tickers...'):
-            for ticker in CUSTOM_DEFAULT:
+        custom_default_tickers = get_tickers_only(CUSTOM_DEFAULT)
+
+        with st.spinner(f'Refreshing technical indicators for {len(custom_default_tickers)} tickers...'):
+            for ticker in custom_default_tickers:
                 try:
                     # Calculate latest indicators
                     st.session_state.tech_calculator.calculate_comprehensive_analysis(
