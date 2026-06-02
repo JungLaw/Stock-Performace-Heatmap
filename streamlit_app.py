@@ -1,4 +1,4 @@
-# Stamp: Tue, June 2, 2026 10:57AM
+# Stamp: Tue, June 2, 2026 1:50PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1136,6 +1136,7 @@ def _build_scd_hover_customdata(
         "delta_abs_fmt",
         "delta_pct_suffix",
         "trend_line",
+        "adx_context_block",
         "signal_line",
         "macd_context_block",
         "stoch_context_block",
@@ -1221,6 +1222,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
+        "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"

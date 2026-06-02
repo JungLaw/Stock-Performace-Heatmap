@@ -1,4 +1,4 @@
-# Stamp: Wed, May 20, 2026 5:26PM
+# Stamp: Tue, June 2, 2026 1:50PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -907,6 +907,18 @@ def build_plotly_heatmap_inputs(
         price_values = price_values + [None] * (len(raw_dates) - len(price_values))
     price_by_date = dict(zip(raw_dates, price_values))
 
+    # Date -> OHLCV / computed-indicator row map for hover-only context.
+    # This consumes already-computed indicator columns from ohlcv_df.
+    # It does not create new score, signal, rule, or numeric-layer truth.
+    ohlcv_by_date: Dict[str, Dict[str, Any]] = {}
+    if ohlcv_df is not None:
+        try:
+            hover_df = ohlcv_df.copy().sort_index()
+            hover_df.index = hover_df.index.astype(str)
+            ohlcv_by_date = hover_df.to_dict(orient="index")
+        except Exception:
+            ohlcv_by_date = {}
+
     # Initialize variables
     row_keys: List[str] = []
     y: List[str] = []
@@ -1074,6 +1086,8 @@ def build_plotly_heatmap_inputs(
             # ----------------------------------------
             volume_series = {}
             volume_5d_avg = {}
+            volume_10d_avg = {}
+            volume_3m_avg = {}
 
             if ohlcv_df is not None:
                 try:
@@ -1091,9 +1105,41 @@ def build_plotly_heatmap_inputs(
                             .mean()
                             .to_dict()
                         )
+                        volume_10d_avg = (
+                            df["Volume"]
+                            .rolling(10)
+                            .mean()
+                            .to_dict()
+                        )
+                        volume_3m_avg = (
+                            df["Volume"]
+                            .rolling(63)
+                            .mean()
+                            .to_dict()
+                        )
                 except Exception:
                     volume_series = {}
                     volume_5d_avg = {}
+                    volume_10d_avg = {}
+                    volume_3m_avg = {}
+
+            def _format_volume_vs_avg_line(label: str, vol_value: Any, avg_value: Any) -> str:
+                """Return a preformatted Price-row volume-vs-average hover line."""
+                if _is_missing(vol_value) or _is_missing(avg_value):
+                    return ""
+
+                try:
+                    avg_float = float(avg_value)
+                    if avg_float == 0:
+                        return ""
+
+                    rel_pct = ((float(vol_value) - avg_float) / avg_float) * 100.0
+                    return (
+                        f"Volume vs {label}: {format_signed_percent(rel_pct, decimals=1)} "
+                        f"({_abbr(avg_float)})<br>"
+                    )
+                except Exception:
+                    return ""
 
             for idx, (d_raw, v) in enumerate(zip(raw_dates, price_vals)):
                 prev_v = price_vals[idx - 1] if idx > 0 else None
@@ -1127,14 +1173,30 @@ def build_plotly_heatmap_inputs(
                 # Volume metrics
                 # ----------------------------
                 vol = volume_series.get(d_raw)
-                vol_avg = volume_5d_avg.get(d_raw)
+                vol_5d_avg = volume_5d_avg.get(d_raw)
+                vol_10d_avg = volume_10d_avg.get(d_raw)
+                vol_3m_avg = volume_3m_avg.get(d_raw)
 
-                vol_rel = None
-                if vol is not None and vol_avg not in (None, 0):
+                vol_5d_rel = None
+                if vol is not None and vol_5d_avg not in (None, 0):
                     try:
-                        vol_rel = ((float(vol) - float(vol_avg)) / float(vol_avg)) * 100.0
+                        vol_5d_rel = ((float(vol) - float(vol_5d_avg)) / float(vol_5d_avg)) * 100.0
                     except Exception:
-                        vol_rel = None
+                        vol_5d_rel = None
+
+                vol_10d_rel = None
+                if vol is not None and vol_10d_avg not in (None, 0):
+                    try:
+                        vol_10d_rel = ((float(vol) - float(vol_10d_avg)) / float(vol_10d_avg)) * 100.0
+                    except Exception:
+                        vol_10d_rel = None
+
+                vol_3m_rel = None
+                if vol is not None and vol_3m_avg not in (None, 0):
+                    try:
+                        vol_3m_rel = ((float(vol) - float(vol_3m_avg)) / float(vol_3m_avg)) * 100.0
+                    except Exception:
+                        vol_3m_rel = None
 
                 # ----------------------------
                 # Preformatted hover fragments (Price-row)
@@ -1146,12 +1208,11 @@ def build_plotly_heatmap_inputs(
                 if not _is_missing(vol):
                     volume_block = f"Volume: {_abbr(float(vol))}<br>"
 
-                volume_vs_avg_block = ""
-                if not _is_missing(vol_rel) and not _is_missing(vol_avg):
-                    volume_vs_avg_block = (
-                        f"Volume vs 5D Avg: {format_signed_percent(vol_rel, decimals=1)} "
-                        f"({_abbr(float(vol_avg))})<br>"
-                    )
+                volume_vs_avg_block = (
+                    _format_volume_vs_avg_line("5D", vol, vol_5d_avg)
+                    + _format_volume_vs_avg_line("10D", vol, vol_10d_avg)
+                    + _format_volume_vs_avg_line("3M", vol, vol_3m_avg)
+                )
 
                 # price row stays display-only / non-semantic
                 trend_line = ""
@@ -1179,8 +1240,12 @@ def build_plotly_heatmap_inputs(
 
                         # volume metrics
                         "volume": vol,
-                        "volume_5d_avg": vol_avg,
-                        "volume_vs_5d_avg_pct": vol_rel,
+                        "volume_5d_avg": vol_5d_avg,
+                        "volume_10d_avg": vol_10d_avg,
+                        "volume_3m_avg": vol_3m_avg,
+                        "volume_vs_5d_avg_pct": vol_5d_rel,
+                        "volume_vs_10d_avg_pct": vol_10d_rel,
+                        "volume_vs_3m_avg_pct": vol_3m_rel,
 
                         # Custom indicator-specific content
                         "macd_context_block": "",
@@ -1278,6 +1343,7 @@ def build_plotly_heatmap_inputs(
             dpo_context_block = ""
             band_context_block = ""
             ma_context_block = ""
+            adx_context_block = ""
 
             # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
@@ -1429,6 +1495,93 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
+            # ADX: Custom hover content (+DI / -DI / spread with deltas)
+            if key.startswith("ADX_"):
+                parts = []
+
+                length_part = key.split("_", 1)[1] if "_" in key else ""
+                dip_col = f"DIp_{length_part}"
+                din_col = f"DIn_{length_part}"
+
+                current_row = ohlcv_by_date.get(str(d_raw), {})
+                prev_date = raw_dates[idx - 1] if idx > 0 else None
+                prev_row = ohlcv_by_date.get(str(prev_date), {}) if prev_date is not None else {}
+
+                dip_val = current_row.get(dip_col) if isinstance(current_row, dict) else None
+                din_val = current_row.get(din_col) if isinstance(current_row, dict) else None
+                prev_dip_val = prev_row.get(dip_col) if isinstance(prev_row, dict) else None
+                prev_din_val = prev_row.get(din_col) if isinstance(prev_row, dict) else None
+
+                def _format_adx_component_line(label: str, curr_value: Any, prev_value: Any) -> str:
+                    """Return an ADX component line with value, absolute delta, and relative delta."""
+                    if _is_missing(curr_value):
+                        return ""
+
+                    delta_abs = None
+                    if not _is_missing(prev_value):
+                        try:
+                            delta_abs = float(curr_value) - float(prev_value)
+                        except Exception:
+                            delta_abs = None
+
+                    delta_pct = safe_pct_delta(curr_value, prev_value)
+
+                    suffix = ""
+                    if delta_abs is not None or delta_pct is not None:
+                        suffix = (
+                            f" ({format_signed_number(delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(delta_pct, decimals=1)}' if delta_pct is not None else ''})"
+                        )
+
+                    return f"{label}: {float(curr_value):.2f}{suffix}"
+
+                dip_line = _format_adx_component_line("+DI", dip_val, prev_dip_val)
+                if dip_line:
+                    parts.append(dip_line)
+
+                din_line = _format_adx_component_line("-DI", din_val, prev_din_val)
+                if din_line:
+                    parts.append(din_line)
+
+                spread_val = None
+                prev_spread_val = None
+
+                if not _is_missing(dip_val) and not _is_missing(din_val):
+                    try:
+                        spread_val = float(dip_val) - float(din_val)
+                    except Exception:
+                        spread_val = None
+
+                if not _is_missing(prev_dip_val) and not _is_missing(prev_din_val):
+                    try:
+                        prev_spread_val = float(prev_dip_val) - float(prev_din_val)
+                    except Exception:
+                        prev_spread_val = None
+
+                if spread_val is not None:
+                    spread_delta_abs = None
+                    if prev_spread_val is not None:
+                        try:
+                            spread_delta_abs = float(spread_val) - float(prev_spread_val)
+                        except Exception:
+                            spread_delta_abs = None
+
+                    spread_delta_pct = safe_pct_delta(spread_val, prev_spread_val)
+
+                    spread_suffix = ""
+                    if spread_delta_abs is not None or spread_delta_pct is not None:
+                        spread_suffix = (
+                            f" ({format_signed_number(spread_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(spread_delta_pct, decimals=1)}' if spread_delta_pct is not None else ''})"
+                        )
+
+                    parts.append(
+                        f"Spread: {format_signed_number(spread_val, decimals=2)}{spread_suffix}"
+                    )
+
+                if parts:
+                    adx_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
             # ----------------------------
             # Preformatted hover fragments ('Indicator'-row)
             # ----------------------------
@@ -1550,6 +1703,7 @@ def build_plotly_heatmap_inputs(
                     "band_context_block": band_context_block,
                     "ma_context_block": ma_context_block,
 					"macd_context_block": macd_context_block,
+                    "adx_context_block": adx_context_block,
                     "stoch_context_block": stoch_context_block, 
                     "dpo_context_block": dpo_context_block,
                     "bullbear_context_block": bullbear_context_block,
@@ -1597,6 +1751,7 @@ def make_rolling_heatmap_figure(
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
+        "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
