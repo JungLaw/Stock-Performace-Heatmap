@@ -1,4 +1,4 @@
-# Stamp: Sat, May 30, 2026 4:22PM
+# Stamp: Tue, June 2, 2026 10:57AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -48,6 +48,10 @@ from ui.rolling_heatmap_selection import (
     get_selection_modes,
     get_window_names,
     resolve_row_selection,
+)
+from ui.rolling_heatmap_adapter import (
+    INDICATOR_DEFS,
+    build_plotly_heatmap_inputs,
 )
 
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
@@ -710,6 +714,22 @@ def _render_scd_indicator_selection_controls() -> list[str]:
 
     return selected_row_keys
 
+def _get_scd_ohlcv_request(window_days: int = 10) -> Dict[str, Any]:
+    """
+    Return the Scenario B-style OHLCV request used by SCD.
+
+    This keeps the SCD rolling payload fetch and hover-context fetch aligned
+    with the existing Rolling Signal Heatmap Scenario B path.
+    """
+    return {
+        "mode": "rolling_heatmap_scenario_b",
+        "window_days": int(window_days),
+        "anchor_mode": "asof",
+        "anchor_date": None,
+        "historical_buffer_days": 435,
+    }
+
+
 def _fetch_scd_rolling_payload_for_ticker(
     *,
     ticker: str,
@@ -719,18 +739,9 @@ def _fetch_scd_rolling_payload_for_ticker(
     Fetch the existing Rolling Heatmap / Option-C rolling payload for one ticker.
 
     SCD must not call yfinance directly and must not create a new acquisition
-    path. This function delegates to the existing technical calculator path,
-    using Scenario B-style OHLCV request semantics.
+    path. This function delegates to the existing technical calculator path.
     """
     ticker = str(ticker).strip().upper()
-
-    ohlcv_request = {
-        "mode": "rolling_heatmap_scenario_b",
-        "window_days": int(window_days),
-        "anchor_mode": "asof",
-        "anchor_date": None,
-        "historical_buffer_days": 435,
-    }
 
     return st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
         ticker=ticker,
@@ -738,8 +749,103 @@ def _fetch_scd_rolling_payload_for_ticker(
         save_to_db=False,
         use_meta_coverage=True,
         return_type="rolling",
-        ohlcv_request=ohlcv_request,
+        ohlcv_request=_get_scd_ohlcv_request(window_days),
     )
+
+
+def _fetch_scd_hover_ohlcv_df_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+) -> Optional[pd.DataFrame]:
+    """
+    Fetch hover-only OHLCV / indicator context for adapter hover enrichment.
+
+    This mirrors the existing Rolling Signal Heatmap hover-context call.
+    It is display context only and does not create SCD-local scores,
+    rankings, aggregates, semantic labels, or persistence behavior.
+    """
+    ticker = str(ticker).strip().upper()
+
+    try:
+        return st.session_state.technical_calculator.calculate_optionc_indicators(
+            ticker=ticker,
+            save_to_db=False,
+            ohlcv_request=_get_scd_ohlcv_request(window_days),
+        )
+    except Exception:
+        return None
+
+
+def _normalize_scd_rolling_payload_for_adapter(
+    rolling_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Normalize the raw SCD rolling payload into the adapter contract.
+
+    The existing Rolling Signal Heatmap does this before calling
+    build_plotly_heatmap_inputs(...). SCD must do the same because the adapter
+    expects dates + rows[row_key].values/scores/hover/extras, not the raw
+    short_term.data[date][row_key] structure.
+    """
+    return _extract_rolling_signals_from_data({"rolling_signals": rolling_payload})
+
+
+def _build_scd_adapter_lookup(
+    *,
+    rolling_payload: Dict[str, Any],
+    row_keys: list[str],
+    ohlcv_df: Optional[pd.DataFrame] = None,
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """
+    Build adapter-owned display metadata by row_key and raw date.
+
+    Shape:
+        lookup[row_key][raw_date] = {
+            "customdata": adapter customdata dict,
+            "text": adapter in-cell text,
+            "z": adapter score/color value,
+        }
+
+    This is the only SCD bridge into the Rolling Heatmap adapter display
+    contract. It normalizes the raw payload before adapter use.
+    """
+    lookup: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    adapter_payload = _normalize_scd_rolling_payload_for_adapter(rolling_payload)
+
+    try:
+        hm = build_plotly_heatmap_inputs(
+            rolling_payload=adapter_payload,
+            indicator_keys=row_keys,
+            indicator_defs=INDICATOR_DEFS,
+            ohlcv_df=ohlcv_df,
+        )
+    except Exception:
+        return lookup
+
+    for row_idx, row_key in enumerate(hm.row_keys):
+        lookup.setdefault(row_key, {})
+
+        customdata_row = hm.customdata[row_idx] if row_idx < len(hm.customdata) else []
+        text_row = hm.text[row_idx] if row_idx < len(hm.text) else []
+        z_row = hm.z[row_idx] if row_idx < len(hm.z) else []
+
+        for col_idx, adapter_cd in enumerate(customdata_row):
+            if not isinstance(adapter_cd, dict):
+                continue
+
+            raw_date = adapter_cd.get("date")
+            if raw_date is None:
+                continue
+
+            lookup[row_key][str(raw_date)] = {
+                "customdata": dict(adapter_cd),
+                "text": text_row[col_idx] if col_idx < len(text_row) else "",
+                "z": z_row[col_idx] if col_idx < len(z_row) else None,
+            }
+
+    return lookup
 
 
 def _extract_latest_scd_cell(
@@ -747,20 +853,53 @@ def _extract_latest_scd_cell(
     ticker: str,
     row_key: str,
     rolling_payload: Dict[str, Any],
+    adapter_lookup: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     """
-    Extract the latest available existing Rolling Heatmap cell for row_key.
+    Extract the latest available SCD matrix cell for row_key.
 
-    Cell identity:
-        ticker + row_key + latest available rolling payload date
-
-    This preserves existing value / signal / score / hover / extras where
-    available and does not compute new scores or semantic labels.
+    Indicator rows preserve existing value / signal / score / hover / extras
+    from the raw rolling payload. Display text and rich hover metadata are
+    consumed from the normalized adapter path when available.
     """
     ticker = str(ticker).strip().upper()
     row_key = str(row_key).strip()
-
     dates = list(rolling_payload.get("dates", []))
+    adapter_lookup = adapter_lookup or {}
+
+    if row_key == "__PRICE__":
+        for date_key in reversed(dates):
+            adapter_entry = adapter_lookup.get("__PRICE__", {}).get(str(date_key), {})
+            adapter_cd = adapter_entry.get("customdata")
+
+            if not isinstance(adapter_cd, dict) or not adapter_cd:
+                continue
+
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": adapter_cd.get("raw_value"),
+                "signal": "",
+                "score": adapter_entry.get("z"),
+                "hover": None,
+                "status": "ok",
+                "display_text": adapter_entry.get("text", ""),
+                "adapter_customdata": dict(adapter_cd),
+            }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": dates[-1] if dates else None,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No Price row available for {ticker}.",
+            "status": "missing_cell",
+            "display_text": "missing_cell",
+        }
+
     short_term = rolling_payload.get("short_term")
     data = short_term.get("data", {}) if isinstance(short_term, dict) else {}
 
@@ -773,6 +912,9 @@ def _extract_latest_scd_cell(
         if not isinstance(source_cell, dict):
             continue
 
+        adapter_entry = adapter_lookup.get(row_key, {}).get(str(date_key), {})
+        adapter_cd = adapter_entry.get("customdata")
+
         cell = {
             "ticker": ticker,
             "row_key": row_key,
@@ -782,10 +924,14 @@ def _extract_latest_scd_cell(
             "score": source_cell.get("score"),
             "hover": source_cell.get("hover"),
             "status": "ok",
+            "display_text": adapter_entry.get("text", ""),
         }
 
         if "extras" in source_cell:
             cell["extras"] = source_cell.get("extras")
+
+        if isinstance(adapter_cd, dict) and adapter_cd:
+            cell["adapter_customdata"] = dict(adapter_cd)
 
         return cell
 
@@ -798,6 +944,7 @@ def _extract_latest_scd_cell(
         "score": None,
         "hover": f"No latest cell available for {row_key} on {ticker}.",
         "status": "missing_cell",
+        "display_text": "missing_cell",
     }
 
 
@@ -817,7 +964,16 @@ def _build_scd_cross_sectional_matrix(
     compute new scores, rank tickers, aggregate signals, or reinterpret meaning.
     """
     tickers = _dedupe_preserve_order_str(selected_tickers)
-    row_keys = [str(row_key).strip() for row_key in selected_row_keys if str(row_key).strip()]
+    selected_row_keys_clean = [
+        str(row_key).strip()
+        for row_key in selected_row_keys
+        if str(row_key).strip()
+    ]
+
+    row_keys = ["__PRICE__"] + [
+        row_key for row_key in selected_row_keys_clean
+        if row_key != "__PRICE__"
+    ]
 
     matrix = {
         "status": "ok",
@@ -834,7 +990,7 @@ def _build_scd_cross_sectional_matrix(
         matrix["errors"].append("No SCD tickers selected.")
         return matrix
 
-    if not row_keys:
+    if not selected_row_keys_clean:
         matrix["status"] = "empty"
         matrix["errors"].append("No SCD indicator row keys selected.")
         return matrix
@@ -861,6 +1017,7 @@ def _build_scd_cross_sectional_matrix(
                         "score": None,
                         "hover": f"No rolling payload returned for {ticker}.",
                         "status": "missing_payload",
+                        "display_text": "missing_payload",
                     }
                 continue
 
@@ -873,11 +1030,23 @@ def _build_scd_cross_sectional_matrix(
                 "latest_date": payload_dates[-1] if payload_dates else None,
             }
 
+            hover_ohlcv_df = _fetch_scd_hover_ohlcv_df_for_ticker(
+                ticker=ticker,
+                window_days=window_days,
+            )
+
+            adapter_lookup = _build_scd_adapter_lookup(
+                rolling_payload=rolling_payload,
+                row_keys=selected_row_keys_clean,
+                ohlcv_df=hover_ohlcv_df,
+            )
+
             for row_key in row_keys:
                 matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
                     ticker=ticker,
                     row_key=row_key,
                     rolling_payload=rolling_payload,
+                    adapter_lookup=adapter_lookup,
                 )
 
         except Exception as e:
@@ -898,22 +1067,258 @@ def _build_scd_cross_sectional_matrix(
                     "score": None,
                     "hover": f"Error fetching rolling payload for {ticker}: {e}",
                     "status": "error",
+                    "display_text": "error",
                 }
 
     return matrix
 
 
-def _render_scd_matrix_debug_view(matrix: Optional[Dict[str, Any]]) -> None:
+def _get_scd_row_display_name(row_key: str) -> str:
     """
-    Render a WS4 debug/audit view of the internal SCD matrix.
+    Return the adapter-owned display label for a canonical SCD row_key.
+    """
+    if row_key == "__PRICE__":
+        return "Price"
 
-    Final Plotly heatmap and detail table rendering belong to WS5.
+    row_def = INDICATOR_DEFS.get(row_key, {})
+    return row_def.get("display_name", row_key)
+
+
+def _format_scd_heatmap_text(row_key: str, cell: Dict[str, Any]) -> str:
+    """
+    Return adapter-produced in-cell text.
+
+    SCD does not append signal labels below values. The Rolling Heatmap adapter
+    owns cell display formatting.
+    """
+    if cell.get("status") != "ok":
+        return str(cell.get("status", ""))
+
+    display_text = cell.get("display_text")
+    if display_text:
+        return str(display_text)
+
+    value = cell.get("value")
+    if value is None:
+        return ""
+
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _build_scd_hover_customdata(
+    *,
+    ticker: str,
+    row_key: str,
+    cell: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build SCD heatmap customdata from adapter-owned hover fields.
+
+    The adapter supplies the Rolling Signal Heatmap hover contract. SCD adds
+    only cross-sectional identity and the original raw payload hover line.
+    """
+    adapter_cd = cell.get("adapter_customdata")
+    custom = dict(adapter_cd) if isinstance(adapter_cd, dict) else {}
+
+    custom.setdefault("indicator_key", row_key)
+    custom.setdefault("display_name", _get_scd_row_display_name(row_key))
+    custom.setdefault("date", cell.get("date"))
+    custom.setdefault("raw_value", cell.get("value"))
+    custom.setdefault("formatted_value", cell.get("display_text") or "")
+    custom.setdefault("score", cell.get("score"))
+    custom.setdefault("score_label", cell.get("signal"))
+
+    for key in [
+        "ma_context_block",
+        "delta_abs_fmt",
+        "delta_pct_suffix",
+        "trend_line",
+        "signal_line",
+        "macd_context_block",
+        "stoch_context_block",
+        "dpo_context_block",
+        "bullbear_context_block",
+        "rule_block",
+        "notes_block",
+        "definition_block",
+        "how_to_read_block",
+        "band_context_block",
+        "volume_block",
+        "volume_vs_avg_block",
+    ]:
+        custom.setdefault(key, "")
+
+    custom["ticker"] = ticker
+    custom["row_key"] = row_key
+    custom["status"] = cell.get("status")
+
+    payload_hover = cell.get("hover")
+    custom["scd_payload_hover_block"] = (
+        f"<br>{payload_hover}" if payload_hover else ""
+    )
+
+    return custom
+
+
+def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
+    """
+    Build the SCD Plotly Heatmap View from the already-built SCD matrix.
+    """
+    tickers = list(matrix.get("tickers", []))
+    row_keys = list(matrix.get("row_keys", []))
+    cells = matrix.get("cells", {})
+
+    y_labels = [_get_scd_row_display_name(row_key) for row_key in row_keys]
+    z = []
+    text = []
+    customdata = []
+
+    for row_key in row_keys:
+        z_row = []
+        text_row = []
+        custom_row = []
+
+        for ticker in tickers:
+            cell = cells.get(row_key, {}).get(ticker, {})
+            score = cell.get("score")
+
+            try:
+                z_row.append(float(score) if score is not None else None)
+            except (TypeError, ValueError):
+                z_row.append(None)
+
+            text_row.append(_format_scd_heatmap_text(row_key, cell))
+            custom_row.append(
+                _build_scd_hover_customdata(
+                    ticker=ticker,
+                    row_key=row_key,
+                    cell=cell,
+                )
+            )
+
+        z.append(z_row)
+        text.append(text_row)
+        customdata.append(custom_row)
+
+    colorscale = [
+        [0.0, "#8B0000"],   # strong sell
+        [0.25, "#CD5C5C"],  # sell
+        [0.5, "#D3D3D3"],   # neutral
+        [0.75, "#90EE90"],  # buy
+        [1.0, "#006400"],   # strong buy
+    ]
+
+    hovertemplate = (
+        "<b>%{customdata.display_name}</b><br>"
+        "Ticker: %{customdata.ticker}<br>"
+        "Date: %{customdata.date}<br>"
+        "<br>"
+        "Value: %{customdata.formatted_value}<br>"
+        "%{customdata.ma_context_block}"
+        "Δ vs prior day: %{customdata.delta_abs_fmt}"
+        "%{customdata.delta_pct_suffix}<br>"
+        "%{customdata.trend_line}"
+        "%{customdata.signal_line}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.stoch_context_block}"
+        "%{customdata.dpo_context_block}"
+        "%{customdata.bullbear_context_block}"
+        "%{customdata.rule_block}"
+        "%{customdata.notes_block}"
+        "%{customdata.definition_block}"
+        "%{customdata.how_to_read_block}"
+        "%{customdata.band_context_block}"
+        "%{customdata.volume_block}"
+        "%{customdata.volume_vs_avg_block}"
+        "%{customdata.scd_payload_hover_block}"
+        "<extra></extra>"
+    )
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=tickers,
+            y=y_labels,
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=colorscale,
+            zmin=-2,
+            zmax=2,
+            hovertemplate=hovertemplate,
+            colorbar=dict(title="Score"),
+        )
+    )
+
+    row_count = max(len(y_labels), 1)
+    dynamic_height = max(450, 30 * row_count + 160)
+
+    fig.update_layout(
+        title="",
+        margin=dict(l=170, r=20, t=30, b=40),
+        height=dynamic_height,
+    )
+
+    fig.update_xaxes(side="top", type="category")
+    fig.update_yaxes(
+        autorange="reversed",
+        automargin=True,
+        tickfont=dict(size=11),
+    )
+
+    return fig
+
+
+def _build_scd_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Build the SCD Detail Table View from the same matrix cells as the heatmap.
+    """
+    rows = []
+    cells = matrix.get("cells", {})
+
+    for row_key in matrix.get("row_keys", []):
+        display_name = _get_scd_row_display_name(row_key)
+
+        for ticker in matrix.get("tickers", []):
+            cell = cells.get(row_key, {}).get(ticker, {})
+            adapter_cd = cell.get("adapter_customdata")
+            formatted_value = ""
+            if isinstance(adapter_cd, dict):
+                formatted_value = adapter_cd.get("formatted_value", "")
+
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "row_key": row_key,
+                    "display_name": display_name,
+                    "date": cell.get("date"),
+                    "value": cell.get("value"),
+                    "formatted_value": formatted_value or cell.get("display_text"),
+                    "signal": cell.get("signal"),
+                    "score": cell.get("score"),
+                    "status": cell.get("status"),
+                    "hover": cell.get("hover"),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def _render_scd_matrix_view(matrix: Optional[Dict[str, Any]]) -> None:
+    """
+    Render the SCD Plotly Heatmap View and Detail Table View.
+
+    This consumes the existing SCD matrix. It does not trigger payload
+    execution and does not compute new numeric or semantic truth.
     """
     if not matrix:
         st.info("No SCD matrix has been built yet.")
         return
 
-    st.subheader("3) Cross-Sectional Signal Matrix — WS4 Debug View")
+    st.subheader("3) SCD Cross-Sectional Matrix View")
 
     st.write("Matrix status:", matrix.get("status"))
     st.write("Tickers:", matrix.get("tickers", []))
@@ -923,36 +1328,82 @@ def _render_scd_matrix_debug_view(matrix: Optional[Dict[str, Any]]) -> None:
         st.warning("Some ticker payloads produced errors.")
         st.write(matrix.get("errors"))
 
+    st.markdown("#### SCD Plotly Heatmap View")
+    fig = _build_scd_heatmap_figure(matrix)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### SCD Detail Table View")
+    detail_df = _build_scd_detail_table(matrix)
+
+    if detail_df.empty:
+        st.info("No SCD detail rows available.")
+    else:
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        csv = detail_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download SCD Detail Table CSV",
+            data=csv,
+            file_name="scd_detail_table.csv",
+            mime="text/csv",
+            key="scd_detail_table_csv_download",
+        )
+
     with st.expander("Ticker payload status", expanded=False):
         st.json(matrix.get("ticker_status", {}))
 
-    preview_rows = []
-    for row_key in matrix.get("row_keys", []):
-        row = {"row_key": row_key}
-        for ticker in matrix.get("tickers", []):
-            cell = matrix.get("cells", {}).get(row_key, {}).get(ticker, {})
-            value = cell.get("value")
-            signal = cell.get("signal")
-            score = cell.get("score")
-            date = cell.get("date")
+    with st.expander("Raw SCD matrix payload", expanded=False):
+        st.json(matrix)
 
-            if cell.get("status") != "ok":
-                row[ticker] = cell.get("status")
-            elif value is None:
-                row[ticker] = f"{signal} | score={score} | {date}"
-            else:
-                try:
-                    row[ticker] = f"{float(value):.2f} | {signal} | score={score} | {date}"
-                except (TypeError, ValueError):
-                    row[ticker] = f"{value} | {signal} | score={score} | {date}"
 
-        preview_rows.append(row)
+def _render_scd_matrix_view(matrix: Optional[Dict[str, Any]]) -> None:
+    """
+    Render the WS5 SCD Plotly Heatmap View and Detail Table View.
 
-    if preview_rows:
-        st.dataframe(pd.DataFrame(preview_rows), use_container_width=True)
+    This consumes the existing SCD matrix. It does not trigger payload
+    execution and does not compute new numeric or semantic truth.
+    """
+    if not matrix:
+        st.info("No SCD matrix has been built yet.")
+        return
+
+    st.subheader("3) SCD Cross-Sectional Matrix View")
+
+    st.write("Matrix status:", matrix.get("status"))
+    st.write("Tickers:", matrix.get("tickers", []))
+    st.write("Indicator row keys:", matrix.get("row_keys", []))
+
+    if matrix.get("errors"):
+        st.warning("Some ticker payloads produced errors.")
+        st.write(matrix.get("errors"))
+
+    st.markdown("#### SCD Plotly Heatmap View")
+    fig = _build_scd_heatmap_figure(matrix)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### SCD Detail Table View")
+    detail_df = _build_scd_detail_table(matrix)
+
+    if detail_df.empty:
+        st.info("No SCD detail rows available.")
+    else:
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        csv = detail_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download SCD Detail Table CSV",
+            data=csv,
+            file_name="scd_detail_table.csv",
+            mime="text/csv",
+            key="scd_detail_table_csv_download",
+        )
+
+    with st.expander("Ticker payload status", expanded=False):
+        st.json(matrix.get("ticker_status", {}))
 
     with st.expander("Raw SCD matrix payload", expanded=False):
         st.json(matrix)
+
         
 def is_final_data_available_for_date(target_date: datetime) -> bool:
     """
@@ -3351,9 +3802,9 @@ def show_stock_comparison_dashboard():
     if st.session_state.scd_matrix_last_run:
         st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
 
-    _render_scd_matrix_debug_view(st.session_state.scd_signal_matrix)
+    _render_scd_matrix_view(st.session_state.scd_signal_matrix)
 
-    with st.expander("WS4 status", expanded=False):
+    with st.expander("WS5 status", expanded=False):
         st.write("Completed through this workstream:")
         st.markdown(
             """
@@ -3365,21 +3816,29 @@ def show_stock_comparison_dashboard():
             - SCD indicator-selection controls using the existing Rolling Heatmap resolver
             - SCD rolling payload execution through the existing Option-C rule-engine path
             - SCD latest-cell cross-sectional matrix assembly
+            - SCD Plotly Heatmap View
+            - SCD Detail Table View
             """
         )
         st.write("Selected tickers:", selected_tickers)
         st.write("Selected indicator row keys:", selected_row_keys)
 
-        st.write("Deferred to later workstreams:")
+        st.write("Still out of scope for SCD v1:")
         st.markdown(
             """
-            - WS5: SCD Plotly Heatmap View and SCD Detail Table View
+            - ticker ranking
+            - aggregate technical strength score
+            - relative within-selected-tickers color mode
+            - new semantic scoring
+            - new rulebook thresholds
+            - new numeric formulas
+            - new persistence behavior
             """
         )
 
     st.info(
-        "WS4 builds the internal latest-cell matrix only. Final SCD Plotly Heatmap "
-        "and Detail Table rendering will be added in WS5."
+        "WS5 renders the SCD heatmap and detail table from the existing latest-cell "
+        "matrix. It does not introduce ranking, aggregation, or relative color logic."
     )
 
 def main():
