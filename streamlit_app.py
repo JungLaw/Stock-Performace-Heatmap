@@ -1,4 +1,4 @@
-# Stamp: Tue, June 2, 2026 1:50PM
+# Stamp: Thu, June 4, 2026 4:57PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -21,7 +21,10 @@ src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import our modules
-from calculations.performance import DatabaseIntegratedPerformanceCalculator
+from calculations.performance import (
+    DatabaseIntegratedPerformanceCalculator,
+    get_last_completed_trading_day,
+)
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
@@ -193,7 +196,16 @@ def initialize_session_state():
     if 'scd_matrix_last_run' not in st.session_state:
         st.session_state.scd_matrix_last_run = None
 
-    # Stock Comparison Dashboard v1 session cache.
+    # Stock Comparison Dashboard v1: Date-anchor controls
+    # These are display/request controls only. They do not create a new
+    # acquisition path, scoring path, or persistence behavior.
+    if 'scd_use_anchor_date' not in st.session_state:
+        st.session_state.scd_use_anchor_date = False
+
+    if 'scd_anchor_date' not in st.session_state:
+        st.session_state.scd_anchor_date = datetime.now().date()
+
+    # Stock Comparison Dashboard v1: Session Cache.
     # Session-only transport cache for expensive per-ticker SCD payloads.
     # This must not introduce DB persistence, new acquisition behavior, ranking,
     # aggregation, or semantic reinterpretation.
@@ -734,18 +746,50 @@ def _render_scd_indicator_selection_controls() -> list[str]:
 
     return selected_row_keys
 
-def _get_scd_ohlcv_request(window_days: int = 10) -> Dict[str, Any]:
+def _resolve_scd_effective_anchor_date(
+    *,
+    use_anchor_date: bool,
+    selected_anchor_date: Optional[Any],
+) -> Any:
     """
-    Return the Scenario B-style OHLCV request used by SCD.
+    Resolve the comparison dashboard snapshot date used for request/cache identity.
 
-    This keeps the SCD rolling payload fetch and hover-context fetch aligned
-    with the existing Rolling Signal Heatmap Scenario B path.
+    Explicit date mode preserves the user-selected date.
+
+    Latest/default mode resolves to the existing app-wide last completed trading
+    day. This prevents the default latest snapshot from being cached under
+    anchor_date=None while the same date selected explicitly is cached under a
+    concrete date object.
+    """
+    if use_anchor_date and selected_anchor_date is not None:
+        return selected_anchor_date
+
+    latest_completed = get_last_completed_trading_day()
+
+    if isinstance(latest_completed, datetime):
+        return latest_completed.date()
+
+    try:
+        return pd.Timestamp(latest_completed).date()
+    except Exception:
+        return latest_completed
+
+def _get_scd_ohlcv_request(
+    window_days: int = 10,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Return the Scenario B-style OHLCV request used by the comparison dashboard.
+
+    The comparison view is a latest-cell cross-section, so its date control is
+    intentionally fixed to as-of semantics. A provided anchor_date asks the
+    existing Scenario B path to build the snapshot as of that date.
     """
     return {
         "mode": "rolling_heatmap_scenario_b",
         "window_days": int(window_days),
         "anchor_mode": "asof",
-        "anchor_date": None,
+        "anchor_date": anchor_date,
         "historical_buffer_days": 435,
     }
 
@@ -754,18 +798,23 @@ def _get_scd_cache_key(
     ticker: str,
     window_days: int,
     payload_kind: str,
+    anchor_date: Optional[Any] = None,
 ) -> tuple:
     """
-    Return a deterministic SCD session-cache key.
+    Return a deterministic comparison dashboard session-cache key.
 
     Cache identity is based on:
     - payload kind
     - ticker
-    - the Scenario B-style SCD OHLCV request signature
+    - the Scenario B-style OHLCV request signature
 
-    This is session-only cache identity. It is not persistence.
+    Including anchor_date in the request signature prevents cached data for one
+    snapshot date from being reused for another snapshot date.
     """
-    request = _get_scd_ohlcv_request(window_days)
+    request = _get_scd_ohlcv_request(
+        window_days=window_days,
+        anchor_date=anchor_date,
+    )
     request_signature = tuple(
         sorted((str(key), repr(value)) for key, value in request.items())
     )
@@ -816,6 +865,7 @@ def _fetch_scd_rolling_payload_for_ticker(
     ticker: str,
     window_days: int = 10,
     force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Fetch the existing Rolling Heatmap / Option-C rolling payload for one ticker.
@@ -835,6 +885,7 @@ def _fetch_scd_rolling_payload_for_ticker(
         ticker=ticker,
         window_days=window_days,
         payload_kind="rolling_payload",
+        anchor_date=anchor_date,
     )
 
     if not force_refresh and cache_key in st.session_state.scd_payload_cache:
@@ -849,7 +900,10 @@ def _fetch_scd_rolling_payload_for_ticker(
         save_to_db=False,
         use_meta_coverage=True,
         return_type="rolling",
-        ohlcv_request=_get_scd_ohlcv_request(window_days),
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+        ),
     )
 
     if isinstance(payload, dict) and payload:
@@ -863,6 +917,7 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
     ticker: str,
     window_days: int = 10,
     force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
     """
     Fetch hover-only OHLCV / indicator context for adapter hover enrichment.
@@ -883,6 +938,7 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
         ticker=ticker,
         window_days=window_days,
         payload_kind="hover_ohlcv",
+        anchor_date=anchor_date,
     )
 
     if not force_refresh and cache_key in st.session_state.scd_hover_ohlcv_cache:
@@ -896,7 +952,10 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
         hover_df = st.session_state.technical_calculator.calculate_optionc_indicators(
             ticker=ticker,
             save_to_db=False,
-            ohlcv_request=_get_scd_ohlcv_request(window_days),
+            ohlcv_request=_get_scd_ohlcv_request(
+                window_days=window_days,
+                anchor_date=anchor_date,
+            ),
         )
 
         if isinstance(hover_df, pd.DataFrame) and not hover_df.empty:
@@ -1085,6 +1144,7 @@ def _build_scd_cross_sectional_matrix(
     selected_row_keys: list[str],
     window_days: int = 10,
     force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Build the SCD latest-cell cross-sectional matrix.
@@ -1110,6 +1170,8 @@ def _build_scd_cross_sectional_matrix(
     matrix = {
         "status": "ok",
         "window_days": int(window_days),
+        "anchor_mode": "asof",
+        "anchor_date": anchor_date,
         "tickers": tickers,
         "row_keys": row_keys,
         "cells": {row_key: {} for row_key in row_keys},
@@ -1133,6 +1195,7 @@ def _build_scd_cross_sectional_matrix(
                 ticker=ticker,
                 window_days=window_days,
                 force_refresh=force_refresh,
+                anchor_date=anchor_date,
             )
 
             if not isinstance(rolling_payload, dict) or not rolling_payload:
@@ -1167,6 +1230,7 @@ def _build_scd_cross_sectional_matrix(
                 ticker=ticker,
                 window_days=window_days,
                 force_refresh=force_refresh,
+                anchor_date=anchor_date,
             )
 
             adapter_lookup = _build_scd_adapter_lookup(
@@ -1445,51 +1509,62 @@ def _build_scd_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
 
 def _render_scd_matrix_view(matrix: Optional[Dict[str, Any]]) -> None:
     """
-    Render the WS5 SCD Plotly Heatmap View and Detail Table View.
+    Render the Stock Comparison heatmap, detail table, and diagnostics.
 
-    This consumes the existing SCD matrix. It does not trigger payload
-    execution and does not compute new numeric or semantic truth.
+    This consumes the existing matrix. It does not trigger payload execution
+    and does not compute new numeric or semantic truth.
     """
     if not matrix:
-        st.info("No SCD matrix has been built yet.")
+        st.info("No comparison matrix has been built yet.")
         return
-
-    st.subheader("3) SCD Cross-Sectional Matrix View")
-
-    st.write("Matrix status:", matrix.get("status"))
-    st.write("Tickers:", matrix.get("tickers", []))
-    st.write("Indicator row keys:", matrix.get("row_keys", []))
 
     if matrix.get("errors"):
         st.warning("Some ticker payloads produced errors.")
-        st.write(matrix.get("errors"))
+        with st.expander("View ticker errors", expanded=False):
+            st.write(matrix.get("errors"))
 
-    st.markdown("#### SCD Plotly Heatmap View")
+        with st.expander("Ticker payload status", expanded=False):
+            st.json(matrix.get("ticker_status", {}))
+
     fig = _build_scd_heatmap_figure(matrix)
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("#### SCD Detail Table View")
-    detail_df = _build_scd_detail_table(matrix)
+    snapshot_date = matrix.get("anchor_date") or "Latest available completed snapshot"
+    ticker_count = len(matrix.get("tickers", []))
+    row_count = len(matrix.get("row_keys", []))
+    st.caption(
+        f"Snapshot date: {snapshot_date} | "
+        f"Tickers: {ticker_count} | "
+        f"Indicator rows: {row_count}"
+    )
 
-    if detail_df.empty:
-        st.info("No SCD detail rows available.")
-    else:
-        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+    show_detail_export = st.checkbox(
+        "Show Details / Export",
+        value=False,
+        key="scd_show_detail_export",
+        help=(
+            "Build and display the detail table only when needed for audit, "
+            "copy/export, or validation."
+        ),
+    )
 
-        csv = detail_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "Download SCD Detail Table CSV",
-            data=csv,
-            file_name="scd_detail_table.csv",
-            mime="text/csv",
-            key="scd_detail_table_csv_download",
-        )
+    if show_detail_export:
+        with st.expander("Details / Export", expanded=True):
+            detail_df = _build_scd_detail_table(matrix)
 
-    with st.expander("Ticker payload status", expanded=False):
-        st.json(matrix.get("ticker_status", {}))
+            if detail_df.empty:
+                st.info("No detail rows available.")
+            else:
+                st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
-    with st.expander("Raw SCD matrix payload", expanded=False):
-        st.json(matrix)
+                csv = detail_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Download Detail Table CSV",
+                    data=csv,
+                    file_name="stock_comparison_detail_table.csv",
+                    mime="text/csv",
+                    key="scd_detail_table_csv_download",
+                )
 
         
 def is_final_data_available_for_date(target_date: datetime) -> bool:
@@ -3843,32 +3918,59 @@ def show_stock_comparison_dashboard():
 
     selected_tickers = _render_scd_ticker_controls()
 
-    st.subheader("1) Selected Ticker Set")
-    st.info("Use the sidebar to choose the SCD ticker source, add/remove tickers, and set the selected ticker cap.")
-    st.write("Selected tickers:", selected_tickers)
+    if selected_tickers:
+        st.caption(
+            f"Selected tickers: {len(selected_tickers)} — "
+            + ", ".join(selected_tickers)
+        )
+    else:
+        st.info("Choose at least one ticker in the sidebar.")
 
     selected_row_keys = _render_scd_indicator_selection_controls()
 
-    st.subheader("3) Build Cross-Sectional Signal Matrix")
+    st.subheader("Build Comparison Matrix")
+
+    st.checkbox(
+        "Use specific as-of date",
+        key="scd_use_anchor_date",
+        help=(
+            "Use this to build the comparison as of a selected date instead of "
+            "the latest available completed snapshot. If the selected date is not "
+            "a trading day, the existing data path resolves to the nearest valid "
+            "trading day according to the current date-handling rules."
+        ),
+    )
+
+    use_anchor_date = bool(st.session_state.get("scd_use_anchor_date", False))
+
+    selected_anchor_date = None
+    if use_anchor_date:
+        st.date_input(
+            "As-of date",
+            key="scd_anchor_date",
+            help=(
+                "Choose the date for the comparison snapshot. Selecting today is "
+                "allowed, but values may depend on what data is available for the "
+                "current session."
+            ),
+        )
+        selected_anchor_date = st.session_state.get("scd_anchor_date")
+
+    effective_anchor_date = _resolve_scd_effective_anchor_date(
+        use_anchor_date=use_anchor_date,
+        selected_anchor_date=selected_anchor_date,
+    )
+
+    if use_anchor_date:
+        st.caption(f"Snapshot date: {effective_anchor_date}")
+    else:
+        st.caption(f"Snapshot date: Latest available completed snapshot ({effective_anchor_date})")
 
     can_build_matrix = bool(selected_tickers) and bool(selected_row_keys)
     if not can_build_matrix:
         st.info("Select at least one ticker and one indicator row to build the SCD matrix.")
 
-    # Button: Recalculate tickers
-    force_refresh_cache = st.checkbox(
-        "Recalculate selected tickers on next build",
-        value=False,
-        key="scd_force_refresh_cache",
-        help=(
-            "Use this when you want the currently selected tickers recalculated "
-            "instead of reused from this session's saved results. This only refreshes "
-            "the tickers currently selected. Other cached tickers are kept. For a full "
-            "reset of all saved ticker data, use Clear Cache."
-        ),
-    )
-
-    col_build, col_clear_matrix, col_clear_cache = st.columns([0.35, 0.32, 0.33])
+    col_build, col_clear_matrix = st.columns([0.45, 0.55])
 
     with col_build:
         build_clicked = st.button(
@@ -3879,7 +3981,6 @@ def show_stock_comparison_dashboard():
             use_container_width=True,
         )
 
-    # Button: Clear results
     with col_clear_matrix:
         if st.button(
             "Clear Results",
@@ -3895,29 +3996,8 @@ def show_stock_comparison_dashboard():
             st.session_state.scd_matrix_last_run = None
             st.rerun()
 
-    cache_is_empty = (
-        not st.session_state.get("scd_payload_cache")
-        and not st.session_state.get("scd_hover_ohlcv_cache")
-    )
-
-    # Button: Clear cache
-    with col_clear_cache:
-        if st.button(
-            "Clear Cache",
-            key="scd_clear_cache",
-            disabled=cache_is_empty,
-            use_container_width=True,
-            help=(
-                "Clears all saved ticker data from this app session. The next build "
-                "will recalculate the selected tickers from scratch. Use this when "
-                "you want a full reset, not just a refresh of the currently selected tickers."
-            ),
-        ):
-            _clear_scd_session_cache()
-            st.rerun()
-
     if build_clicked:
-        # Read from Session State at build time so the force-refresh value used
+        # Read from Session State at build time so the recalculation value used
         # by the matrix builder matches the active widget state for this run.
         force_refresh_for_build = bool(
             st.session_state.get("scd_force_refresh_cache", False)
@@ -3926,68 +4006,64 @@ def show_stock_comparison_dashboard():
         if force_refresh_for_build:
             _get_scd_cache_stats()["force_refreshes"] += 1
 
-        with st.spinner("Building SCD matrix from existing Rolling Heatmap payloads..."):
+        with st.spinner("Building comparison matrix from existing rolling signal data..."):
             st.session_state.scd_signal_matrix = _build_scd_cross_sectional_matrix(
                 selected_tickers=selected_tickers,
                 selected_row_keys=selected_row_keys,
                 window_days=10,
                 force_refresh=force_refresh_for_build,
+                anchor_date=effective_anchor_date,
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
-
-    cache_stats = _get_scd_cache_stats()
-    st.caption(
-        "Cache status: "
-        f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
-        f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s). "
-        f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-        f"hover={cache_stats.get('hover_hits', 0)}. "
-        f"Recalculated: rolling={cache_stats.get('rolling_misses', 0)}, "
-        f"hover={cache_stats.get('hover_misses', 0)}. "
-        f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
-    )
-
+     
     if st.session_state.scd_matrix_last_run:
         st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
 
     _render_scd_matrix_view(st.session_state.scd_signal_matrix)
 
-    with st.expander("WS5 status", expanded=False):
-        st.write("Completed through this workstream:")
-        st.markdown(
-            """
-            - SCD-specific ticker source control
-            - SCD curated default ticker-set initialization
-            - SCD-only selected ticker state
-            - Temporary SCD ticker additions
-            - Default selected ticker cap of 10
-            - SCD indicator-selection controls using the existing Rolling Heatmap resolver
-            - SCD rolling payload execution through the existing Option-C rule-engine path
-            - SCD latest-cell cross-sectional matrix assembly
-            - SCD Plotly Heatmap View
-            - SCD Detail Table View
-            """
-        )
-        st.write("Selected tickers:", selected_tickers)
-        st.write("Selected indicator row keys:", selected_row_keys)
-
-        st.write("Still out of scope for SCD v1:")
-        st.markdown(
-            """
-            - ticker ranking
-            - aggregate technical strength score
-            - relative within-selected-tickers color mode
-            - new semantic scoring
-            - new rulebook thresholds
-            - new numeric formulas
-            - new persistence behavior
-            """
+    with st.expander("Advanced options", expanded=False):
+        st.checkbox(
+            "Recalculate selected tickers on next build",
+            key="scd_force_refresh_cache",
+            help=(
+                "Use this when you want the currently selected tickers recalculated "
+                "instead of reused from this session's saved results. This only refreshes "
+                "the tickers currently selected. Other cached tickers are kept. For a full "
+                "reset of all saved ticker data, use Clear Cache."
+            ),
         )
 
-    st.info(
-        "WS5 renders the SCD heatmap and detail table from the existing latest-cell "
-        "matrix. It does not introduce ranking, aggregation, or relative color logic."
-    )
+        cache_is_empty = (
+            not st.session_state.get("scd_payload_cache")
+            and not st.session_state.get("scd_hover_ohlcv_cache")
+        )
+
+        if st.button(
+            "Clear Cache",
+            key="scd_clear_cache",
+            disabled=cache_is_empty,
+            use_container_width=True,
+            help=(
+                "Clears all saved ticker data from this app session. The next build "
+                "will calculate the selected tickers from scratch. Use this when "
+                "you want a full reset, not just a refresh of the currently selected tickers."
+            ),
+        ):
+            _clear_scd_session_cache()
+            st.rerun()
+
+    with st.expander("Cache status", expanded=False):
+        cache_stats = _get_scd_cache_stats()
+        st.caption(
+            "Cache status after latest build: "
+            f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
+            f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s). "
+            f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
+            f"hover={cache_stats.get('hover_hits', 0)}. "
+            f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
+            f"hover={cache_stats.get('hover_misses', 0)}. "
+            f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
+        )
 
 def main():
     """Main application function with page navigation"""
