@@ -1,4 +1,4 @@
-# Stamp: Thu, June 4, 2026 4:57PM
+# Stamp: Fri, June 5, 2026 6:37PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -9,6 +9,7 @@ Run with: streamlit run streamlit_app.py
 """
 import streamlit as st
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -967,6 +968,130 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
         return None
 
 
+def _fetch_scd_rolling_bundle_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+    force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch rolling payload and hover/context dataframe through one technical pass.
+
+    This is a transport optimization for SCD only:
+    - rolling_payload remains the existing Rolling Heatmap / Option-C payload
+    - indicator_context_df is the already-computed df_ind from that same path
+    - both are stored in the existing session-only SCD caches
+    - no SCD-local scoring, ranking, aggregation, semantics, acquisition, or
+      persistence behavior is introduced
+    """
+    ticker = str(ticker).strip().upper()
+
+    if 'scd_payload_cache' not in st.session_state:
+        st.session_state.scd_payload_cache = {}
+
+    if 'scd_hover_ohlcv_cache' not in st.session_state:
+        st.session_state.scd_hover_ohlcv_cache = {}
+
+    stats = _get_scd_cache_stats()
+
+    rolling_cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="rolling_payload",
+        anchor_date=anchor_date,
+    )
+    hover_cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="hover_ohlcv",
+        anchor_date=anchor_date,
+    )
+
+    rolling_hit = (
+        not force_refresh
+        and rolling_cache_key in st.session_state.scd_payload_cache
+    )
+    hover_hit = (
+        not force_refresh
+        and hover_cache_key in st.session_state.scd_hover_ohlcv_cache
+    )
+
+    if rolling_hit and hover_hit:
+        stats["rolling_hits"] += 1
+        stats["hover_hits"] += 1
+
+        rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+
+        return {
+            "rolling_payload": rolling_payload,
+            "indicator_context_df": cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df,
+            "source": "cache",
+        }
+
+    if rolling_hit:
+        # Rare partial-cache case: keep the cached rolling payload and only
+        # fill the missing hover/context dataframe through the legacy fallback.
+        stats["rolling_hits"] += 1
+        rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        hover_df = _fetch_scd_hover_ohlcv_df_for_ticker(
+            ticker=ticker,
+            window_days=window_days,
+            force_refresh=False,
+            anchor_date=anchor_date,
+        )
+
+        return {
+            "rolling_payload": rolling_payload,
+            "indicator_context_df": hover_df,
+            "source": "partial_cache_hover_fallback",
+        }
+
+    stats["rolling_misses"] += 1
+    if hover_hit:
+        stats["hover_hits"] += 1
+    else:
+        stats["hover_misses"] += 1
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+        ),
+    )
+
+    if not isinstance(bundle, dict):
+        return {
+            "rolling_payload": {},
+            "indicator_context_df": None,
+            "source": "invalid_bundle",
+        }
+
+    rolling_payload = bundle.get("rolling_payload")
+    indicator_context_df = bundle.get("indicator_context_df")
+
+    if isinstance(rolling_payload, dict) and rolling_payload:
+        st.session_state.scd_payload_cache[rolling_cache_key] = rolling_payload
+
+    if isinstance(indicator_context_df, pd.DataFrame) and not indicator_context_df.empty:
+        st.session_state.scd_hover_ohlcv_cache[hover_cache_key] = indicator_context_df.copy()
+    elif hover_hit:
+        cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+        indicator_context_df = cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df
+
+    return {
+        "rolling_payload": rolling_payload,
+        "indicator_context_df": indicator_context_df,
+        "source": "bundled",
+    }
+
+
 def _normalize_scd_rolling_payload_for_adapter(
     rolling_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -1167,6 +1292,8 @@ def _build_scd_cross_sectional_matrix(
         if row_key != "__PRICE__"
     ]
 
+    profile_started_at = time.perf_counter()
+
     matrix = {
         "status": "ok",
         "window_days": int(window_days),
@@ -1177,31 +1304,67 @@ def _build_scd_cross_sectional_matrix(
         "cells": {row_key: {} for row_key in row_keys},
         "ticker_status": {},
         "errors": [],
+        "profile": {
+            "ticker_count": len(tickers),
+            "row_count": len(row_keys),
+            "anchor_date": str(anchor_date),
+            "total_seconds": None,
+            "tickers": {},
+        },
     }
 
     if not tickers:
         matrix["status"] = "empty"
         matrix["errors"].append("No SCD tickers selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
         return matrix
 
     if not selected_row_keys_clean:
         matrix["status"] = "empty"
         matrix["errors"].append("No SCD indicator row keys selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
         return matrix
 
     for ticker in tickers:
+        ticker_started_at = time.perf_counter()
+        ticker_profile = {
+            "rolling_payload_seconds": None,
+            "hover_context_seconds": None,
+            "adapter_lookup_seconds": None,
+            "latest_cell_extraction_seconds": None,
+            "total_seconds": None,
+            "status": "started",
+        }
+        matrix["profile"]["tickers"][ticker] = ticker_profile
+
         try:
-            rolling_payload = _fetch_scd_rolling_payload_for_ticker(
+            stage_started_at = time.perf_counter()
+            bundle = _fetch_scd_rolling_bundle_for_ticker(
                 ticker=ticker,
                 window_days=window_days,
                 force_refresh=force_refresh,
                 anchor_date=anchor_date,
             )
+            ticker_profile["rolling_payload_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+            hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+            bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+
+            # Hover/context is now supplied by the same technical-layer pass as
+            # the rolling payload. There is no separate hover fetch in the
+            # normal bundled cold path.
+            ticker_profile["hover_context_seconds"] = 0.0
+            ticker_profile["bundle_source"] = bundle_source
 
             if not isinstance(rolling_payload, dict) or not rolling_payload:
                 matrix["ticker_status"][ticker] = {
                     "status": "empty",
                     "message": "No rolling payload returned.",
+                    "bundle_source": bundle_source,
                 }
                 for row_key in row_keys:
                     matrix["cells"][row_key][ticker] = {
@@ -1215,6 +1378,11 @@ def _build_scd_cross_sectional_matrix(
                         "status": "missing_payload",
                         "display_text": "missing_payload",
                     }
+                ticker_profile["status"] = "missing_payload"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
                 continue
 
             payload_status = rolling_payload.get("status", "unknown")
@@ -1224,21 +1392,25 @@ def _build_scd_cross_sectional_matrix(
                 "status": payload_status,
                 "dates": payload_dates,
                 "latest_date": payload_dates[-1] if payload_dates else None,
+                "bundle_source": bundle_source,
+                "has_indicator_context": (
+                    isinstance(hover_ohlcv_df, pd.DataFrame)
+                    and not hover_ohlcv_df.empty
+                ),
             }
 
-            hover_ohlcv_df = _fetch_scd_hover_ohlcv_df_for_ticker(
-                ticker=ticker,
-                window_days=window_days,
-                force_refresh=force_refresh,
-                anchor_date=anchor_date,
-            )
-
+            stage_started_at = time.perf_counter()
             adapter_lookup = _build_scd_adapter_lookup(
                 rolling_payload=rolling_payload,
                 row_keys=selected_row_keys_clean,
                 ohlcv_df=hover_ohlcv_df,
             )
+            ticker_profile["adapter_lookup_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
 
+            stage_started_at = time.perf_counter()
             for row_key in row_keys:
                 matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
                     ticker=ticker,
@@ -1246,6 +1418,15 @@ def _build_scd_cross_sectional_matrix(
                     rolling_payload=rolling_payload,
                     adapter_lookup=adapter_lookup,
                 )
+            ticker_profile["latest_cell_extraction_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+            ticker_profile["status"] = "ok"
+            ticker_profile["total_seconds"] = round(
+                time.perf_counter() - ticker_started_at,
+                3,
+            )
 
         except Exception as e:
             message = f"{ticker}: {e}"
@@ -1263,10 +1444,21 @@ def _build_scd_cross_sectional_matrix(
                     "value": None,
                     "signal": None,
                     "score": None,
-                    "hover": f"Error fetching rolling payload for {ticker}: {e}",
+                    "hover": message,
                     "status": "error",
                     "display_text": "error",
                 }
+
+            ticker_profile["status"] = "error"
+            ticker_profile["total_seconds"] = round(
+                time.perf_counter() - ticker_started_at,
+                3,
+            )
+
+    matrix["profile"]["total_seconds"] = round(
+        time.perf_counter() - profile_started_at,
+        3,
+    )
 
     return matrix
 
@@ -1537,6 +1729,49 @@ def _render_scd_matrix_view(matrix: Optional[Dict[str, Any]]) -> None:
         f"Tickers: {ticker_count} | "
         f"Indicator rows: {row_count}"
     )
+
+    profile = matrix.get("profile", {})
+    if isinstance(profile, dict) and profile:
+        show_performance_profile = st.checkbox(
+            "Show Performance Profile",
+            value=False,
+            key="scd_show_performance_profile",
+            help=(
+                "Show timing diagnostics for the latest matrix build. "
+                "This is for performance investigation only."
+            ),
+        )
+
+        if show_performance_profile:
+            st.caption(
+                f"Total build time: {profile.get('total_seconds')}s | "
+                f"Tickers: {profile.get('ticker_count')} | "
+                f"Rows: {profile.get('row_count')}"
+            )
+
+            ticker_profile = profile.get("tickers", {})
+            if isinstance(ticker_profile, dict) and ticker_profile:
+                profile_rows = []
+                for ticker, stats in ticker_profile.items():
+                    if not isinstance(stats, dict):
+                        continue
+                    profile_rows.append({
+                        "ticker": ticker,
+                        "status": stats.get("status"),
+                        "bundle_source": stats.get("bundle_source"),
+                        "rolling_payload_seconds": stats.get("rolling_payload_seconds"),
+                        "hover_context_seconds": stats.get("hover_context_seconds"),
+                        "adapter_lookup_seconds": stats.get("adapter_lookup_seconds"),
+                        "latest_cell_extraction_seconds": stats.get("latest_cell_extraction_seconds"),
+                        "total_seconds": stats.get("total_seconds"),
+                    })
+
+                if profile_rows:
+                    st.dataframe(
+                        pd.DataFrame(profile_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
     show_detail_export = st.checkbox(
         "Show Details / Export",

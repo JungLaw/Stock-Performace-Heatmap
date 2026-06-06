@@ -1249,6 +1249,7 @@ def build_plotly_heatmap_inputs(
 
                         # Custom indicator-specific content
                         "macd_context_block": "",
+                        "adx_context_block": "",
                         "stoch_context_block": "",
                         "bullbear_context_block": "",
                         "dpo_context_block": "",
