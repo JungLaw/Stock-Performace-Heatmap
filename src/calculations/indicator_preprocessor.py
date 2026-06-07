@@ -430,16 +430,22 @@ def compute_all_indicators(
             for n in (cfg.get(fam, []) or []):
                 base_cols.append(f"{fam}_{int(n)}")
 
+        # Build slope outputs off-frame, then attach in one concat.
+        # This preserves formulas and column names while avoiding repeated
+        # DataFrame insertions during a high-cost section.
+        slope_columns: Dict[str, Any] = {}
+
         # Compute canonical slope columns where the base series exists.
         for base_col in base_cols:
             if base_col not in df.columns:
                 continue
 
             canon = _canonical_slope_name(base_col)
-            df[canon] = _rolling_linreg_slope(
+            slope_series = _rolling_linreg_slope(
                 df[base_col].astype("float64"),
                 window
             )
+            slope_columns[canon] = slope_series
 
             # Parameterized compatibility aliases for SMA, EMA, and HMA.
             if emit_aliases and (
@@ -447,7 +453,7 @@ def compute_all_indicators(
                 or base_col.startswith("EMA_")
                 or base_col.startswith("HMA_")
             ):
-                df[f"{base_col}_slope"] = df[canon]
+                slope_columns[f"{base_col}_slope"] = slope_series
 
         if emit_aliases:
             # Unparameterized compatibility aliases: resolve deterministically
@@ -466,13 +472,20 @@ def compute_all_indicators(
 
             if vwma_base is not None:
                 vwma_canon = _canonical_slope_name(vwma_base)
-                if vwma_canon in df.columns:
-                    df["VWMA_slope"] = df[vwma_canon]
+                if vwma_canon in slope_columns:
+                    slope_columns["VWMA_slope"] = slope_columns[vwma_canon]
 
             if hma_base is not None:
                 hma_canon = _canonical_slope_name(hma_base)
-                if hma_canon in df.columns:
-                    df["HMA_slope"] = df[hma_canon]
+                if hma_canon in slope_columns:
+                    slope_columns["HMA_slope"] = slope_columns[hma_canon]
+
+        if slope_columns:
+            df = pd.concat(
+                [df, pd.DataFrame(slope_columns, index=df.index)],
+                axis=1,
+            )
+
     # ====================================================
     # Bull/Bear Power
     # ====================================================
@@ -570,8 +583,12 @@ def compute_all_indicators(
     # ====================================================
     # ATR and ATRP (pandas_ta_classic.atr)
     # ====================================================
+    atr_atrp_columns: Dict[str, Any] = {}
+
     if {"High", "Low"}.issubset(df.columns):
         price_f = pd.to_numeric(price, errors="coerce").astype("float64")
+
+        atr_series_by_length: Dict[int, pd.Series] = {}
 
         for length in cfg.get("ATR", []):
             l_i = int(length)
@@ -581,30 +598,36 @@ def compute_all_indicators(
                 close=price_f,
                 length=l_i,
             )
-            df[f"ATR_{l_i}"] = pd.to_numeric(
+            atr_series = pd.to_numeric(
                 atr_series,
                 errors="coerce"
             ).astype("float64")
+
+            atr_series_by_length[l_i] = atr_series
+            atr_atrp_columns[f"ATR_{l_i}"] = atr_series
 
         # ATRP = ATR relative to price, expressed in percent units
         # to match existing rulebook consumers such as:
         #   abs(Close/EMA_20 - 1) <= 0.50 * ATRP_20
         for length in cfg.get("ATRP", []):
             l_i = int(length)
-            atr_col = f"ATR_{l_i}"
-            if atr_col not in df.columns:
+
+            if l_i in atr_series_by_length:
+                atr_series = atr_series_by_length[l_i]
+            else:
                 atr_series = ta.atr(
                     high=df["High"],
                     low=df["Low"],
                     close=price_f,
                     length=l_i,
                 )
-                df[atr_col] = pd.to_numeric(
+                atr_series = pd.to_numeric(
                     atr_series,
                     errors="coerce"
                 ).astype("float64")
 
-            atr_series = pd.to_numeric(df[atr_col], errors="coerce").astype("float64")
+                atr_series_by_length[l_i] = atr_series
+                atr_atrp_columns[f"ATR_{l_i}"] = atr_series
 
             # ATRP remains percent-of-price (not fractional) for current
             # moving-average neutral-zone consumers.
@@ -612,15 +635,21 @@ def compute_all_indicators(
             atrp = pd.to_numeric(atrp, errors="coerce").astype("float64")
             atrp = atrp.replace([np.inf, -np.inf], np.nan)
 
-            df[f"ATRP_{l_i}"] = atrp
+            atr_atrp_columns[f"ATRP_{l_i}"] = atrp
     else:
         # If High/Low missing, still create the configured columns as NA
         for length in cfg.get("ATR", []):
             l_i = int(length)
-            df[f"ATR_{l_i}"] = pd.NA
+            atr_atrp_columns[f"ATR_{l_i}"] = pd.Series(pd.NA, index=df.index)
         for length in cfg.get("ATRP", []):
             l_i = int(length)
-            df[f"ATRP_{l_i}"] = pd.NA
+            atr_atrp_columns[f"ATRP_{l_i}"] = pd.Series(pd.NA, index=df.index)
+
+    if atr_atrp_columns:
+        df = pd.concat(
+            [df, pd.DataFrame(atr_atrp_columns, index=df.index)],
+            axis=1,
+        )
 
     # ====================================================
     # ADX + DIp/DIn (pandas_ta_classic.adx)
