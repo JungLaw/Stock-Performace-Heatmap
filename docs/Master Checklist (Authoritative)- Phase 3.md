@@ -1,11 +1,55 @@
 # Master Checklist (Authoritative) — Phase 3  
 **TA Rule Engine (GPT)**  
 **Created**: 12/23/25
-**last update**: 5/20/26   
-**Version**: 2.0  
+**last update**: 5/26/26   
+**Version**: 2.1  
 
 ---
 ## Change Log
+
+### v2.1 — 5/26/26
+- Next active workstream assigned:
+  - Phase III Extension — Stock Comparison Dashboard v1
+- Forward-looking Phase 3 state updated to reflect:
+  - implementation-prep active workstream status
+  - SCD Signal Matrix Architecture
+  - SCD Cross-Sectional Matrix View as the active v1 display mode
+  - SCD Single-Indicator Time-Series Matrix View recognized but deferred from v1 unless explicitly promoted
+  - primary interaction / navigation model:
+    - `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+- Active v1 scope locked to:
+  - SCD-specific ticker controls
+  - SCD curated default ticker sets
+  - reuse of existing asset universes
+  - reuse of existing Rolling Heatmap row-selection resolver
+  - reuse of existing Rolling Heatmap / Option-C rule-engine payload path
+  - latest-cell cross-sectional matrix assembly
+  - primary display = SCD Plotly Heatmap View
+  - secondary display = SCD Detail Table View
+    - copy/export/audit companion to the heatmap
+    - uses the same underlying matrix cells
+    - must not introduce ranking, aggregation, new scoring, or semantic reinterpretation
+  - existing semantic score color for the first implementation
+- Explicit v1 non-goals recorded:
+  - no new semantic scoring
+  - no ticker ranking
+  - no aggregate technical strength score
+  - no relative within selected tickers color mode in the first implementation pass
+  - no composites
+  - no cross-confirmation
+  - no regime logic
+  - no new numeric formulas
+  - no new rulebook thresholds
+  - no new DB table
+  - no new persistence behavior
+  - no persistent SCD ticker-set management
+  - no AgGrid / pivot-table implementation
+- Deferred semantic tiers carried forward unchanged:
+  - composites
+  - cross-confirmation
+  - regime logic
+- Deferred numeric backlog carried forward unchanged:
+  - SMA slope / SMA semantic reopen
 
 ### v2.0 — 5/20/26
 - Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) marked COMPLETE
@@ -90,8 +134,7 @@
 - Scenario B data plumbing implementation documented
 - DB-first missing-range acquisition rules finalized
 
-**Current Active Workstream:** No next active workstream assigned in this completed-items pass.
-
+**Current Active Workstream:** Phase III Extension — Stock Comparison Dashboard v1
 
 ---
 
@@ -104,9 +147,10 @@
 | Phase III UX                     | **Complete**                    |
 | Option E                         | **Wave 1 Complete**             |
 | Option F                         | **Wave 1 Complete**             |
-| Phase III Selection Architecture | **Complete**      |
+| Phase III Selection Architecture | **Complete**                    |
+| Phase III Extension — Stock Comparison Dashboard v1 | **Implementation-prep active workstream** |
 
-**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) complete; no next active workstream assigned in this completed-items pass.
+**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) complete; Phase III Extension — Stock Comparison Dashboard v1 is the next active implementation-prep workstream.
 
 **Recently completed**:
 - Option B — Core indicator families
@@ -137,15 +181,30 @@
   - DPO rolling heatmap support validated
 
 **Next active workstream:**
-- Not assigned in this completed-items pass.
+- Phase III Extension — Stock Comparison Dashboard v1
 
-**Deferred beyond completed Option F Wave 1:**
+**Current objective:**
+- Implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells.
+
+**Primary architecture label:**
+- SCD Signal Matrix Architecture
+
+**Primary interaction / navigation model:**
+- `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+
+**Active v1 display mode:**
+- SCD Cross-Sectional Matrix View
+
+**Recognized but deferred display mode:**
+- SCD Single-Indicator Time-Series Matrix View is recognized but deferred from v1 implementation unless explicitly promoted.
+
+**Deferred later-wave semantic tiers remain unchanged:**
 - composites
 - cross-confirmation
 - regime logic
 
-**Deferred outside current semantic wave:**
-- SMA slope (later numeric backlog / review item)
+**Deferred numeric backlog remains unchanged:**
+- SMA slope / SMA semantic reopen
 
 ---
 ## Continuity & Scope Enforcement
@@ -184,7 +243,8 @@ Phase 3 is divided into **indicator option groups and data-layer stabilization t
 | Phase III UX | Rolling heatmap interaction layer   | Complete     |
 | Option E     | Derived numeric primitives          | Wave 1 Complete |
 | Option F     | Rule semantics / relational logic   | Wave 1 Complete |
-| Phase III UI Selection Architecture | Rolling heatmap row-selection / grouping architecture | Next Active Workstream |
+| Phase III UI Selection Architecture | Rolling heatmap row-selection / grouping architecture | Complete |
+| Phase III Extension — Stock Comparison Dashboard v1 | Cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells | Implementation-prep active workstream |
 
 ---
 ## Option F — Completed Workstream (Wave 1)
@@ -212,9 +272,9 @@ Option F owns **semantic interpretation / relational logic**. Wave 1 is now comp
 - [x] kept first-wave work at the single-family semantic level
 
 ---
-## Phase III UI Selection Architecture — Next Active Workstream
+## Phase III UI Selection Architecture — Completed Workstream
 
-This workstream follows completed Option F Wave 1 and added the row-selection / grouping architecture for the Rolling Signal Heatmap.
+This workstream followed completed Option F Wave 1 and added the row-selection / grouping architecture for the Rolling Signal Heatmap.
 
 ### Completed Workstream purpose
 Added a row-selection architecture for the rolling signals heatmap so row sets can be resolved through:
@@ -270,6 +330,87 @@ Deferred semantic tiers carried forward unchanged:
 
 Deferred numeric backlog carried forward unchanged:
 - SMA slope / SMA semantic reopen remains later numeric backlog / review item
+
+## Phase III Extension — Stock Comparison Dashboard v1 — Next Active Workstream
+
+**Status:** Implementation-prep active workstream
+
+**Current objective:**  
+Implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells.
+
+**Primary architecture label:**  
+SCD Signal Matrix Architecture
+
+**Primary interaction / navigation model:**  
+`Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+
+### Active v1 scope
+
+- SCD-specific ticker controls
+- SCD curated default ticker sets
+- reuse of existing asset universes:
+  - `assets::COUNTRY_ETFS`
+  - `assets::SECTOR_ETFS`
+  - `assets::CUSTOM_DEFAULT`
+- reuse of existing Rolling Heatmap row-selection resolver
+- reuse of existing Rolling Heatmap / Option-C rule-engine payload path
+- latest-cell cross-sectional matrix assembly
+- SCD Plotly Heatmap View
+- SCD Detail Table View
+- existing semantic score color for the first implementation
+
+### Active v1 display mode
+
+**SCD Cross-Sectional Matrix View**
+- rows = selected indicators
+- columns = selected tickers
+- cells = existing Rolling Heatmap value / signal / score
+- color = existing semantic score color
+
+### Recognized but deferred display mode
+
+**SCD Single-Indicator Time-Series Matrix View**
+- rows = dates
+- columns = selected tickers
+- indicator = one selected technical indicator
+- window = 25 trading days
+- status = recognized but deferred from v1 implementation unless explicitly promoted
+
+### Explicit non-goals for v1
+
+- no new semantic scoring
+- no ticker ranking
+- no aggregate technical strength score
+- no relative within selected tickers color mode in the first implementation pass
+- no composites
+- no cross-confirmation
+- no regime logic
+- no new numeric formulas
+- no new rulebook thresholds
+- no new DB table
+- no new persistence behavior
+- no persistent SCD ticker-set management
+- no AgGrid / pivot-table implementation
+
+### Guardrails
+
+- SCD v1 must reuse existing Rolling Heatmap value / signal / score cells.
+- SCD v1 must reuse the existing Rolling Heatmap row-selection resolver.
+- SCD v1 must use the existing Scenario B / Option-C rule-engine payload path.
+- SCD v1 must not call yfinance directly.
+- SCD v1 must not alter Scenario B acquisition behavior or persistence behavior.
+- SCD v1 must not alter score meanings or introduce UI-local semantic scoring.
+- SCD v1 must not modify indicator formulas, rulebook thresholds, or semantic rule interpretation.
+
+### Deferred routing carried forward
+
+Deferred later-wave semantic tiers remain unchanged:
+- composites
+- cross-confirmation
+- regime logic
+
+Deferred numeric backlog remains unchanged:
+- SMA slope / SMA semantic reopen
 
 ---
 ## Scenario B — Data Acquisition Stabilization
@@ -526,8 +667,14 @@ Evidence:
 ### Current interpretation
 
 - Option E Wave 1 is complete
-- Option F Wave 1 is now authorized as the next active workstream
-- Later semantic tiers remain deferred until first-wave semantic families are stable
+- Option F Wave 1 is complete
+- Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) is complete
+- Phase III Extension — Stock Comparison Dashboard v1 is the next active implementation-prep workstream
+- Later semantic tiers remain deferred:
+  - composites
+  - cross-confirmation
+  - regime logic
+- SMA slope / SMA semantic reopen remains a later numeric backlog / review item
 
 ---
 

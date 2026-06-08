@@ -1,4 +1,4 @@
-# Stamp: Thu, May 28, 2026 2:18PM
+# Stamp: Fri, June 5, 2026 6:37PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -9,6 +9,7 @@ Run with: streamlit run streamlit_app.py
 """
 import streamlit as st
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -21,11 +22,21 @@ src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import our modules
-from calculations.performance import DatabaseIntegratedPerformanceCalculator
+from calculations.performance import (
+    DatabaseIntegratedPerformanceCalculator,
+    get_last_completed_trading_day,
+)
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
-from config.assets import ASSET_GROUPS, CUSTOM_DEFAULT, get_tickers_only
+from config.assets import (
+    ASSET_GROUPS,
+    CUSTOM_DEFAULT,
+    get_tickers_only,
+    SCD_DEFAULT_COUNTRY_TICKERS,
+    SCD_DEFAULT_SECTOR_TICKERS,
+    SCD_DEFAULT_CUSTOM_TICKERS,
+)
 
 # Rolling Heatmap Selection & Catalog architecture
 # Grouping/selection truth lives in src/ui modules; streamlit_app.py only
@@ -41,6 +52,10 @@ from ui.rolling_heatmap_selection import (
     get_selection_modes,
     get_window_names,
     resolve_row_selection,
+)
+from ui.rolling_heatmap_adapter import (
+    INDICATOR_DEFS,
+    build_plotly_heatmap_inputs,
 )
 
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
@@ -124,6 +139,93 @@ def initialize_session_state():
     if 'custom_visible_tickers' not in st.session_state:
         st.session_state.custom_visible_tickers = []   # Will be populated on first run
 
+    # Stock Comparison Dashboard v1 ticker-selection session state.
+    # These keys are SCD-specific and must not collide with Performance /
+    # Volume ticker controls or Rolling Heatmap row-selection state.
+    if 'scd_ticker_source' not in st.session_state:
+        st.session_state.scd_ticker_source = 'custom'
+
+    if 'scd_selected_country_tickers' not in st.session_state:
+        st.session_state.scd_selected_country_tickers = list(SCD_DEFAULT_COUNTRY_TICKERS)
+
+    if 'scd_selected_sector_tickers' not in st.session_state:
+        st.session_state.scd_selected_sector_tickers = list(SCD_DEFAULT_SECTOR_TICKERS)
+
+    if 'scd_selected_custom_tickers' not in st.session_state:
+        st.session_state.scd_selected_custom_tickers = list(SCD_DEFAULT_CUSTOM_TICKERS)
+
+    if 'scd_temp_tickers' not in st.session_state:
+        st.session_state.scd_temp_tickers = []
+
+    if 'scd_ticker_limit' not in st.session_state:
+        st.session_state.scd_ticker_limit = 10
+
+    # Stock Comparison Dashboard v1 indicator-selection session state.
+    # These keys are SCD-specific but resolve through the existing Rolling
+    # Heatmap row-selection resolver and catalog.
+    if 'scd_selection_mode' not in st.session_state:
+        st.session_state.scd_selection_mode = 'Custom'
+
+    if 'scd_custom_rows' not in st.session_state:
+        st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+
+    if 'scd_selected_category' not in st.session_state:
+        st.session_state.scd_selected_category = None
+
+    if 'scd_selected_scope' not in st.session_state:
+        st.session_state.scd_selected_scope = 'All'
+
+    if 'scd_selected_window' not in st.session_state:
+        st.session_state.scd_selected_window = 'All'
+
+    if 'scd_selected_family' not in st.session_state:
+        st.session_state.scd_selected_family = 'All'
+
+    if 'scd_selected_preset' not in st.session_state:
+        preset_names = get_preset_names()
+        st.session_state.scd_selected_preset = preset_names[0] if preset_names else None
+
+    if 'scd_last_resolved_row_keys' not in st.session_state:
+        st.session_state.scd_last_resolved_row_keys = []
+
+    # Stock Comparison Dashboard v1 matrix transport state.
+    # This stores reshaped existing Rolling Heatmap cells only.
+    # It must not store new scores, rankings, aggregates, or semantic labels.
+    if 'scd_signal_matrix' not in st.session_state:
+        st.session_state.scd_signal_matrix = None
+
+    if 'scd_matrix_last_run' not in st.session_state:
+        st.session_state.scd_matrix_last_run = None
+
+    # Stock Comparison Dashboard v1: Date-anchor controls
+    # These are display/request controls only. They do not create a new
+    # acquisition path, scoring path, or persistence behavior.
+    if 'scd_use_anchor_date' not in st.session_state:
+        st.session_state.scd_use_anchor_date = False
+
+    if 'scd_anchor_date' not in st.session_state:
+        st.session_state.scd_anchor_date = datetime.now().date()
+
+    # Stock Comparison Dashboard v1: Session Cache.
+    # Session-only transport cache for expensive per-ticker SCD payloads.
+    # This must not introduce DB persistence, new acquisition behavior, ranking,
+    # aggregation, or semantic reinterpretation.
+    if 'scd_payload_cache' not in st.session_state:
+        st.session_state.scd_payload_cache = {}
+
+    if 'scd_hover_ohlcv_cache' not in st.session_state:
+        st.session_state.scd_hover_ohlcv_cache = {}
+
+    if 'scd_cache_stats' not in st.session_state:
+        st.session_state.scd_cache_stats = {
+            "rolling_hits": 0,
+            "rolling_misses": 0,
+            "hover_hits": 0,
+            "hover_misses": 0,
+            "force_refreshes": 0,
+            "clears": 0,
+        }
+
     # Rolling Heatmap Selection & Catalog session state.
     # These keys support the Phase III row-selection architecture only.
     # They do not define numeric truth, semantic truth, display metadata,
@@ -189,6 +291,1517 @@ def is_bucket_ticker(ticker: str) -> bool:
     
     return ticker.upper() in [t.upper() for t in all_bucket_tickers]
 
+
+def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
+    """Return a display label while preserving ticker as the canonical identity."""
+    display_name = ticker_names.get(ticker, ticker)
+    if display_name and display_name != ticker:
+        return f"{display_name} ({ticker})"
+    return ticker
+
+
+def _get_scd_source_config(source: str) -> Dict[str, Any]:
+    """
+    Return existing asset-universe metadata for an SCD ticker source.
+
+    SCD consumes the existing ASSET_GROUPS universes. It does not create a new
+    asset universe or reorder canonical ticker lists.
+    """
+    source_key = source if source in {"country", "sector", "custom"} else "custom"
+    group = ASSET_GROUPS.get(source_key, {})
+
+    return {
+        "source": source_key,
+        "name": group.get("name", source_key.title()),
+        "tickers": list(group.get("tickers", [])),
+        "ticker_names": dict(group.get("ticker_names", {})),
+    }
+
+
+def _get_scd_selected_ticker_state_key(source: str) -> str:
+    """Return the SCD session-state key for the selected source."""
+    if source == "country":
+        return "scd_selected_country_tickers"
+    if source == "sector":
+        return "scd_selected_sector_tickers"
+    return "scd_selected_custom_tickers"
+
+
+def _dedupe_preserve_order_str(values) -> list[str]:
+    """Return uppercase non-empty strings with duplicates removed."""
+    seen = set()
+    out = []
+
+    for value in values:
+        ticker = str(value).strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        out.append(ticker)
+
+    return out
+
+
+def _get_scd_selected_tickers() -> list[str]:
+    """
+    Return the current SCD selected ticker set.
+
+    This is ticker-symbol identity only. Display names remain presentation
+    metadata and must not replace ticker symbols.
+    """
+    source = st.session_state.get("scd_ticker_source", "custom")
+    selected_key = _get_scd_selected_ticker_state_key(source)
+
+    selected = list(st.session_state.get(selected_key, []))
+    temp_tickers = list(st.session_state.get("scd_temp_tickers", []))
+
+    selected_tickers = _dedupe_preserve_order_str(selected + temp_tickers)
+    ticker_limit = int(st.session_state.get("scd_ticker_limit", 10))
+
+    return selected_tickers[:ticker_limit]
+
+def _render_scd_ticker_controls() -> list[str]:
+    """
+    Render SCD-specific ticker controls in the sidebar.
+
+    These controls intentionally mirror the Performance / Volume checkbox
+    interaction pattern while using SCD-only session-state keys.
+    """
+    source_options = ["country", "sector", "custom"]
+    source_labels = {
+        "country": "🌍 Country ETFs",
+        "sector": "🏭 Sector ETFs",
+        "custom": "🎯 Custom Stocks",
+    }
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📋 Stock Comparison Tickers")
+
+    current_source = st.session_state.get("scd_ticker_source", "custom")
+    if current_source not in source_options:
+        current_source = "custom"
+
+    selected_source = st.sidebar.radio(
+        "Ticker Source",
+        options=source_options,
+        format_func=lambda source: source_labels[source],
+        index=source_options.index(current_source),
+        key="scd_ticker_source_widget",
+    )
+
+    # Keep canonical SCD source state separate from widget state.
+    # This avoids stale source behavior when switching Country / Sector / Custom.
+    st.session_state.scd_ticker_source = selected_source
+
+    source_config = _get_scd_source_config(selected_source)
+    available_tickers = source_config["tickers"]
+    ticker_names = source_config["ticker_names"]
+    selected_key = _get_scd_selected_ticker_state_key(selected_source)
+
+    current_selected = [
+        ticker for ticker in st.session_state.get(selected_key, [])
+        if ticker in available_tickers
+    ]
+    st.session_state[selected_key] = current_selected
+
+    ticker_limit = st.sidebar.number_input(
+        "Selected ticker cap (max 10)",
+        min_value=1,
+        max_value=50,
+        value=int(st.session_state.get("scd_ticker_limit", 10)),
+        step=1,
+        key="scd_ticker_limit",
+        help="SCD v1 defaults to 10 selected tickers. Higher values may slow later payload execution.",
+    )
+
+    with st.sidebar.expander(f"📋 Show/Hide {source_config['name']}", expanded=True):
+        col_select, col_clear = st.columns(2)
+
+        with col_select:
+            if st.button("Select Defaults", key=f"scd_select_defaults_{selected_source}"):
+                if selected_source == "country":
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_COUNTRY_TICKERS
+                        if ticker in available_tickers
+                    ]
+                elif selected_source == "sector":
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_SECTOR_TICKERS
+                        if ticker in available_tickers
+                    ]
+                else:
+                    st.session_state[selected_key] = [
+                        ticker for ticker in SCD_DEFAULT_CUSTOM_TICKERS
+                        if ticker in available_tickers
+                    ]
+                st.rerun()
+
+        with col_clear:
+            if st.button("Clear", key=f"scd_clear_source_{selected_source}"):
+                st.session_state[selected_key] = []
+                st.rerun()
+
+        for ticker in available_tickers:
+            is_selected = ticker in st.session_state[selected_key]
+            label = _format_scd_ticker_label(ticker, ticker_names)
+
+            if st.checkbox(
+                label,
+                value=is_selected,
+                key=f"scd_filter_{selected_source}_{ticker}",
+            ):
+                if ticker not in st.session_state[selected_key]:
+                    st.session_state[selected_key].append(ticker)
+            else:
+                if ticker in st.session_state[selected_key]:
+                    st.session_state[selected_key].remove(ticker)
+
+        st.caption(
+            f"Selected from source: {len(st.session_state[selected_key])}/"
+            f"{len(available_tickers)}"
+        )
+
+    with st.sidebar.expander("➕ Add Temporary SCD Tickers", expanded=False):
+        temp_input = st.text_area(
+            "Add temporary ticker(s):",
+            key="scd_temp_ticker_input",
+            placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
+            height=80,
+            help="Temporary SCD tickers apply only to this dashboard view.",
+        )
+
+        if st.button("Add Temporary Ticker(s)", key="scd_add_temp_tickers"):
+            parsed_tickers = _dedupe_preserve_order_str(
+                temp_input.replace(",", "\n").split("\n")
+            )
+            existing = _dedupe_preserve_order_str(st.session_state.scd_temp_tickers)
+            st.session_state.scd_temp_tickers = _dedupe_preserve_order_str(
+                existing + parsed_tickers
+            )
+
+            if parsed_tickers:
+                st.success(f"Added {len(parsed_tickers)} temporary ticker(s).")
+            else:
+                st.warning("Enter at least one ticker symbol.")
+
+        if st.session_state.scd_temp_tickers:
+            st.caption(
+                "Temporary tickers: "
+                + ", ".join(_dedupe_preserve_order_str(st.session_state.scd_temp_tickers))
+            )
+
+            tickers_to_remove = []
+            for ticker in _dedupe_preserve_order_str(st.session_state.scd_temp_tickers):
+                remove_col, label_col = st.columns([1, 4])
+                with remove_col:
+                    if st.button("❌", key=f"scd_remove_temp_{ticker}", help=f"Remove {ticker}"):
+                        tickers_to_remove.append(ticker)
+                with label_col:
+                    st.write(ticker)
+
+            for ticker in tickers_to_remove:
+                st.session_state.scd_temp_tickers = [
+                    existing
+                    for existing in st.session_state.scd_temp_tickers
+                    if existing != ticker
+                ]
+                st.rerun()
+
+            if st.button("Clear Temporary Tickers", key="scd_clear_temp_tickers"):
+                st.session_state.scd_temp_tickers = []
+                st.rerun()
+
+    selected_tickers = _get_scd_selected_tickers()
+
+    if len(st.session_state[selected_key]) + len(st.session_state.scd_temp_tickers) > ticker_limit:
+        st.sidebar.warning(
+            f"Ticker cap is {ticker_limit}. Only the first {ticker_limit} selected "
+            f"ticker(s), including temporary tickers, will be used."
+        )
+
+    st.sidebar.success(f"Selected for SCD: {len(selected_tickers)} ticker(s)")
+    st.sidebar.caption(
+        ", ".join(selected_tickers) if selected_tickers else "No tickers selected."
+    )
+
+    return selected_tickers
+
+def _render_scd_indicator_selection_controls() -> list[str]:
+    """
+    Render SCD-specific indicator row-selection controls.
+
+    SCD does not own indicator grouping metadata. This function only renders
+    SCD-specific controls and delegates row-key resolution to the existing
+    Rolling Heatmap selection resolver.
+    """
+    st.subheader("2) Indicator Selection")
+
+    mode_options = get_selection_modes()
+    if not mode_options:
+        mode_options = ["Custom", "Category", "Preset"]
+
+    current_mode = st.session_state.get("scd_selection_mode", "Custom")
+    if current_mode not in mode_options:
+        current_mode = "Custom"
+
+    selection_mode = st.selectbox(
+        "Selection Mode",
+        options=mode_options,
+        index=mode_options.index(current_mode),
+        key="scd_selection_mode",
+        help="Choose the base indicator row set for the Stock Comparison Dashboard.",
+    )
+
+    resolved_row_keys: list[str] = []
+
+    if selection_mode == "Custom":
+        cc1, cc2 = st.columns([0.75, 0.25])
+        with cc1:
+            st.caption(
+                "Custom mode uses the SCD session row set. Restore-default "
+                "resets to the catalog-owned Rolling Heatmap Custom default."
+            )
+        with cc2:
+            if st.button(
+                "Restore Default Custom",
+                key="scd_restore_default_custom_rows",
+                use_container_width=True,
+            ):
+                st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+                st.session_state.pop("scd_custom_selected_row_keys", None)
+                st.rerun()
+
+        resolved_row_keys = resolve_row_selection(
+            selection_mode="Custom",
+            custom_rows=st.session_state.get(
+                "scd_custom_rows",
+                list(RH_CUSTOM_DEFAULT),
+            ),
+        )
+
+        multiselect_key = "scd_custom_selected_row_keys"
+
+    elif selection_mode == "Preset":
+        preset_options = get_preset_names()
+
+        if not preset_options:
+            st.warning("No Rolling Heatmap presets are available.")
+            selected_preset = None
+            resolved_row_keys = []
+            multiselect_key = "scd_preset_selected_row_keys__none"
+        else:
+            stored_preset = st.session_state.get("scd_selected_preset")
+            if stored_preset not in preset_options:
+                st.session_state.scd_selected_preset = preset_options[0]
+                stored_preset = preset_options[0]
+
+            selected_preset = st.selectbox(
+                "Choose a preset",
+                options=preset_options,
+                index=preset_options.index(stored_preset),
+                key="scd_selected_preset",
+                help="Presets are resolved by the existing Rolling Heatmap selection catalog.",
+            )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Preset",
+                preset_name=selected_preset,
+            )
+
+            preset_key_part = str(selected_preset).replace(" ", "_").replace("/", "_")
+            multiselect_key = f"scd_preset_selected_row_keys__{preset_key_part}"
+
+    elif selection_mode == "Category":
+        category_options = get_category_names()
+
+        if not category_options:
+            st.warning("No row categories are available.")
+            selected_category = None
+            selected_scope = "All"
+            selected_window = "All"
+            selected_family = "All"
+            resolved_row_keys = []
+            multiselect_key = "scd_category_selected_row_keys__none"
+        else:
+            stored_category = st.session_state.get("scd_selected_category")
+            if stored_category not in category_options:
+                st.session_state.scd_selected_category = category_options[0]
+                stored_category = category_options[0]
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            with c1:
+                selected_category = st.selectbox(
+                    "Category",
+                    options=category_options,
+                    index=category_options.index(stored_category),
+                    key="scd_selected_category",
+                )
+
+            scope_options = ["All"] + get_scope_names(category=selected_category)
+            stored_scope = st.session_state.get("scd_selected_scope", "All")
+            if stored_scope not in scope_options:
+                stored_scope = "All"
+
+            with c2:
+                selected_scope = st.selectbox(
+                    "Scope",
+                    options=scope_options,
+                    index=scope_options.index(stored_scope),
+                    key="scd_selected_scope",
+                )
+
+            window_options = ["All"] + get_window_names(category=selected_category)
+            stored_window = st.session_state.get("scd_selected_window", "All")
+            if stored_window not in window_options:
+                stored_window = "All"
+
+            with c3:
+                selected_window = st.selectbox(
+                    "Window",
+                    options=window_options,
+                    index=window_options.index(stored_window),
+                    key="scd_selected_window",
+                )
+
+            family_options = ["All"] + get_family_names(category=selected_category)
+            stored_family = st.session_state.get("scd_selected_family", "All")
+            if stored_family not in family_options:
+                stored_family = "All"
+
+            with c4:
+                selected_family = st.selectbox(
+                    "Family",
+                    options=family_options,
+                    index=family_options.index(stored_family),
+                    key="scd_selected_family",
+                )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Category",
+                category=selected_category,
+                scope=selected_scope,
+                window=selected_window,
+                family=selected_family,
+            )
+
+            category_key_part = str(selected_category).replace(" ", "_").replace("/", "_")
+            scope_key_part = str(selected_scope).replace(" ", "_").replace("/", "_")
+            window_key_part = str(selected_window).replace(" ", "_").replace("/", "_")
+            family_key_part = str(selected_family).replace(" ", "_").replace("/", "_")
+            multiselect_key = (
+                "scd_category_selected_row_keys__"
+                f"{category_key_part}__{scope_key_part}__"
+                f"{window_key_part}__{family_key_part}"
+            )
+
+    else:
+        st.warning(f"Unsupported SCD selection mode: {selection_mode!r}")
+        resolved_row_keys = []
+        multiselect_key = "scd_selected_row_keys__unsupported"
+
+    resolved_row_keys = list(resolved_row_keys)
+
+    if not resolved_row_keys:
+        empty_message = describe_empty_selection(
+            selection_mode=selection_mode,
+            category=st.session_state.get("scd_selected_category"),
+            scope=st.session_state.get("scd_selected_scope"),
+            window=st.session_state.get("scd_selected_window"),
+            family=st.session_state.get("scd_selected_family"),
+            preset_name=st.session_state.get("scd_selected_preset"),
+        )
+        st.info(empty_message)
+        st.session_state.scd_last_resolved_row_keys = []
+        return []
+
+    # Build a local default without mutating the widget's Session State key
+    # before instantiating the widget. Mutating st.session_state[multiselect_key]
+    # here while also passing default=... causes Streamlit's default/session-state warning.
+    widget_default = [
+        row_key
+        for row_key in st.session_state.get(multiselect_key, resolved_row_keys)
+        if row_key in resolved_row_keys
+    ]
+
+    selected_row_keys = st.multiselect(
+        "Indicator rows",
+        options=resolved_row_keys,
+        default=widget_default,
+        key=multiselect_key,
+        help=(
+            "These are canonical Rolling Heatmap row_key values. "
+            "The final SCD matrix will use these row keys as indicator rows."
+        ),
+    )
+
+    selected_row_keys = list(selected_row_keys)
+
+    if selection_mode == "Custom":
+        st.session_state.scd_custom_rows = list(selected_row_keys)
+
+    st.session_state.scd_last_resolved_row_keys = list(selected_row_keys)
+
+    st.success(f"Selected for SCD: {len(selected_row_keys)} indicator row(s)")
+    st.caption(", ".join(selected_row_keys) if selected_row_keys else "No indicator rows selected.")
+
+    return selected_row_keys
+
+def _resolve_scd_effective_anchor_date(
+    *,
+    use_anchor_date: bool,
+    selected_anchor_date: Optional[Any],
+) -> Any:
+    """
+    Resolve the comparison dashboard snapshot date used for request/cache identity.
+
+    Explicit date mode preserves the user-selected date.
+
+    Latest/default mode resolves to the existing app-wide last completed trading
+    day. This prevents the default latest snapshot from being cached under
+    anchor_date=None while the same date selected explicitly is cached under a
+    concrete date object.
+    """
+    if use_anchor_date and selected_anchor_date is not None:
+        return selected_anchor_date
+
+    latest_completed = get_last_completed_trading_day()
+
+    if isinstance(latest_completed, datetime):
+        return latest_completed.date()
+
+    try:
+        return pd.Timestamp(latest_completed).date()
+    except Exception:
+        return latest_completed
+
+def _get_scd_ohlcv_request(
+    window_days: int = 10,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Return the Scenario B-style OHLCV request used by the comparison dashboard.
+
+    The comparison view is a latest-cell cross-section, so its date control is
+    intentionally fixed to as-of semantics. A provided anchor_date asks the
+    existing Scenario B path to build the snapshot as of that date.
+    """
+    return {
+        "mode": "rolling_heatmap_scenario_b",
+        "window_days": int(window_days),
+        "anchor_mode": "asof",
+        "anchor_date": anchor_date,
+        "historical_buffer_days": 435,
+    }
+
+def _get_scd_cache_key(
+    *,
+    ticker: str,
+    window_days: int,
+    payload_kind: str,
+    anchor_date: Optional[Any] = None,
+) -> tuple:
+    """
+    Return a deterministic comparison dashboard session-cache key.
+
+    Cache identity is based on:
+    - payload kind
+    - ticker
+    - the Scenario B-style OHLCV request signature
+
+    Including anchor_date in the request signature prevents cached data for one
+    snapshot date from being reused for another snapshot date.
+    """
+    request = _get_scd_ohlcv_request(
+        window_days=window_days,
+        anchor_date=anchor_date,
+    )
+    request_signature = tuple(
+        sorted((str(key), repr(value)) for key, value in request.items())
+    )
+
+    return (
+        str(payload_kind).strip(),
+        str(ticker).strip().upper(),
+        request_signature,
+    )
+
+
+def _get_scd_cache_stats() -> Dict[str, int]:
+    """Return initialized SCD cache stats."""
+    if 'scd_cache_stats' not in st.session_state:
+        st.session_state.scd_cache_stats = {
+            "rolling_hits": 0,
+            "rolling_misses": 0,
+            "hover_hits": 0,
+            "hover_misses": 0,
+            "force_refreshes": 0,
+            "clears": 0,
+        }
+
+    return st.session_state.scd_cache_stats
+
+
+def _clear_scd_session_cache() -> None:
+    """
+    Clear SCD session-only transport caches.
+
+    This does not clear the currently rendered matrix. The next build will
+    repopulate caches through the existing SCD fetch path.
+    """
+    st.session_state.scd_payload_cache = {}
+    st.session_state.scd_hover_ohlcv_cache = {}
+    st.session_state.scd_cache_stats = {
+        "rolling_hits": 0,
+        "rolling_misses": 0,
+        "hover_hits": 0,
+        "hover_misses": 0,
+        "force_refreshes": 0,
+        "clears": st.session_state.get("scd_cache_stats", {}).get("clears", 0) + 1,
+    }
+
+
+def _fetch_scd_rolling_payload_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+    force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch the existing Rolling Heatmap / Option-C rolling payload for one ticker.
+
+    SCD must not call yfinance directly and must not create a new acquisition
+    path. This function delegates to the existing technical calculator path.
+
+    WS6 adds session-only caching around that existing path.
+    """
+    ticker = str(ticker).strip().upper()
+
+    if 'scd_payload_cache' not in st.session_state:
+        st.session_state.scd_payload_cache = {}
+
+    stats = _get_scd_cache_stats()
+    cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="rolling_payload",
+        anchor_date=anchor_date,
+    )
+
+    if not force_refresh and cache_key in st.session_state.scd_payload_cache:
+        stats["rolling_hits"] += 1
+        return st.session_state.scd_payload_cache[cache_key]
+
+    stats["rolling_misses"] += 1
+
+    payload = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        use_meta_coverage=True,
+        return_type="rolling",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+        ),
+    )
+
+    if isinstance(payload, dict) and payload:
+        st.session_state.scd_payload_cache[cache_key] = payload
+
+    return payload
+
+
+def _fetch_scd_hover_ohlcv_df_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+    force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
+) -> Optional[pd.DataFrame]:
+    """
+    Fetch hover-only OHLCV / indicator context for adapter hover enrichment.
+
+    This mirrors the existing Rolling Signal Heatmap hover-context call.
+    It is display context only and does not create SCD-local scores,
+    rankings, aggregates, semantic labels, or persistence behavior.
+
+    WS6 adds session-only caching around that existing path.
+    """
+    ticker = str(ticker).strip().upper()
+
+    if 'scd_hover_ohlcv_cache' not in st.session_state:
+        st.session_state.scd_hover_ohlcv_cache = {}
+
+    stats = _get_scd_cache_stats()
+    cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="hover_ohlcv",
+        anchor_date=anchor_date,
+    )
+
+    if not force_refresh and cache_key in st.session_state.scd_hover_ohlcv_cache:
+        stats["hover_hits"] += 1
+        cached_df = st.session_state.scd_hover_ohlcv_cache[cache_key]
+        return cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df
+
+    stats["hover_misses"] += 1
+
+    try:
+        hover_df = st.session_state.technical_calculator.calculate_optionc_indicators(
+            ticker=ticker,
+            save_to_db=False,
+            ohlcv_request=_get_scd_ohlcv_request(
+                window_days=window_days,
+                anchor_date=anchor_date,
+            ),
+        )
+
+        if isinstance(hover_df, pd.DataFrame) and not hover_df.empty:
+            st.session_state.scd_hover_ohlcv_cache[cache_key] = hover_df.copy()
+
+        return hover_df
+
+    except Exception:
+        return None
+
+
+def _fetch_scd_rolling_bundle_for_ticker(
+    *,
+    ticker: str,
+    window_days: int = 10,
+    force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch rolling payload and hover/context dataframe through one technical pass.
+
+    This is a transport optimization for SCD only:
+    - rolling_payload remains the existing Rolling Heatmap / Option-C payload
+    - indicator_context_df is the already-computed df_ind from that same path
+    - both are stored in the existing session-only SCD caches
+    - no SCD-local scoring, ranking, aggregation, semantics, acquisition, or
+      persistence behavior is introduced
+    """
+    ticker = str(ticker).strip().upper()
+
+    if 'scd_payload_cache' not in st.session_state:
+        st.session_state.scd_payload_cache = {}
+
+    if 'scd_hover_ohlcv_cache' not in st.session_state:
+        st.session_state.scd_hover_ohlcv_cache = {}
+
+    stats = _get_scd_cache_stats()
+
+    rolling_cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="rolling_payload",
+        anchor_date=anchor_date,
+    )
+    hover_cache_key = _get_scd_cache_key(
+        ticker=ticker,
+        window_days=window_days,
+        payload_kind="hover_ohlcv",
+        anchor_date=anchor_date,
+    )
+
+    rolling_hit = (
+        not force_refresh
+        and rolling_cache_key in st.session_state.scd_payload_cache
+    )
+    hover_hit = (
+        not force_refresh
+        and hover_cache_key in st.session_state.scd_hover_ohlcv_cache
+    )
+
+    if rolling_hit and hover_hit:
+        stats["rolling_hits"] += 1
+        stats["hover_hits"] += 1
+
+        rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+
+        return {
+            "rolling_payload": rolling_payload,
+            "indicator_context_df": cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df,
+            "source": "cache",
+        }
+
+    if rolling_hit:
+        # Rare partial-cache case: keep the cached rolling payload and only
+        # fill the missing hover/context dataframe through the legacy fallback.
+        stats["rolling_hits"] += 1
+        rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        hover_df = _fetch_scd_hover_ohlcv_df_for_ticker(
+            ticker=ticker,
+            window_days=window_days,
+            force_refresh=False,
+            anchor_date=anchor_date,
+        )
+
+        return {
+            "rolling_payload": rolling_payload,
+            "indicator_context_df": hover_df,
+            "source": "partial_cache_hover_fallback",
+        }
+
+    stats["rolling_misses"] += 1
+    if hover_hit:
+        stats["hover_hits"] += 1
+    else:
+        stats["hover_misses"] += 1
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+        ),
+    )
+
+    if not isinstance(bundle, dict):
+        return {
+            "rolling_payload": {},
+            "indicator_context_df": None,
+            "source": "invalid_bundle",
+        }
+
+    rolling_payload = bundle.get("rolling_payload")
+    indicator_context_df = bundle.get("indicator_context_df")
+
+    if isinstance(rolling_payload, dict) and rolling_payload:
+        st.session_state.scd_payload_cache[rolling_cache_key] = rolling_payload
+
+    if isinstance(indicator_context_df, pd.DataFrame) and not indicator_context_df.empty:
+        st.session_state.scd_hover_ohlcv_cache[hover_cache_key] = indicator_context_df.copy()
+    elif hover_hit:
+        cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+        indicator_context_df = cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df
+
+    return {
+        "rolling_payload": rolling_payload,
+        "indicator_context_df": indicator_context_df,
+        "source": "bundled",
+    }
+
+
+def _normalize_scd_rolling_payload_for_adapter(
+    rolling_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Normalize the raw SCD rolling payload into the adapter contract.
+
+    The existing Rolling Signal Heatmap does this before calling
+    build_plotly_heatmap_inputs(...). SCD must do the same because the adapter
+    expects dates + rows[row_key].values/scores/hover/extras, not the raw
+    short_term.data[date][row_key] structure.
+    """
+    return _extract_rolling_signals_from_data({"rolling_signals": rolling_payload})
+
+
+def _build_scd_adapter_lookup(
+    *,
+    rolling_payload: Dict[str, Any],
+    row_keys: list[str],
+    ohlcv_df: Optional[pd.DataFrame] = None,
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """
+    Build adapter-owned display metadata by row_key and raw date.
+
+    Shape:
+        lookup[row_key][raw_date] = {
+            "customdata": adapter customdata dict,
+            "text": adapter in-cell text,
+            "z": adapter score/color value,
+        }
+
+    This is the only SCD bridge into the Rolling Heatmap adapter display
+    contract. It normalizes the raw payload before adapter use.
+    """
+    lookup: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    adapter_payload = _normalize_scd_rolling_payload_for_adapter(rolling_payload)
+
+    try:
+        hm = build_plotly_heatmap_inputs(
+            rolling_payload=adapter_payload,
+            indicator_keys=row_keys,
+            indicator_defs=INDICATOR_DEFS,
+            ohlcv_df=ohlcv_df,
+        )
+    except Exception:
+        return lookup
+
+    for row_idx, row_key in enumerate(hm.row_keys):
+        lookup.setdefault(row_key, {})
+
+        customdata_row = hm.customdata[row_idx] if row_idx < len(hm.customdata) else []
+        text_row = hm.text[row_idx] if row_idx < len(hm.text) else []
+        z_row = hm.z[row_idx] if row_idx < len(hm.z) else []
+
+        for col_idx, adapter_cd in enumerate(customdata_row):
+            if not isinstance(adapter_cd, dict):
+                continue
+
+            raw_date = adapter_cd.get("date")
+            if raw_date is None:
+                continue
+
+            lookup[row_key][str(raw_date)] = {
+                "customdata": dict(adapter_cd),
+                "text": text_row[col_idx] if col_idx < len(text_row) else "",
+                "z": z_row[col_idx] if col_idx < len(z_row) else None,
+            }
+
+    return lookup
+
+
+def _extract_latest_scd_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    rolling_payload: Dict[str, Any],
+    adapter_lookup: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """
+    Extract the latest available SCD matrix cell for row_key.
+
+    Indicator rows preserve existing value / signal / score / hover / extras
+    from the raw rolling payload. Display text and rich hover metadata are
+    consumed from the normalized adapter path when available.
+    """
+    ticker = str(ticker).strip().upper()
+    row_key = str(row_key).strip()
+    dates = list(rolling_payload.get("dates", []))
+    adapter_lookup = adapter_lookup or {}
+
+    if row_key == "__PRICE__":
+        for date_key in reversed(dates):
+            adapter_entry = adapter_lookup.get("__PRICE__", {}).get(str(date_key), {})
+            adapter_cd = adapter_entry.get("customdata")
+
+            if not isinstance(adapter_cd, dict) or not adapter_cd:
+                continue
+
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": adapter_cd.get("raw_value"),
+                "signal": "",
+                "score": adapter_entry.get("z"),
+                "hover": None,
+                "status": "ok",
+                "display_text": adapter_entry.get("text", ""),
+                "adapter_customdata": dict(adapter_cd),
+            }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": dates[-1] if dates else None,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No Price row available for {ticker}.",
+            "status": "missing_cell",
+            "display_text": "missing_cell",
+        }
+
+    short_term = rolling_payload.get("short_term")
+    data = short_term.get("data", {}) if isinstance(short_term, dict) else {}
+
+    for date_key in reversed(dates):
+        date_cells = data.get(date_key, {})
+        if not isinstance(date_cells, dict):
+            continue
+
+        source_cell = date_cells.get(row_key)
+        if not isinstance(source_cell, dict):
+            continue
+
+        adapter_entry = adapter_lookup.get(row_key, {}).get(str(date_key), {})
+        adapter_cd = adapter_entry.get("customdata")
+
+        cell = {
+            "ticker": ticker,
+            "row_key": row_key,
+            "date": date_key,
+            "value": source_cell.get("value"),
+            "signal": source_cell.get("signal"),
+            "score": source_cell.get("score"),
+            "hover": source_cell.get("hover"),
+            "status": "ok",
+            "display_text": adapter_entry.get("text", ""),
+        }
+
+        if "extras" in source_cell:
+            cell["extras"] = source_cell.get("extras")
+
+        if isinstance(adapter_cd, dict) and adapter_cd:
+            cell["adapter_customdata"] = dict(adapter_cd)
+
+        return cell
+
+    return {
+        "ticker": ticker,
+        "row_key": row_key,
+        "date": None,
+        "value": None,
+        "signal": None,
+        "score": None,
+        "hover": f"No latest cell available for {row_key} on {ticker}.",
+        "status": "missing_cell",
+        "display_text": "missing_cell",
+    }
+
+
+def _build_scd_cross_sectional_matrix(
+    *,
+    selected_tickers: list[str],
+    selected_row_keys: list[str],
+    window_days: int = 10,
+    force_refresh: bool = False,
+    anchor_date: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Build the SCD latest-cell cross-sectional matrix.
+
+    Shape:
+        matrix["cells"][row_key][ticker] = latest existing Rolling Heatmap cell
+
+    This function reshapes existing rolling payload cells only. It does not
+    compute new scores, rank tickers, aggregate signals, or reinterpret meaning.
+    """
+    tickers = _dedupe_preserve_order_str(selected_tickers)
+    selected_row_keys_clean = [
+        str(row_key).strip()
+        for row_key in selected_row_keys
+        if str(row_key).strip()
+    ]
+
+    row_keys = ["__PRICE__"] + [
+        row_key for row_key in selected_row_keys_clean
+        if row_key != "__PRICE__"
+    ]
+
+    profile_started_at = time.perf_counter()
+
+    matrix = {
+        "status": "ok",
+        "window_days": int(window_days),
+        "anchor_mode": "asof",
+        "anchor_date": anchor_date,
+        "tickers": tickers,
+        "row_keys": row_keys,
+        "cells": {row_key: {} for row_key in row_keys},
+        "ticker_status": {},
+        "errors": [],
+        "profile": {
+            "ticker_count": len(tickers),
+            "row_count": len(row_keys),
+            "anchor_date": str(anchor_date),
+            "total_seconds": None,
+            "tickers": {},
+        },
+    }
+
+    if not tickers:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No SCD tickers selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
+        return matrix
+
+    if not selected_row_keys_clean:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No SCD indicator row keys selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
+        return matrix
+
+    for ticker in tickers:
+        ticker_started_at = time.perf_counter()
+        ticker_profile = {
+            "rolling_payload_seconds": None,
+            "hover_context_seconds": None,
+            "adapter_lookup_seconds": None,
+            "latest_cell_extraction_seconds": None,
+            "total_seconds": None,
+            "status": "started",
+        }
+        matrix["profile"]["tickers"][ticker] = ticker_profile
+
+        try:
+            stage_started_at = time.perf_counter()
+            bundle = _fetch_scd_rolling_bundle_for_ticker(
+                ticker=ticker,
+                window_days=window_days,
+                force_refresh=force_refresh,
+                anchor_date=anchor_date,
+            )
+            ticker_profile["rolling_payload_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+            hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+            bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+
+            # Hover/context is now supplied by the same technical-layer pass as
+            # the rolling payload. There is no separate hover fetch in the
+            # normal bundled cold path.
+            ticker_profile["hover_context_seconds"] = 0.0
+            ticker_profile["bundle_source"] = bundle_source
+
+            if not isinstance(rolling_payload, dict) or not rolling_payload:
+                matrix["ticker_status"][ticker] = {
+                    "status": "empty",
+                    "message": "No rolling payload returned.",
+                    "bundle_source": bundle_source,
+                }
+                for row_key in row_keys:
+                    matrix["cells"][row_key][ticker] = {
+                        "ticker": ticker,
+                        "row_key": row_key,
+                        "date": None,
+                        "value": None,
+                        "signal": None,
+                        "score": None,
+                        "hover": f"No rolling payload returned for {ticker}.",
+                        "status": "missing_payload",
+                        "display_text": "missing_payload",
+                    }
+                ticker_profile["status"] = "missing_payload"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
+                continue
+
+            payload_status = rolling_payload.get("status", "unknown")
+            payload_dates = list(rolling_payload.get("dates", []))
+
+            matrix["ticker_status"][ticker] = {
+                "status": payload_status,
+                "dates": payload_dates,
+                "latest_date": payload_dates[-1] if payload_dates else None,
+                "bundle_source": bundle_source,
+                "has_indicator_context": (
+                    isinstance(hover_ohlcv_df, pd.DataFrame)
+                    and not hover_ohlcv_df.empty
+                ),
+            }
+
+            stage_started_at = time.perf_counter()
+            adapter_lookup = _build_scd_adapter_lookup(
+                rolling_payload=rolling_payload,
+                row_keys=selected_row_keys_clean,
+                ohlcv_df=hover_ohlcv_df,
+            )
+            ticker_profile["adapter_lookup_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            stage_started_at = time.perf_counter()
+            for row_key in row_keys:
+                matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
+                    ticker=ticker,
+                    row_key=row_key,
+                    rolling_payload=rolling_payload,
+                    adapter_lookup=adapter_lookup,
+                )
+            ticker_profile["latest_cell_extraction_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+            ticker_profile["status"] = "ok"
+            ticker_profile["total_seconds"] = round(
+                time.perf_counter() - ticker_started_at,
+                3,
+            )
+
+        except Exception as e:
+            message = f"{ticker}: {e}"
+            matrix["errors"].append(message)
+            matrix["ticker_status"][ticker] = {
+                "status": "error",
+                "message": str(e),
+            }
+
+            for row_key in row_keys:
+                matrix["cells"][row_key][ticker] = {
+                    "ticker": ticker,
+                    "row_key": row_key,
+                    "date": None,
+                    "value": None,
+                    "signal": None,
+                    "score": None,
+                    "hover": message,
+                    "status": "error",
+                    "display_text": "error",
+                }
+
+            ticker_profile["status"] = "error"
+            ticker_profile["total_seconds"] = round(
+                time.perf_counter() - ticker_started_at,
+                3,
+            )
+
+    matrix["profile"]["total_seconds"] = round(
+        time.perf_counter() - profile_started_at,
+        3,
+    )
+
+    return matrix
+
+
+def _get_scd_row_display_name(row_key: str) -> str:
+    """
+    Return the adapter-owned display label for a canonical SCD row_key.
+    """
+    if row_key == "__PRICE__":
+        return "Price"
+
+    row_def = INDICATOR_DEFS.get(row_key, {})
+    return row_def.get("display_name", row_key)
+
+
+def _format_scd_heatmap_text(row_key: str, cell: Dict[str, Any]) -> str:
+    """
+    Return adapter-produced in-cell text.
+
+    SCD does not append signal labels below values. The Rolling Heatmap adapter
+    owns cell display formatting.
+    """
+    if cell.get("status") != "ok":
+        return str(cell.get("status", ""))
+
+    display_text = cell.get("display_text")
+    if display_text:
+        return str(display_text)
+
+    value = cell.get("value")
+    if value is None:
+        return ""
+
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _build_scd_hover_customdata(
+    *,
+    ticker: str,
+    row_key: str,
+    cell: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build SCD heatmap customdata from adapter-owned hover fields.
+
+    The adapter supplies the Rolling Signal Heatmap hover contract. SCD adds
+    only cross-sectional identity and the original raw payload hover line.
+    """
+    adapter_cd = cell.get("adapter_customdata")
+    custom = dict(adapter_cd) if isinstance(adapter_cd, dict) else {}
+
+    custom.setdefault("indicator_key", row_key)
+    custom.setdefault("display_name", _get_scd_row_display_name(row_key))
+    custom.setdefault("date", cell.get("date"))
+    custom.setdefault("raw_value", cell.get("value"))
+    custom.setdefault("formatted_value", cell.get("display_text") or "")
+    custom.setdefault("score", cell.get("score"))
+    custom.setdefault("score_label", cell.get("signal"))
+
+    for key in [
+        "ma_context_block",
+        "delta_abs_fmt",
+        "delta_pct_suffix",
+        "trend_line",
+        "adx_context_block",
+        "signal_line",
+        "macd_context_block",
+        "stoch_context_block",
+        "dpo_context_block",
+        "bullbear_context_block",
+        "rule_block",
+        "notes_block",
+        "definition_block",
+        "how_to_read_block",
+        "band_context_block",
+        "volume_block",
+        "volume_vs_avg_block",
+    ]:
+        custom.setdefault(key, "")
+
+    custom["ticker"] = ticker
+    custom["row_key"] = row_key
+    custom["status"] = cell.get("status")
+
+    payload_hover = cell.get("hover")
+    custom["scd_payload_hover_block"] = (
+        f"<br>{payload_hover}" if payload_hover else ""
+    )
+
+    return custom
+
+
+def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
+    """
+    Build the SCD Plotly Heatmap View from the already-built SCD matrix.
+    """
+    tickers = list(matrix.get("tickers", []))
+    row_keys = list(matrix.get("row_keys", []))
+    cells = matrix.get("cells", {})
+
+    y_labels = [_get_scd_row_display_name(row_key) for row_key in row_keys]
+    z = []
+    text = []
+    customdata = []
+
+    for row_key in row_keys:
+        z_row = []
+        text_row = []
+        custom_row = []
+
+        for ticker in tickers:
+            cell = cells.get(row_key, {}).get(ticker, {})
+            score = cell.get("score")
+
+            try:
+                z_row.append(float(score) if score is not None else None)
+            except (TypeError, ValueError):
+                z_row.append(None)
+
+            text_row.append(_format_scd_heatmap_text(row_key, cell))
+            custom_row.append(
+                _build_scd_hover_customdata(
+                    ticker=ticker,
+                    row_key=row_key,
+                    cell=cell,
+                )
+            )
+
+        z.append(z_row)
+        text.append(text_row)
+        customdata.append(custom_row)
+
+    colorscale = [
+        [0.0, "#8B0000"],   # strong sell
+        [0.25, "#CD5C5C"],  # sell
+        [0.5, "#D3D3D3"],   # neutral
+        [0.75, "#90EE90"],  # buy
+        [1.0, "#006400"],   # strong buy
+    ]
+
+    hovertemplate = (
+        "<b>%{customdata.display_name}</b><br>"
+        "Ticker: %{customdata.ticker}<br>"
+        "Date: %{customdata.date}<br>"
+        "<br>"
+        "Value: %{customdata.formatted_value}<br>"
+        "%{customdata.ma_context_block}"
+        "Δ vs prior day: %{customdata.delta_abs_fmt}"
+        "%{customdata.delta_pct_suffix}<br>"
+        "%{customdata.trend_line}"
+        "%{customdata.adx_context_block}"
+        "%{customdata.signal_line}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.stoch_context_block}"
+        "%{customdata.dpo_context_block}"
+        "%{customdata.bullbear_context_block}"
+        "%{customdata.rule_block}"
+        "%{customdata.notes_block}"
+        "%{customdata.definition_block}"
+        "%{customdata.how_to_read_block}"
+        "%{customdata.band_context_block}"
+        "%{customdata.volume_block}"
+        "%{customdata.volume_vs_avg_block}"
+        "%{customdata.scd_payload_hover_block}"
+        "<extra></extra>"
+    )
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=tickers,
+            y=y_labels,
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=colorscale,
+            zmin=-2,
+            zmax=2,
+            hovertemplate=hovertemplate,
+            colorbar=dict(title="Score"),
+        )
+    )
+
+    row_count = max(len(y_labels), 1)
+    dynamic_height = max(450, 30 * row_count + 160)
+
+    fig.update_layout(
+        title="",
+        margin=dict(l=170, r=20, t=30, b=40),
+        height=dynamic_height,
+    )
+
+    fig.update_xaxes(side="top", type="category")
+    fig.update_yaxes(
+        autorange="reversed",
+        automargin=True,
+        tickfont=dict(size=11),
+    )
+
+    return fig
+
+
+def _build_scd_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Build the SCD Detail Table View from the same matrix cells as the heatmap.
+    """
+    rows = []
+    cells = matrix.get("cells", {})
+
+    for row_key in matrix.get("row_keys", []):
+        display_name = _get_scd_row_display_name(row_key)
+
+        for ticker in matrix.get("tickers", []):
+            cell = cells.get(row_key, {}).get(ticker, {})
+            adapter_cd = cell.get("adapter_customdata")
+            formatted_value = ""
+            if isinstance(adapter_cd, dict):
+                formatted_value = adapter_cd.get("formatted_value", "")
+
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "row_key": row_key,
+                    "display_name": display_name,
+                    "date": cell.get("date"),
+                    "value": cell.get("value"),
+                    "formatted_value": formatted_value or cell.get("display_text"),
+                    "signal": cell.get("signal"),
+                    "score": cell.get("score"),
+                    "status": cell.get("status"),
+                    "hover": cell.get("hover"),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def _render_scd_matrix_view(matrix: Optional[Dict[str, Any]]) -> None:
+    """
+    Render the Stock Comparison heatmap, detail table, and diagnostics.
+
+    This consumes the existing matrix. It does not trigger payload execution
+    and does not compute new numeric or semantic truth.
+    """
+    if not matrix:
+        st.info("No comparison matrix has been built yet.")
+        return
+
+    if matrix.get("errors"):
+        st.warning("Some ticker payloads produced errors.")
+        with st.expander("View ticker errors", expanded=False):
+            st.write(matrix.get("errors"))
+
+        with st.expander("Ticker payload status", expanded=False):
+            st.json(matrix.get("ticker_status", {}))
+
+    fig = _build_scd_heatmap_figure(matrix)
+    st.plotly_chart(fig, use_container_width=True)
+
+    snapshot_date = matrix.get("anchor_date") or "Latest available completed snapshot"
+    ticker_count = len(matrix.get("tickers", []))
+    row_count = len(matrix.get("row_keys", []))
+    st.caption(
+        f"Snapshot date: {snapshot_date} | "
+        f"Tickers: {ticker_count} | "
+        f"Indicator rows: {row_count}"
+    )
+
+    profile = matrix.get("profile", {})
+    if isinstance(profile, dict) and profile:
+        show_performance_profile = st.checkbox(
+            "Show Performance Profile",
+            value=False,
+            key="scd_show_performance_profile",
+            help=(
+                "Show timing diagnostics for the latest matrix build. "
+                "This is for performance investigation only."
+            ),
+        )
+
+        if show_performance_profile:
+            st.caption(
+                f"Total build time: {profile.get('total_seconds')}s | "
+                f"Tickers: {profile.get('ticker_count')} | "
+                f"Rows: {profile.get('row_count')}"
+            )
+
+            ticker_profile = profile.get("tickers", {})
+            if isinstance(ticker_profile, dict) and ticker_profile:
+                profile_rows = []
+                for ticker, stats in ticker_profile.items():
+                    if not isinstance(stats, dict):
+                        continue
+                    profile_rows.append({
+                        "ticker": ticker,
+                        "status": stats.get("status"),
+                        "bundle_source": stats.get("bundle_source"),
+                        "rolling_payload_seconds": stats.get("rolling_payload_seconds"),
+                        "hover_context_seconds": stats.get("hover_context_seconds"),
+                        "adapter_lookup_seconds": stats.get("adapter_lookup_seconds"),
+                        "latest_cell_extraction_seconds": stats.get("latest_cell_extraction_seconds"),
+                        "total_seconds": stats.get("total_seconds"),
+                    })
+
+                if profile_rows:
+                    st.dataframe(
+                        pd.DataFrame(profile_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+    show_detail_export = st.checkbox(
+        "Show Details / Export",
+        value=False,
+        key="scd_show_detail_export",
+        help=(
+            "Build and display the detail table only when needed for audit, "
+            "copy/export, or validation."
+        ),
+    )
+
+    if show_detail_export:
+        with st.expander("Details / Export", expanded=True):
+            detail_df = _build_scd_detail_table(matrix)
+
+            if detail_df.empty:
+                st.info("No detail rows available.")
+            else:
+                st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+                csv = detail_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Download Detail Table CSV",
+                    data=csv,
+                    file_name="stock_comparison_detail_table.csv",
+                    mime="text/csv",
+                    key="scd_detail_table_csv_download",
+                )
+
+        
 def is_final_data_available_for_date(target_date: datetime) -> bool:
     """
     Check if final data is available for a given date
@@ -2520,6 +4133,173 @@ def show_performance_heatmaps():
         "Data provided by Yahoo Finance via yfinance"
     )
 
+def show_stock_comparison_dashboard():
+    """
+    Render the Stock Comparison Dashboard v1 route shell.
+
+    WS2 scope: SCD-specific ticker controls only.
+    Indicator selection, rolling payload execution, matrix assembly, heatmap,
+    and detail table rendering are added in later workstreams.
+    """
+    st.title("📋 Stock Comparison Dashboard")
+    st.caption("Phase III Extension — Stock Comparison Dashboard v1")
+
+    st.markdown(
+        """
+        This dashboard will compare selected technical indicator rows across
+        selected tickers using the existing Rolling Heatmap value / signal / score path.
+        """
+    )
+
+    selected_tickers = _render_scd_ticker_controls()
+
+    if selected_tickers:
+        st.caption(
+            f"Selected tickers: {len(selected_tickers)} — "
+            + ", ".join(selected_tickers)
+        )
+    else:
+        st.info("Choose at least one ticker in the sidebar.")
+
+    selected_row_keys = _render_scd_indicator_selection_controls()
+
+    st.subheader("Build Comparison Matrix")
+
+    st.checkbox(
+        "Use specific as-of date",
+        key="scd_use_anchor_date",
+        help=(
+            "Use this to build the comparison as of a selected date instead of "
+            "the latest available completed snapshot. If the selected date is not "
+            "a trading day, the existing data path resolves to the nearest valid "
+            "trading day according to the current date-handling rules."
+        ),
+    )
+
+    use_anchor_date = bool(st.session_state.get("scd_use_anchor_date", False))
+
+    selected_anchor_date = None
+    if use_anchor_date:
+        st.date_input(
+            "As-of date",
+            key="scd_anchor_date",
+            help=(
+                "Choose the date for the comparison snapshot. Selecting today is "
+                "allowed, but values may depend on what data is available for the "
+                "current session."
+            ),
+        )
+        selected_anchor_date = st.session_state.get("scd_anchor_date")
+
+    effective_anchor_date = _resolve_scd_effective_anchor_date(
+        use_anchor_date=use_anchor_date,
+        selected_anchor_date=selected_anchor_date,
+    )
+
+    if use_anchor_date:
+        st.caption(f"Snapshot date: {effective_anchor_date}")
+    else:
+        st.caption(f"Snapshot date: Latest available completed snapshot ({effective_anchor_date})")
+
+    can_build_matrix = bool(selected_tickers) and bool(selected_row_keys)
+    if not can_build_matrix:
+        st.info("Select at least one ticker and one indicator row to build the SCD matrix.")
+
+    col_build, col_clear_matrix = st.columns([0.45, 0.55])
+
+    with col_build:
+        build_clicked = st.button(
+            "Build/Refresh Matrix",
+            key="scd_build_matrix",
+            type="primary",
+            disabled=not can_build_matrix,
+            use_container_width=True,
+        )
+
+    with col_clear_matrix:
+        if st.button(
+            "Clear Results",
+            key="scd_clear_matrix",
+            disabled=st.session_state.scd_signal_matrix is None,
+            use_container_width=True,
+            help=(
+                "Removes the currently displayed heatmap and detail table from the page. "
+                "This does not clear saved ticker data, so rebuilding can still be fast."
+            ),
+        ):
+            st.session_state.scd_signal_matrix = None
+            st.session_state.scd_matrix_last_run = None
+            st.rerun()
+
+    if build_clicked:
+        # Read from Session State at build time so the recalculation value used
+        # by the matrix builder matches the active widget state for this run.
+        force_refresh_for_build = bool(
+            st.session_state.get("scd_force_refresh_cache", False)
+        )
+
+        if force_refresh_for_build:
+            _get_scd_cache_stats()["force_refreshes"] += 1
+
+        with st.spinner("Building comparison matrix from existing rolling signal data..."):
+            st.session_state.scd_signal_matrix = _build_scd_cross_sectional_matrix(
+                selected_tickers=selected_tickers,
+                selected_row_keys=selected_row_keys,
+                window_days=10,
+                force_refresh=force_refresh_for_build,
+                anchor_date=effective_anchor_date,
+            )
+            st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
+     
+    if st.session_state.scd_matrix_last_run:
+        st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
+
+    _render_scd_matrix_view(st.session_state.scd_signal_matrix)
+
+    with st.expander("Advanced options", expanded=False):
+        st.checkbox(
+            "Recalculate selected tickers on next build",
+            key="scd_force_refresh_cache",
+            help=(
+                "Use this when you want the currently selected tickers recalculated "
+                "instead of reused from this session's saved results. This only refreshes "
+                "the tickers currently selected. Other cached tickers are kept. For a full "
+                "reset of all saved ticker data, use Clear Cache."
+            ),
+        )
+
+        cache_is_empty = (
+            not st.session_state.get("scd_payload_cache")
+            and not st.session_state.get("scd_hover_ohlcv_cache")
+        )
+
+        if st.button(
+            "Clear Cache",
+            key="scd_clear_cache",
+            disabled=cache_is_empty,
+            use_container_width=True,
+            help=(
+                "Clears all saved ticker data from this app session. The next build "
+                "will calculate the selected tickers from scratch. Use this when "
+                "you want a full reset, not just a refresh of the currently selected tickers."
+            ),
+        ):
+            _clear_scd_session_cache()
+            st.rerun()
+
+    with st.expander("Cache status", expanded=False):
+        cache_stats = _get_scd_cache_stats()
+        st.caption(
+            "Cache status after latest build: "
+            f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
+            f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s). "
+            f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
+            f"hover={cache_stats.get('hover_hits', 0)}. "
+            f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
+            f"hover={cache_stats.get('hover_misses', 0)}. "
+            f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
+        )
+
 def main():
     """Main application function with page navigation"""
     # Page config
@@ -2579,15 +4359,7 @@ def main():
     elif st.session_state.selected_page == 'technical_analysis':
         show_technical_analysis_dashboard()
     elif st.session_state.selected_page == 'stock_comparison':
-        # Placeholder for Dashboard 2
-        st.title("📋 Stock Comparison Dashboard")
-        st.info("Dashboard 2: Multi-stock technical comparison coming soon...")
-        st.markdown("""
-        This dashboard will allow you to:
-        - Compare technical indicators across multiple stocks
-        - Use the existing bucket system (Country/Sector/Custom)
-        - Display technical heatmaps for comparative analysis
-        """)
+        show_stock_comparison_dashboard()
 
 if __name__ == "__main__":
     main()

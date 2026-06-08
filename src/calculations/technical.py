@@ -919,16 +919,27 @@ class DatabaseIntegratedTechnicalCalculator:
                 except Exception as e:
                     print(f"SMA SCORE SERIES DEBUG {pk}: error={e}")
 
-        if return_type not in ("scores", "rolling"):
-            raise ValueError(f"return_type must be 'scores' or 'rolling', got: {return_type}")
+        if return_type not in ("scores", "rolling", "rolling_with_context"):
+            raise ValueError(
+                "return_type must be 'scores', 'rolling', or "
+                f"'rolling_with_context', got: {return_type}"
+            )
 
-        if return_type == "rolling":
-            return self._build_optionc_rolling_signals(
+        if return_type in ("rolling", "rolling_with_context"):
+            rolling_payload = self._build_optionc_rolling_signals(
                 ticker=ticker,
                 df_ind=df_ind,
                 scores=scores,
                 days=10,
-            )        
+            )
+
+            if return_type == "rolling_with_context":
+                return {
+                    "rolling_payload": rolling_payload,
+                    "indicator_context_df": df_ind,
+                }
+
+            return rolling_payload
         
         return scores
 

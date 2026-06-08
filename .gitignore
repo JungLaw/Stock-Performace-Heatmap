@@ -33,3 +33,4 @@ start.ps1
 pivot_points_full_diff.txt
 contract_audit_report.csv
 test_mfi.py
+baseline/indicator_baseline_AAPL.csv
