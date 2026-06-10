@@ -1,4 +1,4 @@
-# Stamp: Fri, June 5, 2026 6:37PM
+# Stamp: Wed, June 10, 2026 2:27PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -534,7 +534,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
     SCD-specific controls and delegates row-key resolution to the existing
     Rolling Heatmap selection resolver.
     """
-    st.subheader("2) Indicator Selection")
+    st.subheader("Indicator Selection")
 
     mode_options = get_selection_modes()
     if not mode_options:
@@ -1608,10 +1608,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "Date: %{customdata.date}<br>"
         "<br>"
         "Value: %{customdata.formatted_value}<br>"
-        "%{customdata.ma_context_block}"
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
+        "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
