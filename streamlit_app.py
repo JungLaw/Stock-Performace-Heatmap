@@ -160,6 +160,12 @@ def initialize_session_state():
     if 'scd_ticker_limit' not in st.session_state:
         st.session_state.scd_ticker_limit = 10
 
+    # Stock Comparison Dashboard analysis-mode routing.
+    # Multiple Indicators preserves the existing SCD cross-sectional matrix.
+    # Single Indicator is the planned time-series view route.
+    if 'scd_analysis_mode' not in st.session_state:
+        st.session_state.scd_analysis_mode = 'Multiple Indicators'
+
     # Stock Comparison Dashboard v1 indicator-selection session state.
     # These keys are SCD-specific but resolve through the existing Rolling
     # Heatmap row-selection resolver and catalog.
@@ -4146,10 +4152,37 @@ def show_stock_comparison_dashboard():
 
     st.markdown(
         """
-        This dashboard will compare selected technical indicator rows across
+        This dashboard compares selected technical indicator rows across
         selected tickers using the existing Rolling Heatmap value / signal / score path.
         """
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Analysis Mode")
+
+    analysis_mode_options = ["Multiple Indicators", "Single Indicator"]
+    current_analysis_mode = st.session_state.get(
+        "scd_analysis_mode",
+        "Multiple Indicators",
+    )
+    if current_analysis_mode not in analysis_mode_options:
+        current_analysis_mode = "Multiple Indicators"
+
+    analysis_mode = st.sidebar.radio(
+        "Analysis Mode",
+        options=analysis_mode_options,
+        index=analysis_mode_options.index(current_analysis_mode),
+        key="scd_analysis_mode_widget",
+        help=(
+            "Multiple Indicators shows the current cross-sectional comparison matrix. "
+            "Single Indicator will show one selected indicator across tickers and dates."
+        ),
+    )
+
+    # Keep canonical SCD analysis-mode state separate from widget state.
+    # This mirrors the existing SCD ticker-source pattern and prevents stale
+    # routing behavior when switching between analysis modes.
+    st.session_state.scd_analysis_mode = analysis_mode
 
     selected_tickers = _render_scd_ticker_controls()
 
@@ -4160,6 +4193,14 @@ def show_stock_comparison_dashboard():
         )
     else:
         st.info("Choose at least one ticker in the sidebar.")
+
+    if analysis_mode == "Single Indicator":
+        st.subheader("Single Indicator")
+        st.info(
+            "Single Indicator time-series view will be added next. "
+            "This mode will compare one selected indicator across selected tickers and dates."
+        )
+        return
 
     selected_row_keys = _render_scd_indicator_selection_controls()
 
