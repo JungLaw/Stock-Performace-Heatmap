@@ -43,6 +43,7 @@ from config.assets import (
 # renders controls, stores session state, and passes resolved row_key sets
 # into the existing downstream manual-control/render path.
 from ui.rolling_heatmap_presets import CUSTOM_DEFAULT as RH_CUSTOM_DEFAULT
+from ui.rolling_heatmap_classification import ROW_CLASSIFICATION
 from ui.rolling_heatmap_selection import (
     describe_empty_selection,
     get_category_names,
@@ -165,6 +166,18 @@ def initialize_session_state():
     # Single Indicator is the planned time-series view route.
     if 'scd_analysis_mode' not in st.session_state:
         st.session_state.scd_analysis_mode = 'Multiple Indicators'
+
+    # Stock Comparison Dashboard Single Indicator selector state.
+    # These controls select one canonical Rolling Heatmap row_key for the
+    # planned dates × tickers time-series view. They do not build data yet.
+    if 'scd_single_indicator_source' not in st.session_state:
+        st.session_state.scd_single_indicator_source = 'Main Indicators'
+
+    if 'scd_single_indicator_family' not in st.session_state:
+        st.session_state.scd_single_indicator_family = 'RSI'
+
+    if 'scd_single_indicator_row_key' not in st.session_state:
+        st.session_state.scd_single_indicator_row_key = 'RSI_14'
 
     # Stock Comparison Dashboard v1 indicator-selection session state.
     # These keys are SCD-specific but resolve through the existing Rolling
@@ -365,6 +378,178 @@ def _get_scd_selected_tickers() -> list[str]:
     ticker_limit = int(st.session_state.get("scd_ticker_limit", 10))
 
     return selected_tickers[:ticker_limit]
+
+
+def _format_scd_indicator_display_label(row_key: str) -> str:
+    """
+    Return a user-facing indicator label while preserving row_key identity.
+
+    Examples:
+        RSI_14 -> RSI(14)
+        MACD_12_26_9 -> MACD(12,26,9)
+        SMA_50 -> SMA(50)
+    """
+    row_key = str(row_key).strip()
+
+    display_name = INDICATOR_DEFS.get(row_key, {}).get("display_name")
+    if display_name:
+        # Normalize existing labels such as "RSI (14)" to "RSI(14)".
+        return display_name.replace(" (", "(").strip()
+
+    parts = row_key.split("_")
+    if len(parts) <= 1:
+        return row_key
+
+    family = parts[0]
+    params = ",".join(parts[1:])
+
+    family_display = {
+        "STOCH": "Stoch",
+        "WILLR": "Williams %R",
+        "UO": "UO",
+        "BB": "BB",
+    }.get(family, family)
+
+    return f"{family_display}({params})"
+
+
+def _get_scd_single_indicator_main_rows() -> list[str]:
+    """
+    Return quick-access Single Indicator candidates.
+
+    Main Indicators are derived from the existing Rolling Heatmap Custom
+    default membership so they stay aligned with curated Custom changes.
+    """
+    return [
+        row_key
+        for row_key in RH_CUSTOM_DEFAULT
+        if row_key in ROW_CLASSIFICATION
+    ]
+
+
+def _get_scd_single_indicator_available_rows() -> list[str]:
+    """
+    Return catalog-backed Single Indicator candidates.
+
+    v1 intentionally uses known Rolling Heatmap row keys and excludes Price.
+    """
+    return [
+        row_key
+        for row_key in ROW_CLASSIFICATION.keys()
+        if row_key in INDICATOR_DEFS
+    ]
+
+
+def _get_scd_single_indicator_family_options(row_keys: list[str]) -> list[str]:
+    """Return sorted family names available for the provided row keys."""
+    families = sorted(
+        {
+            ROW_CLASSIFICATION[row_key].get("family", "")
+            for row_key in row_keys
+            if row_key in ROW_CLASSIFICATION
+        }
+    )
+    return [family for family in families if family]
+
+
+def _render_scd_single_indicator_controls() -> str | None:
+    """
+    Render selector controls for the planned SCD Single Indicator time-series view.
+
+    This returns one canonical row_key. It does not build time-series data.
+    """
+    st.subheader("Single Indicator")
+
+    source_options = ["Main Indicators", "Available Indicators"]
+    current_source = st.session_state.get(
+        "scd_single_indicator_source",
+        "Main Indicators",
+    )
+    if current_source not in source_options:
+        current_source = "Main Indicators"
+
+    selected_source = st.selectbox(
+        "Indicator Source",
+        options=source_options,
+        index=source_options.index(current_source),
+        key="scd_single_indicator_source_widget",
+        help=(
+            "Main Indicators are derived from the current Custom default row set. "
+            "Available Indicators are drawn from the Rolling Heatmap row catalog."
+        ),
+    )
+    st.session_state.scd_single_indicator_source = selected_source
+
+    if selected_source == "Main Indicators":
+        candidate_rows = _get_scd_single_indicator_main_rows()
+    else:
+        candidate_rows = _get_scd_single_indicator_available_rows()
+
+    if not candidate_rows:
+        st.warning("No Single Indicator candidates are available.")
+        st.session_state.scd_single_indicator_row_key = None
+        return None
+
+    family_options = _get_scd_single_indicator_family_options(candidate_rows)
+
+    current_family = st.session_state.get(
+        "scd_single_indicator_family",
+        "RSI",
+    )
+    if current_family not in family_options:
+        current_family = family_options[0] if family_options else None
+
+    if selected_source == "Available Indicators" and family_options:
+        selected_family = st.selectbox(
+            "Indicator Family",
+            options=family_options,
+            index=family_options.index(current_family),
+            key="scd_single_indicator_family_widget",
+            help="Choose an indicator family, then select one parameter setting.",
+        )
+        st.session_state.scd_single_indicator_family = selected_family
+
+        candidate_rows = [
+            row_key
+            for row_key in candidate_rows
+            if ROW_CLASSIFICATION.get(row_key, {}).get("family") == selected_family
+        ]
+    else:
+        selected_family = ROW_CLASSIFICATION.get(
+            st.session_state.get("scd_single_indicator_row_key", "RSI_14"),
+            {},
+        ).get("family", "RSI")
+        st.session_state.scd_single_indicator_family = selected_family
+
+    current_row_key = st.session_state.get(
+        "scd_single_indicator_row_key",
+        "RSI_14",
+    )
+    if current_row_key not in candidate_rows:
+        if "RSI_14" in candidate_rows:
+            current_row_key = "RSI_14"
+        else:
+            current_row_key = candidate_rows[0]
+
+    selected_row_key = st.selectbox(
+        "Indicator",
+        options=candidate_rows,
+        index=candidate_rows.index(current_row_key),
+        key="scd_single_indicator_row_key_widget",
+        format_func=_format_scd_indicator_display_label,
+        help="Select one indicator row for the planned dates × tickers view.",
+    )
+
+    st.session_state.scd_single_indicator_row_key = selected_row_key
+
+    selected_label = _format_scd_indicator_display_label(selected_row_key)
+    selected_family = ROW_CLASSIFICATION.get(selected_row_key, {}).get("family", "Unknown")
+
+    st.success(f"Selected indicator: {selected_label}")
+    st.caption(f"Canonical row key: {selected_row_key} | Family: {selected_family}")
+
+    return selected_row_key
+
 
 def _render_scd_ticker_controls() -> list[str]:
     """
@@ -4195,11 +4380,19 @@ def show_stock_comparison_dashboard():
         st.info("Choose at least one ticker in the sidebar.")
 
     if analysis_mode == "Single Indicator":
-        st.subheader("Single Indicator")
+        selected_single_indicator = _render_scd_single_indicator_controls()
+
         st.info(
             "Single Indicator time-series view will be added next. "
             "This mode will compare one selected indicator across selected tickers and dates."
         )
+
+        if selected_single_indicator:
+            st.caption(
+                "Next step: this selected indicator will drive the dates × tickers "
+                "time-series matrix."
+            )
+
         return
 
     selected_row_keys = _render_scd_indicator_selection_controls()
