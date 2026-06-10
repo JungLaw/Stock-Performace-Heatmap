@@ -25,6 +25,8 @@ sys.path.insert(0, str(src_path))
 from calculations.performance import (
     DatabaseIntegratedPerformanceCalculator,
     get_last_completed_trading_day,
+    get_last_n_trading_days,
+    is_us_trading_day,
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
@@ -178,6 +180,33 @@ def initialize_session_state():
 
     if 'scd_single_indicator_row_key' not in st.session_state:
         st.session_state.scd_single_indicator_row_key = 'RSI_14'
+
+    # Stock Comparison Dashboard Single Indicator selector state.
+    # These controls select one canonical Rolling Heatmap row_key for the
+    # planned dates × tickers time-series view. They do not build data yet.
+    if 'scd_single_indicator_source' not in st.session_state:
+        st.session_state.scd_single_indicator_source = 'Main Indicators'
+
+    if 'scd_single_indicator_family' not in st.session_state:
+        st.session_state.scd_single_indicator_family = 'RSI'
+
+    if 'scd_single_indicator_row_key' not in st.session_state:
+        st.session_state.scd_single_indicator_row_key = 'RSI_14'
+
+    # Stock Comparison Dashboard Single Indicator date-window state.
+    # These controls resolve a visible trading-day window only. They do not
+    # fetch data, build matrices, or change cache/acquisition behavior yet.
+    if 'scd_single_trading_days' not in st.session_state:
+        st.session_state.scd_single_trading_days = 20
+
+    if 'scd_single_anchor_mode' not in st.session_state:
+        st.session_state.scd_single_anchor_mode = 'End date'
+
+    if 'scd_single_use_anchor_date' not in st.session_state:
+        st.session_state.scd_single_use_anchor_date = False
+
+    if 'scd_single_anchor_date' not in st.session_state:
+        st.session_state.scd_single_anchor_date = datetime.now().date()
 
     # Stock Comparison Dashboard v1 indicator-selection session state.
     # These keys are SCD-specific but resolve through the existing Rolling
@@ -549,6 +578,170 @@ def _render_scd_single_indicator_controls() -> str | None:
     st.caption(f"Canonical row key: {selected_row_key} | Family: {selected_family}")
 
     return selected_row_key
+
+
+def _coerce_scd_date_to_datetime(value: Any) -> datetime:
+    """Return a normalized naive datetime for an SCD date-control value."""
+    try:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts.normalize().to_pydatetime()
+    except Exception:
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _get_next_n_trading_days_for_scd(start_date: datetime, n: int) -> list[datetime]:
+    """Return n trading days starting at or after start_date."""
+    trading_days: list[datetime] = []
+    cursor = _coerce_scd_date_to_datetime(start_date)
+
+    while len(trading_days) < int(n):
+        if is_us_trading_day(cursor):
+            trading_days.append(cursor)
+        cursor += timedelta(days=1)
+
+    return trading_days
+
+
+def _resolve_scd_single_indicator_date_window(
+    *,
+    trading_days: int,
+    anchor_mode: str,
+    use_anchor_date: bool,
+    anchor_date: Any,
+) -> Dict[str, Any]:
+    """
+    Resolve the Single Indicator visible trading-day window.
+
+    This is a UI/request helper only. It does not fetch data, build a matrix,
+    change cache identity, or alter acquisition behavior.
+    """
+    trading_days = int(trading_days)
+
+    if use_anchor_date and anchor_date is not None:
+        effective_anchor = _coerce_scd_date_to_datetime(anchor_date)
+    else:
+        effective_anchor = _coerce_scd_date_to_datetime(get_last_completed_trading_day())
+
+    if anchor_mode == "Start date":
+        window_dates = _get_next_n_trading_days_for_scd(effective_anchor, trading_days)
+        scenario_b_anchor_mode = "start"
+    else:
+        # Default behavior: visible window ends on the anchor date.
+        window_dates = get_last_n_trading_days(effective_anchor, trading_days)
+        scenario_b_anchor_mode = "asof"
+
+    date_strings = [
+        pd.Timestamp(day).strftime("%Y-%m-%d")
+        for day in window_dates
+    ]
+
+    window_start = date_strings[0] if date_strings else None
+    window_end = date_strings[-1] if date_strings else None
+
+    return {
+        "trading_days": trading_days,
+        "anchor_mode": anchor_mode,
+        "scenario_b_anchor_mode": scenario_b_anchor_mode,
+        "use_anchor_date": bool(use_anchor_date),
+        "anchor_date": pd.Timestamp(effective_anchor).date(),
+        "window_start_date": window_start,
+        "window_end_date": window_end,
+        "date_strings": date_strings,
+    }
+
+
+def _render_scd_single_indicator_date_controls() -> Dict[str, Any]:
+    """
+    Render date-window controls for the planned Single Indicator time-series view.
+
+    Returns resolved request metadata only. It does not build the matrix yet.
+    """
+    st.subheader("Date Window")
+
+    trading_day_options = [10, 20, 30, 40]
+    current_trading_days = int(
+        st.session_state.get("scd_single_trading_days", 20)
+    )
+    if current_trading_days not in trading_day_options:
+        current_trading_days = 20
+
+    d1, d2 = st.columns(2)
+
+    with d1:
+        selected_trading_days = st.selectbox(
+            "# of Trading days",
+            options=trading_day_options,
+            index=trading_day_options.index(current_trading_days),
+            key="scd_single_trading_days_widget",
+            help="Number of visible trading days for the Single Indicator view.",
+        )
+        st.session_state.scd_single_trading_days = int(selected_trading_days)
+
+    anchor_mode_options = ["End date", "Start date"]
+    current_anchor_mode = st.session_state.get(
+        "scd_single_anchor_mode",
+        "End date",
+    )
+    if current_anchor_mode not in anchor_mode_options:
+        current_anchor_mode = "End date"
+
+    with d2:
+        selected_anchor_mode = st.selectbox(
+            "Anchor mode",
+            options=anchor_mode_options,
+            index=anchor_mode_options.index(current_anchor_mode),
+            key="scd_single_anchor_mode_widget",
+            help=(
+                "End date shows the selected number of trading days ending on the anchor. "
+                "Start date shows the selected number of trading days starting from the anchor."
+            ),
+        )
+        st.session_state.scd_single_anchor_mode = selected_anchor_mode
+
+    use_anchor_date = st.checkbox(
+        "Use anchor date",
+        value=bool(st.session_state.get("scd_single_use_anchor_date", False)),
+        key="scd_single_use_anchor_date_widget",
+        help="When unchecked, the view uses the latest completed trading day.",
+    )
+    st.session_state.scd_single_use_anchor_date = bool(use_anchor_date)
+
+    if use_anchor_date:
+        selected_anchor_date = st.date_input(
+            "Anchor date",
+            value=st.session_state.get(
+                "scd_single_anchor_date",
+                datetime.now().date(),
+            ),
+            key="scd_single_anchor_date_widget",
+            help="Weekend/holiday dates resolve to the nearest valid trading-day window.",
+        )
+        st.session_state.scd_single_anchor_date = selected_anchor_date
+    else:
+        selected_anchor_date = None
+
+    date_request = _resolve_scd_single_indicator_date_window(
+        trading_days=int(selected_trading_days),
+        anchor_mode=selected_anchor_mode,
+        use_anchor_date=bool(use_anchor_date),
+        anchor_date=selected_anchor_date,
+    )
+
+    st.caption(
+        "Resolved window: "
+        f"{date_request['window_start_date']} → {date_request['window_end_date']} "
+        f"({date_request['trading_days']} trading days)"
+    )
+
+    st.caption(
+        "Request mode: "
+        f"{date_request['scenario_b_anchor_mode']} | "
+        f"Anchor date: {date_request['anchor_date']}"
+    )
+
+    return date_request
 
 
 def _render_scd_ticker_controls() -> list[str]:
@@ -4381,6 +4574,7 @@ def show_stock_comparison_dashboard():
 
     if analysis_mode == "Single Indicator":
         selected_single_indicator = _render_scd_single_indicator_controls()
+        single_indicator_date_request = _render_scd_single_indicator_date_controls()
 
         st.info(
             "Single Indicator time-series view will be added next. "
@@ -4389,8 +4583,13 @@ def show_stock_comparison_dashboard():
 
         if selected_single_indicator:
             st.caption(
-                "Next step: this selected indicator will drive the dates × tickers "
-                "time-series matrix."
+                "Next step: this selected indicator and date window will drive "
+                "the dates × tickers time-series matrix."
+            )
+            st.caption(
+                f"Selected row: {selected_single_indicator} | "
+                f"Window: {single_indicator_date_request['window_start_date']} → "
+                f"{single_indicator_date_request['window_end_date']}"
             )
 
         return
