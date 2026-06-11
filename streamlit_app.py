@@ -1,4 +1,4 @@
-# Stamp: Wed, June 10, 2026 2:27PM
+# Stamp: Thu, June 11, 2026 4:22PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1695,6 +1695,36 @@ def _extract_scd_cell_for_date(
     short_term = rolling_payload.get("short_term")
     data = short_term.get("data", {}) if isinstance(short_term, dict) else {}
 
+    if row_key == "__PRICE__":
+        adapter_entry = adapter_lookup.get("__PRICE__", {}).get(date_key, {})
+        adapter_cd = adapter_entry.get("customdata")
+
+        if isinstance(adapter_cd, dict) and adapter_cd:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": adapter_cd.get("raw_value"),
+                "signal": "",
+                "score": adapter_entry.get("z"),
+                "hover": None,
+                "status": "ok",
+                "display_text": adapter_entry.get("text", ""),
+                "adapter_customdata": dict(adapter_cd),
+            }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No Price row available for {ticker} at {date_key}.",
+            "status": "missing_cell",
+            "display_text": "missing_cell",
+        }
+
     date_cells = data.get(date_key, {})
     if not isinstance(date_cells, dict):
         date_cells = {}
@@ -1735,6 +1765,195 @@ def _extract_scd_cell_for_date(
         cell["adapter_customdata"] = dict(adapter_cd)
 
     return cell
+
+
+def _build_scd_price_cell_from_context_df(
+    *,
+    ticker: str,
+    date_key: str,
+    context_df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    """
+    Build a display-only Price cell for the SCD Single Indicator hover.
+
+    This uses the already-bundled indicator/OHLCV context dataframe returned
+    with the SCD rolling bundle. It does not fetch data, score data, persist
+    data, or introduce new technical semantics.
+    """
+    ticker = str(ticker).strip().upper()
+    date_key = str(date_key).strip()
+
+    if not isinstance(context_df, pd.DataFrame) or context_df.empty:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No context dataframe available for {ticker} at {date_key}.",
+            "status": "missing_context_df",
+            "display_text": "missing_context_df",
+        }
+
+    price_col = "Adj Close" if "Adj Close" in context_df.columns else "Close"
+    if price_col not in context_df.columns:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No price column available for {ticker} at {date_key}.",
+            "status": "missing_price_column",
+            "display_text": "missing_price_column",
+        }
+
+    try:
+        df = context_df.copy()
+        df.index = pd.to_datetime(df.index)
+        df.index = df.index.tz_localize(None) if df.index.tz is not None else df.index
+        df.index = df.index.normalize()
+        df = df.sort_index()
+
+        target_date = pd.Timestamp(date_key).normalize()
+
+        matching_rows = df.loc[df.index == target_date]
+        if matching_rows.empty:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": None,
+                "signal": "",
+                "score": None,
+                "hover": f"No price row available for {ticker} at {date_key}.",
+                "status": "missing_price_date",
+                "display_text": "missing_price_date",
+            }
+
+        current_price = pd.to_numeric(
+            matching_rows[price_col],
+            errors="coerce",
+        ).dropna()
+
+        if current_price.empty:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": None,
+                "signal": "",
+                "score": None,
+                "hover": f"Price value is missing for {ticker} at {date_key}.",
+                "status": "missing_price_value",
+                "display_text": "missing_price_value",
+            }
+
+        price_value = float(current_price.iloc[-1])
+
+        prior_rows = df.loc[df.index < target_date]
+        prior_price = None
+        if not prior_rows.empty:
+            prior_series = pd.to_numeric(
+                prior_rows[price_col],
+                errors="coerce",
+            ).dropna()
+            if not prior_series.empty:
+                prior_price = float(prior_series.iloc[-1])
+
+        delta_abs = None
+        delta_pct = None
+        if prior_price is not None:
+            delta_abs = price_value - prior_price
+            if prior_price != 0:
+                delta_pct = (delta_abs / prior_price) * 100.0
+
+        if delta_abs is None:
+            trend = ""
+            trend_line = ""
+            delta_abs_fmt = "—"
+            delta_pct_suffix = ""
+        else:
+            if delta_abs > 0:
+                trend = "Rising"
+            elif delta_abs < 0:
+                trend = "Falling"
+            else:
+                trend = "Flat"
+
+            trend_line = f"Trend: {trend}<br>"
+            delta_abs_fmt = f"{delta_abs:+.2f}"
+            delta_pct_suffix = (
+                f" ({delta_pct:+.1f}%)"
+                if delta_pct is not None
+                else ""
+            )
+
+        formatted_value = f"{price_value:.2f}"
+
+        adapter_customdata = {
+            "indicator_key": "__PRICE__",
+            "display_name": "Price",
+            "date": date_key,
+            "raw_value": price_value,
+            "formatted_value": formatted_value,
+            "score": None,
+            "score_label": "",
+            "delta_abs": delta_abs,
+            "delta_pct": delta_pct,
+            "trend": trend,
+            "rule_expr": "",
+            "rule_notes": "",
+            "rule_text": "",
+            "definition": "",
+            "how_to_read": "",
+            "delta_abs_fmt": delta_abs_fmt,
+            "delta_pct_suffix": delta_pct_suffix,
+            "trend_line": trend_line,
+            "signal_line": "",
+            "rule_block": "",
+            "notes_block": "",
+            "definition_block": "",
+            "how_to_read_block": "",
+            "volume_block": "",
+            "volume_vs_avg_block": "",
+            "band_context_block": "",
+            "ma_context_block": "",
+            "macd_context_block": "",
+            "adx_context_block": "",
+            "stoch_context_block": "",
+            "dpo_context_block": "",
+            "bullbear_context_block": "",
+            "meta": {},
+        }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": price_value,
+            "signal": "",
+            "score": None,
+            "hover": None,
+            "status": "ok",
+            "display_text": formatted_value,
+            "adapter_customdata": adapter_customdata,
+        }
+
+    except Exception as e:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"Price context error for {ticker} at {date_key}: {e}",
+            "status": "price_context_error",
+            "display_text": "price_context_error",
+        }
 
 
 def _build_scd_single_indicator_time_series_matrix(
@@ -1888,6 +2107,15 @@ def _build_scd_single_indicator_time_series_matrix(
                     rolling_payload=rolling_payload,
                     adapter_lookup=adapter_lookup,
                 )
+
+                price_cell = _build_scd_price_cell_from_context_df(
+                    ticker=ticker,
+                    date_key=date_key,
+                    context_df=hover_ohlcv_df,
+                )
+                if price_cell.get("status") == "ok":
+                    cell["price_cell"] = price_cell
+
                 if cell.get("status") != "ok":
                     missing_count += 1
                 matrix["cells"][date_key][ticker] = cell
@@ -2346,6 +2574,305 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     return fig
+
+def _derive_scd_price_trend_label(price_customdata: Dict[str, Any]) -> str:
+    """
+    Derive a simple price trend label from adapter-owned Price-row delta data.
+    """
+    delta_abs = price_customdata.get("delta_abs")
+
+    try:
+        delta_abs_f = float(delta_abs)
+    except (TypeError, ValueError):
+        return ""
+
+    if delta_abs_f > 0:
+        return "Rising"
+    if delta_abs_f < 0:
+        return "Falling"
+    return "Flat"
+
+
+def _build_scd_single_indicator_hover_customdata(
+    *,
+    ticker: str,
+    row_key: str,
+    cell: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build customdata for the Single Indicator time-series heatmap.
+
+    This reuses the existing SCD/adapter hover contract and adds Price context
+    from the attached Price-row cell when available.
+    """
+    custom = _build_scd_hover_customdata(
+        ticker=ticker,
+        row_key=row_key,
+        cell=cell,
+    )
+
+    price_cell = cell.get("price_cell")
+    price_customdata: Dict[str, Any] = {}
+
+    if isinstance(price_cell, dict):
+        maybe_cd = price_cell.get("adapter_customdata")
+        if isinstance(maybe_cd, dict):
+            price_customdata = maybe_cd
+
+    def _format_price_value_for_single_hover() -> str:
+        raw_value = price_customdata.get("raw_value")
+        if raw_value is None and isinstance(price_cell, dict):
+            raw_value = price_cell.get("value")
+
+        try:
+            return f"{float(raw_value):.2f}"
+        except (TypeError, ValueError):
+            formatted = (
+                price_customdata.get("formatted_value")
+                or (price_cell or {}).get("display_text")
+                or ""
+            )
+            formatted = str(formatted).strip()
+            if formatted.startswith("$"):
+                formatted = formatted[1:]
+            return "" if formatted == "-" else formatted
+
+    def _format_price_delta_for_single_hover() -> str:
+        delta_abs = price_customdata.get("delta_abs")
+        delta_pct = price_customdata.get("delta_pct")
+
+        delta_abs_txt = ""
+        try:
+            delta_abs_txt = f"{float(delta_abs):+.2f}"
+        except (TypeError, ValueError):
+            delta_abs_txt = str(price_customdata.get("delta_abs_fmt", "") or "").strip()
+
+        delta_pct_txt = ""
+        try:
+            delta_pct_txt = f" ({float(delta_pct):+.2f}%)"
+        except (TypeError, ValueError):
+            delta_pct_txt = str(price_customdata.get("delta_pct_suffix", "") or "").strip()
+
+        combined = f"{delta_abs_txt}{delta_pct_txt}".strip()
+        return "" if combined == "-" else combined
+
+    price_formatted = _format_price_value_for_single_hover()
+    price_delta = _format_price_delta_for_single_hover()
+    price_trend = _derive_scd_price_trend_label(price_customdata)
+
+    custom["single_price_value_suffix"] = (
+        f" | Price: {price_formatted}" if price_formatted else ""
+    )
+    custom["single_price_delta_suffix"] = (
+        f" | Price: {price_delta}" if price_delta else ""
+    )
+
+    indicator_trend = custom.get("trend") or ""
+    if indicator_trend or price_trend:
+        custom["single_combined_trend_line"] = (
+            f"Trend: {indicator_trend or 'N/A'}"
+            f"{f' | Price: {price_trend}' if price_trend else ''}<br>"
+        )
+    else:
+        custom["single_combined_trend_line"] = ""
+
+    return custom
+
+
+def _format_scd_compact_date_label(date_key: Any) -> str:
+    """Return compact M/D display text for Single Indicator heatmap row labels."""
+    try:
+        ts = pd.Timestamp(date_key)
+        return f"{ts.month}/{ts.day}"
+    except Exception:
+        return str(date_key)
+
+
+def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
+    """
+    Build the Single Indicator time-series heatmap.
+
+    Shape:
+        y-axis = dates
+        x-axis = tickers
+        z/text/customdata = one selected indicator cell per date/ticker
+    """
+    tickers = list(matrix.get("tickers", []))
+    dates = list(matrix.get("dates", []))
+    date_labels = [_format_scd_compact_date_label(date_key) for date_key in dates]
+    row_key = str(matrix.get("row_key", ""))
+    row_label = str(matrix.get("row_label", row_key))
+    cells = matrix.get("cells", {})
+
+    z = []
+    text = []
+    customdata = []
+
+    for date_key in dates:
+        z_row = []
+        text_row = []
+        custom_row = []
+
+        for ticker in tickers:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            score = cell.get("score")
+
+            try:
+                z_row.append(float(score) if score is not None else None)
+            except (TypeError, ValueError):
+                z_row.append(None)
+
+            text_row.append(_format_scd_heatmap_text(row_key, cell))
+            custom_row.append(
+                _build_scd_single_indicator_hover_customdata(
+                    ticker=ticker,
+                    row_key=row_key,
+                    cell=cell,
+                )
+            )
+
+        z.append(z_row)
+        text.append(text_row)
+        customdata.append(custom_row)
+
+    colorscale = [
+        [0.0, "#8B0000"],   # strong sell
+        [0.25, "#CD5C5C"],  # sell
+        [0.5, "#D3D3D3"],   # neutral
+        [0.75, "#90EE90"],  # buy
+        [1.0, "#006400"],   # strong buy
+    ]
+
+    hovertemplate = (
+        "<b>%{customdata.display_name}</b><br>"
+        "Ticker: %{customdata.ticker}<br>"
+        "Date: %{customdata.date}<br>"
+        "<br>"
+        "Value: %{customdata.formatted_value}"
+        "%{customdata.single_price_value_suffix}<br>"
+        "Δ vs prior day: %{customdata.delta_abs_fmt}"
+        "%{customdata.delta_pct_suffix}"
+        "%{customdata.single_price_delta_suffix}<br>"
+        "%{customdata.single_combined_trend_line}"
+        "%{customdata.ma_context_block}"
+        "%{customdata.adx_context_block}"
+        "%{customdata.signal_line}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.stoch_context_block}"
+        "%{customdata.dpo_context_block}"
+        "%{customdata.bullbear_context_block}"
+        "%{customdata.rule_block}"
+        "%{customdata.notes_block}"
+        "%{customdata.definition_block}"
+        "%{customdata.how_to_read_block}"
+        "%{customdata.band_context_block}"
+        "%{customdata.volume_block}"
+        "%{customdata.volume_vs_avg_block}"
+        "%{customdata.scd_payload_hover_block}"
+        "<extra></extra>"
+    )
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=tickers,
+            y=date_labels,
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=colorscale,
+            zmin=-2,
+            zmax=2,
+            hovertemplate=hovertemplate,
+            colorbar=dict(title="Score"),
+        )
+    )
+
+    dynamic_height = max(450, 24 * max(len(dates), 1) + 180)
+
+    fig.update_layout(
+        title=f"{row_label} — Single Indicator Time Series",
+        margin=dict(l=110, r=20, t=80, b=80),
+        height=dynamic_height,
+    )
+
+    fig.update_xaxes(side="top", type="category")
+    fig.update_yaxes(
+        autorange="reversed",
+        automargin=True,
+        tickmode="array",
+        tickvals=date_labels,
+        ticktext=date_labels,
+        tickfont=dict(size=11),
+    )
+
+    return fig
+
+
+def _build_scd_single_indicator_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Build a dates × tickers detail table for the Single Indicator matrix.
+
+    The table uses the same display text shown in the heatmap cells.
+    """
+    tickers = list(matrix.get("tickers", []))
+    dates = list(matrix.get("dates", []))
+    row_key = str(matrix.get("row_key", ""))
+    cells = matrix.get("cells", {})
+
+    records = []
+    for date_key in dates:
+        row = {"Date": date_key}
+        for ticker in tickers:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            row[ticker] = _format_scd_heatmap_text(row_key, cell)
+        records.append(row)
+
+    return pd.DataFrame(records)
+
+
+def _render_scd_single_indicator_matrix_view(matrix: Dict[str, Any]) -> None:
+    """
+    Render the Single Indicator time-series matrix.
+
+    This renders display-only views of already-built cells:
+    - heatmap
+    - detail/export table
+    - existing ticker-status diagnostics
+    """
+    if not isinstance(matrix, dict) or not matrix:
+        st.info("Build the Single Indicator time-series matrix first.")
+        return
+
+    if matrix.get("status") == "empty":
+        st.warning("Single Indicator matrix is empty.")
+        if matrix.get("errors"):
+            st.write(matrix.get("errors"))
+        return
+
+    st.subheader("Single Indicator Time-Series Heatmap")
+
+    fig = _build_scd_single_indicator_heatmap_figure(matrix)
+    st.plotly_chart(fig, use_container_width=True)
+
+    detail_df = _build_scd_single_indicator_detail_table(matrix)
+
+    with st.expander("Show Details / Export", expanded=False):
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        csv_bytes = detail_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download Single Indicator CSV",
+            data=csv_bytes,
+            file_name=(
+                "scd_single_indicator_"
+                f"{matrix.get('row_key', 'indicator')}_"
+                f"{matrix.get('window_start_date', 'start')}_"
+                f"{matrix.get('window_end_date', 'end')}.csv"
+            ),
+            mime="text/csv",
+            key="scd_single_indicator_download_csv",
+        )
 
 
 def _build_scd_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
@@ -4918,6 +5445,8 @@ def show_stock_comparison_dashboard():
                 f"Dates: {len(single_matrix.get('dates', []))} | "
                 f"Tickers: {len(single_matrix.get('tickers', []))}"
             )
+
+            _render_scd_single_indicator_matrix_view(single_matrix)
 
             if single_matrix.get("errors"):
                 st.warning("Some ticker payloads produced errors.")
