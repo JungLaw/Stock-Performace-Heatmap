@@ -907,11 +907,18 @@ class DatabaseIntegratedTechnicalCalculator:
             )
 
         if return_type in ("rolling", "rolling_with_context"):
+            rolling_days = 10
+            if isinstance(ohlcv_request, dict):
+                try:
+                    rolling_days = int(ohlcv_request.get("window_days", 10))
+                except (TypeError, ValueError):
+                    rolling_days = 10
+
             rolling_payload = self._build_optionc_rolling_signals(
                 ticker=ticker,
                 df_ind=df_ind,
                 scores=scores,
-                days=10,
+                days=rolling_days,
             )
 
             if return_type == "rolling_with_context":
