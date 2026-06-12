@@ -1,4 +1,4 @@
-# Stamp: Thu, June 11, 2026 4:22PM
+# Stamp: Fri, June 12, 2026 2:44PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -167,7 +167,7 @@ def initialize_session_state():
     # Multiple Indicators preserves the existing SCD cross-sectional matrix.
     # Single Indicator is the planned time-series view route.
     if 'scd_analysis_mode' not in st.session_state:
-        st.session_state.scd_analysis_mode = 'Multiple Indicators'
+        st.session_state.scd_analysis_mode = 'Single Indicator'
 
     # Stock Comparison Dashboard Single Indicator selector state.
     # These controls select one canonical Rolling Heatmap row_key for the
@@ -203,10 +203,11 @@ def initialize_session_state():
         st.session_state.scd_single_anchor_mode = 'End date'
 
     if 'scd_single_use_anchor_date' not in st.session_state:
-        st.session_state.scd_single_use_anchor_date = False
+        st.session_state.scd_single_use_anchor_date = True
+        #st.session_state.scd_single_use_anchor_date = False
 
     if 'scd_single_anchor_date' not in st.session_state:
-        st.session_state.scd_single_anchor_date = datetime.now().date()
+        st.session_state.scd_single_anchor_date = datetime.now().date()        
 
     # Stock Comparison Dashboard v1 indicator-selection session state.
     # These keys are SCD-specific but resolve through the existing Rolling
@@ -248,11 +249,17 @@ def initialize_session_state():
     # Stock Comparison Dashboard Single Indicator matrix transport state.
     # This stores reshaped existing Rolling Heatmap cells only, but oriented
     # as dates × tickers for one selected indicator.
-    if 'scd_single_indicator_matrix' not in st.session_state:
-        st.session_state.scd_single_indicator_matrix = None
-
     if 'scd_single_indicator_matrix_last_run' not in st.session_state:
         st.session_state.scd_single_indicator_matrix_last_run = None
+
+    # Stock Comparison Dashboard Single Indicator chart display state.
+    # These controls affect only the chart layer. They must not remove data
+    # from the matrix, heatmap, detail table, export, cache, or payload.
+    if 'scd_single_chart_value_mode' not in st.session_state:
+        st.session_state.scd_single_chart_value_mode = 'Auto'
+
+    if 'scd_single_chart_visible_tickers' not in st.session_state:
+        st.session_state.scd_single_chart_visible_tickers = []
 
     # Stock Comparison Dashboard v1: Date-anchor controls
     # These are display/request controls only. They do not create a new
@@ -2791,7 +2798,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)
 
     fig.update_layout(
-        title=f"{row_label} — Single Indicator Time Series",
+        title=f"{row_label}",
         margin=dict(l=110, r=20, t=80, b=80),
         height=dynamic_height,
     )
@@ -2831,6 +2838,433 @@ def _build_scd_single_indicator_detail_table(matrix: Dict[str, Any]) -> pd.DataF
     return pd.DataFrame(records)
 
 
+def _get_scd_single_chart_value_modes() -> list[str]:
+    """Return supported Single Indicator chart value modes."""
+    return [
+        "Auto",
+        "Indicator value",
+        "Indexed to 100",
+        "Change from first date",
+        "% change from first date",
+        "Score",
+    ]
+
+
+def _get_scd_single_chart_auto_mode(row_key: str) -> str:
+    """
+    Resolve Auto chart mode for one Single Indicator row_key.
+
+    Auto intentionally avoids Score mode. It chooses a display transform only.
+    """
+    row_key = str(row_key).strip()
+    family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
+
+    if row_key == "OBV":
+        return "Change from first date"
+
+    if family in {
+        "RSI",
+        "Stochastic",
+        "Williams_R",
+        "MFI",
+        "Ultimate_Oscillator",
+        "ADX",
+        "CMF",
+        "CCI",
+        "ROC",
+        "DPO",
+    }:
+        return "Indicator value"
+
+    if row_key.startswith("BB_PCT_B") or row_key.startswith("BB_BW"):
+        return "Indicator value"
+
+    if family in {"SMA", "EMA", "HMA", "VWMA", "ATR"}:
+        return "Indexed to 100"
+
+    if family in {"MACD", "BullBearPower"}:
+        return "Change from first date"
+
+    return "Indicator value"
+
+
+def _resolve_scd_single_chart_value_mode(
+    *,
+    row_key: str,
+    selected_mode: str,
+) -> str:
+    """Resolve chart mode, expanding Auto to the indicator-specific default."""
+    mode = str(selected_mode).strip()
+    if mode == "Auto":
+        return _get_scd_single_chart_auto_mode(row_key)
+    if mode in _get_scd_single_chart_value_modes():
+        return mode
+    return _get_scd_single_chart_auto_mode(row_key)
+
+
+def _coerce_scd_chart_numeric_value(value: Any) -> Optional[float]:
+    """Coerce chart values to float while preserving missing values as None."""
+    try:
+        value_f = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if pd.isna(value_f):
+        return None
+
+    return value_f
+
+
+def _get_scd_chart_yaxis_title(mode: str, row_label: str) -> str:
+    """Return a compact y-axis title for the selected chart transform."""
+    if mode == "Indexed to 100":
+        return "Indexed value"
+    if mode == "Change from first date":
+        return "Change from first date"
+    if mode == "% change from first date":
+        return "% change from first date"
+    if mode == "Score":
+        return "Score"
+    return row_label
+
+
+def _build_scd_single_indicator_chart_series(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    value_mode: str,
+) -> tuple[dict[str, list[Optional[float]]], list[str]]:
+    """
+    Build chart series from the already-built Single Indicator matrix.
+
+    This is display-only. It does not alter matrix cells, scores, rules,
+    cache entries, acquisition, or persistence.
+    """
+    dates = list(matrix.get("dates", []))
+    cells = matrix.get("cells", {})
+
+    raw_series: dict[str, list[Optional[float]]] = {}
+
+    for ticker in visible_tickers:
+        values: list[Optional[float]] = []
+
+        for date_key in dates:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            if value_mode == "Score":
+                values.append(_coerce_scd_chart_numeric_value(cell.get("score")))
+            else:
+                values.append(_coerce_scd_chart_numeric_value(cell.get("value")))
+
+        raw_series[ticker] = values
+
+    warnings: list[str] = []
+
+    if value_mode in {"Indicator value", "Score"}:
+        return raw_series, warnings
+
+    transformed: dict[str, list[Optional[float]]] = {}
+
+    for ticker, values in raw_series.items():
+        first_valid = next((v for v in values if v is not None), None)
+
+        if first_valid is None:
+            transformed[ticker] = [None for _ in values]
+            warnings.append(f"{ticker}: no valid starting value.")
+            continue
+
+        if value_mode == "Change from first date":
+            transformed[ticker] = [
+                (v - first_valid) if v is not None else None
+                for v in values
+            ]
+            continue
+
+        if value_mode == "% change from first date":
+            if abs(first_valid) <= 1e-9:
+                transformed[ticker] = [None for _ in values]
+                warnings.append(
+                    f"{ticker}: % change unavailable because first value is near zero."
+                )
+                continue
+
+            transformed[ticker] = [
+                ((v - first_valid) / abs(first_valid) * 100.0)
+                if v is not None
+                else None
+                for v in values
+            ]
+            continue
+
+        if value_mode == "Indexed to 100":
+            if first_valid <= 0 or abs(first_valid) <= 1e-9:
+                transformed[ticker] = [None for _ in values]
+                warnings.append(
+                    f"{ticker}: Indexed to 100 unavailable because first value "
+                    "is not positive or is near zero."
+                )
+                continue
+
+            transformed[ticker] = [
+                (v / first_valid * 100.0) if v is not None else None
+                for v in values
+            ]
+            continue
+
+        transformed[ticker] = values
+
+    return transformed, warnings
+
+
+def _get_scd_single_chart_hover_fields(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    date_key: str,
+    chart_value: Optional[float],
+    value_mode: str,
+) -> list[Any]:
+    """Return compact hover customdata for one Single Indicator chart point."""
+    row_key = str(matrix.get("row_key", ""))
+    cells = matrix.get("cells", {})
+    cell = cells.get(date_key, {}).get(ticker, {})
+
+    price_cell = cell.get("price_cell") if isinstance(cell, dict) else None
+    price_cd = {}
+    if isinstance(price_cell, dict):
+        maybe_cd = price_cell.get("adapter_customdata")
+        if isinstance(maybe_cd, dict):
+            price_cd = maybe_cd
+
+    price_value = price_cd.get("formatted_value", "")
+    price_delta = ""
+    if price_cd.get("delta_abs_fmt"):
+        price_delta = (
+            f"{price_cd.get('delta_abs_fmt', '')}"
+            f"{price_cd.get('delta_pct_suffix', '')}"
+        )
+
+    return [
+        str(date_key),
+        _format_scd_heatmap_text(row_key, cell),
+        cell.get("signal") if isinstance(cell, dict) else None,
+        chart_value,
+        price_value,
+        price_delta,
+    ]
+
+
+def _add_scd_single_chart_reference_lines(
+    *,
+    fig: go.Figure,
+    row_key: str,
+    value_mode: str,
+) -> None:
+    """Add native indicator reference lines where they are meaningful."""
+    if value_mode == "Score":
+        for level in [-2, -1, 0, 1, 2]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.35)
+        fig.update_yaxes(range=[-2.25, 2.25])
+        return
+
+    if value_mode != "Indicator value":
+        return
+
+    family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
+
+    if family == "CCI":
+        for level in [100, 0, -100]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family == "RSI":
+        for level in [70, 50, 30]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family in {"MFI", "Ultimate_Oscillator", "Stochastic"}:
+        for level in [80, 50, 20]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family == "Williams_R":
+        for level in [-20, -50, -80]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+
+def _build_scd_single_indicator_chart_figure(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    selected_value_mode: str,
+) -> tuple[go.Figure, str, list[str]]:
+    """
+    Build the Single Indicator line chart.
+
+    The chart is derived only from existing Single Indicator matrix cells.
+    """
+    row_key = str(matrix.get("row_key", ""))
+    row_label = str(matrix.get("row_label", row_key))
+    dates = list(matrix.get("dates", []))
+    date_labels = [_format_scd_compact_date_label(date_key) for date_key in dates]
+
+    resolved_mode = _resolve_scd_single_chart_value_mode(
+        row_key=row_key,
+        selected_mode=selected_value_mode,
+    )
+
+    series_by_ticker, warnings = _build_scd_single_indicator_chart_series(
+        matrix=matrix,
+        visible_tickers=visible_tickers,
+        value_mode=resolved_mode,
+    )
+
+    fig = go.Figure()
+
+    for ticker in visible_tickers:
+        y_values = series_by_ticker.get(ticker, [])
+        customdata = [
+            _get_scd_single_chart_hover_fields(
+                matrix=matrix,
+                ticker=ticker,
+                date_key=date_key,
+                chart_value=y_values[i] if i < len(y_values) else None,
+                value_mode=resolved_mode,
+            )
+            for i, date_key in enumerate(dates)
+        ]
+
+        fig.add_trace(
+            go.Scatter(
+                x=date_labels,
+                y=y_values,
+                mode="lines+markers",
+                name=ticker,
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>"
+                    "Date: %{customdata[0]}<br>"
+                    f"{row_label}: %{{customdata[1]}}<br>"
+                    f"Chart value ({resolved_mode}): %{{customdata[3]:.2f}}<br>"
+                    "Signal: %{customdata[2]}<br>"
+                    "Price: %{customdata[4]}<br>"
+                    "Price Δ vs prior day: %{customdata[5]}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    _add_scd_single_chart_reference_lines(
+        fig=fig,
+        row_key=row_key,
+        value_mode=resolved_mode,
+    )
+
+    y_axis_title = _get_scd_chart_yaxis_title(resolved_mode, row_label)
+    dynamic_height = max(420, 35 * max(len(visible_tickers), 1) + 260)
+
+    fig.update_layout(
+        title=dict(
+            text=f"{row_label}",
+            y=0.98,
+            yanchor="top",
+        ),
+        height=dynamic_height,
+        margin=dict(l=70, r=30, t=150, b=70),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.08,
+            xanchor="left",
+            x=0,
+        ),
+    )
+
+    fig.update_xaxes(
+        title="Date",
+        type="category",
+        tickmode="array",
+        tickvals=date_labels,
+        ticktext=date_labels,
+    )
+    fig.update_yaxes(title=y_axis_title)
+
+    return fig, resolved_mode, warnings
+
+
+def _render_scd_single_indicator_chart_view(matrix: Dict[str, Any]) -> None:
+    """
+    Render chart-only controls and line chart for the Single Indicator matrix.
+
+    Ticker visibility is handled by the native Plotly legend. This affects only
+    chart display and must not mutate the matrix, heatmap, table, export, cache,
+    or payload.
+    """
+    if not isinstance(matrix, dict) or not matrix:
+        return
+
+    tickers = list(matrix.get("tickers", []))
+    if not tickers:
+        st.info("No tickers available for the Single Indicator chart.")
+        return
+
+    st.subheader("Single Indicator Trend Chart")
+
+    value_modes = _get_scd_single_chart_value_modes()
+    current_mode = st.session_state.get("scd_single_chart_value_mode", "Auto")
+    if current_mode not in value_modes:
+        current_mode = "Auto"
+        st.session_state.scd_single_chart_value_mode = current_mode
+
+    selected_mode = st.selectbox(
+        "Chart value",
+        options=value_modes,
+        index=value_modes.index(current_mode),
+        key="scd_single_chart_value_mode",
+        help=(
+            "Auto chooses a display transform based on the selected indicator. "
+            "Score plots the existing heatmap score from -2 to +2."
+        ),
+    )
+
+    fig, resolved_mode, warnings = _build_scd_single_indicator_chart_figure(
+        matrix=matrix,
+        visible_tickers=tickers,
+        selected_value_mode=selected_mode,
+    )
+
+    if selected_mode == "Auto":
+        st.markdown(
+            f"<small style='color: #6c757d;'>"
+            f"Auto chart mode resolved to: {resolved_mode}"
+            f"</small>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        "<small style='color: #6c757d;'>"
+        "Tip: Click a ticker in the legend to hide/show it. "
+        "Double-click to isolate one ticker."
+        "</small>",
+        unsafe_allow_html=True,
+    )
+
+    if warnings:
+        with st.expander("Chart transform notes", expanded=False):
+            for warning in warnings:
+                st.markdown(
+                    f"<small style='color: #6c757d;'>- {warning}</small>",
+                    unsafe_allow_html=True,
+                )
+
+    #st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="scd_single_indicator_trend_chart",
+        config={
+            "doubleClickDelay": 800,
+            "responsive": True,
+        },
+    )    
+
+
 def _render_scd_single_indicator_matrix_view(matrix: Dict[str, Any]) -> None:
     """
     Render the Single Indicator time-series matrix.
@@ -2854,6 +3288,8 @@ def _render_scd_single_indicator_matrix_view(matrix: Dict[str, Any]) -> None:
 
     fig = _build_scd_single_indicator_heatmap_figure(matrix)
     st.plotly_chart(fig, use_container_width=True)
+
+    _render_scd_single_indicator_chart_view(matrix)
 
     detail_df = _build_scd_single_indicator_detail_table(matrix)
 
@@ -5365,22 +5801,22 @@ def show_stock_comparison_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Analysis Mode")
 
-    analysis_mode_options = ["Multiple Indicators", "Single Indicator"]
+    analysis_mode_options = ["Single Indicator", "Multiple Indicators"]
     current_analysis_mode = st.session_state.get(
         "scd_analysis_mode",
-        "Multiple Indicators",
+        "Single Indicator",
     )
     if current_analysis_mode not in analysis_mode_options:
-        current_analysis_mode = "Multiple Indicators"
+        current_analysis_mode = "Single Indicator"
 
     analysis_mode = st.sidebar.radio(
         "Analysis Mode",
         options=analysis_mode_options,
         index=analysis_mode_options.index(current_analysis_mode),
         key="scd_analysis_mode_widget",
-        help=(
-            "Multiple Indicators shows the current cross-sectional comparison matrix. "
+        help=(            
             "Single Indicator will show one selected indicator across tickers and dates."
+            "Multiple Indicators shows the current cross-sectional comparison matrix. "
         ),
     )
 
@@ -5422,14 +5858,26 @@ def show_stock_comparison_dashboard():
             disabled=not selected_tickers or not selected_single_indicator,
         )
 
-        if build_single_clicked:
-            with st.spinner("Building Single Indicator time-series matrix."):
+        should_auto_build_single = (
+            selected_tickers
+            and selected_single_indicator
+            and st.session_state.get("scd_single_indicator_matrix") is None
+        )
+
+        if build_single_clicked or should_auto_build_single:
+            spinner_text = (
+                "Building Single Indicator time-series matrix."
+                if build_single_clicked
+                else "Building default Single Indicator time-series matrix."
+            )
+
+            with st.spinner(spinner_text):
                 st.session_state.scd_single_indicator_matrix = (
                     _build_scd_single_indicator_time_series_matrix(
                         selected_tickers=selected_tickers,
                         selected_row_key=selected_single_indicator,
                         date_request=single_indicator_date_request,
-                        force_refresh=force_refresh_single,
+                        force_refresh=force_refresh_single if build_single_clicked else False,
                     )
                 )
                 st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
