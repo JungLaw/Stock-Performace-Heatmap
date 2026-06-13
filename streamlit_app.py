@@ -1,4 +1,4 @@
-# Stamp: Fri, June 12, 2026 2:44PM
+# Stamp: Fri, June 12, 2026 2:45PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -295,6 +295,7 @@ def initialize_session_state():
             "force_refreshes": 0,
             "clears": 0,
             "coverage_writes": 0,
+            "coverage_hits": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -1250,6 +1251,7 @@ def _get_scd_cache_stats() -> Dict[str, int]:
         "force_refreshes": 0,
         "clears": 0,
         "coverage_writes": 0,
+        "coverage_hits": 0,
     }
 
     if 'scd_cache_stats' not in st.session_state:
@@ -1279,6 +1281,7 @@ def _clear_scd_session_cache() -> None:
         "force_refreshes": 0,
         "clears": st.session_state.get("scd_cache_stats", {}).get("clears", 0) + 1,
         "coverage_writes": 0,
+        "coverage_hits": 0,
     }
 
 
@@ -1460,6 +1463,110 @@ def _store_scd_coverage_cache_entry(
     stats["coverage_writes"] += 1
 
 
+def _normalize_scd_requested_cache_dates(
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]],
+) -> set[str]:
+    """Normalize requested visible date strings for coverage-cache lookup."""
+    if not requested_date_strings:
+        return set()
+
+    return {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in requested_date_strings
+        )
+        if normalized
+    }
+
+
+def _can_reuse_scd_coverage_entry(
+    *,
+    entry: Dict[str, Any],
+    requested_dates: set[str],
+) -> bool:
+    """
+    Return True when a coverage cache entry can satisfy requested dates.
+
+    WS11-G-C1 policy:
+    - reuse completed historical dates only
+    - do not reuse live/current-day data in this step
+    """
+    if not isinstance(entry, dict) or not requested_dates:
+        return False
+
+    rolling_payload = entry.get("rolling_payload")
+    indicator_context_df = entry.get("indicator_context_df")
+
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        return False
+
+    if not isinstance(indicator_context_df, pd.DataFrame) or indicator_context_df.empty:
+        return False
+
+    available_dates = set(entry.get("available_dates", []) or [])
+    completed_dates = set(entry.get("completed_dates", []) or [])
+    live_dates = set(entry.get("live_dates", []) or [])
+
+    if not requested_dates.issubset(available_dates):
+        return False
+
+    if requested_dates & live_dates:
+        return False
+
+    if not requested_dates.issubset(completed_dates):
+        return False
+
+    return True
+
+
+def _find_scd_coverage_cache_entry(
+    *,
+    ticker: str,
+    anchor_mode: str,
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Find a coverage-compatible SCD bundle entry for completed-date reuse.
+
+    This is intentionally conservative and only returns entries that fully
+    cover the requested visible Single Indicator date window.
+    """
+    ticker = str(ticker).strip().upper()
+    resolved_anchor_mode = str(anchor_mode).strip().lower()
+    if resolved_anchor_mode not in {"asof", "start"}:
+        resolved_anchor_mode = "asof"
+
+    requested_dates = _normalize_scd_requested_cache_dates(requested_date_strings)
+    if not requested_dates:
+        return None
+
+    coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
+    entries = list(coverage_cache.get((ticker, resolved_anchor_mode), []) or [])
+
+    reusable_entries = [
+        entry
+        for entry in entries
+        if _can_reuse_scd_coverage_entry(
+            entry=entry,
+            requested_dates=requested_dates,
+        )
+    ]
+
+    if not reusable_entries:
+        return None
+
+    reusable_entries.sort(
+        key=lambda entry: (
+            len(entry.get("completed_dates", []) or []),
+            entry.get("created_at", datetime.min),
+        ),
+        reverse=True,
+    )
+
+    return reusable_entries[0]
+
+
 def _fetch_scd_rolling_payload_for_ticker(
     *,
     ticker: str,
@@ -1580,6 +1687,7 @@ def _fetch_scd_rolling_bundle_for_ticker(
     force_refresh: bool = False,
     anchor_date: Optional[Any] = None,
     anchor_mode: str = "asof",
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
     """
     Fetch rolling payload and hover/context dataframe through one technical pass.
@@ -1636,6 +1744,28 @@ def _fetch_scd_rolling_bundle_for_ticker(
             "rolling_payload": rolling_payload,
             "indicator_context_df": cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df,
             "source": "cache",
+        }
+
+    coverage_entry = None
+    if not force_refresh:
+        coverage_entry = _find_scd_coverage_cache_entry(
+            ticker=ticker,
+            anchor_mode=anchor_mode,
+            requested_date_strings=requested_date_strings,
+        )
+
+    if coverage_entry is not None:
+        stats["coverage_hits"] += 1
+        indicator_context_df = coverage_entry.get("indicator_context_df")
+
+        return {
+            "rolling_payload": coverage_entry.get("rolling_payload"),
+            "indicator_context_df": (
+                indicator_context_df.copy()
+                if isinstance(indicator_context_df, pd.DataFrame)
+                else indicator_context_df
+            ),
+            "source": "coverage_cache",
         }
 
     if rolling_hit:
@@ -2261,6 +2391,7 @@ def _build_scd_single_indicator_time_series_matrix(
                 force_refresh=force_refresh,
                 anchor_date=anchor_date,
                 anchor_mode=anchor_mode,
+                requested_date_strings=date_strings,
             )
             ticker_profile["rolling_payload_seconds"] = round(
                 time.perf_counter() - stage_started_at,
@@ -6130,7 +6261,8 @@ def show_stock_comparison_dashboard():
                     f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s), "
                     f"{coverage_entry_count} coverage-aware bundle entry/entries. "
                     f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-                    f"hover={cache_stats.get('hover_hits', 0)}. "
+                    f"hover={cache_stats.get('hover_hits', 0)}, "
+                    f"coverage={cache_stats.get('coverage_hits', 0)}. "
                     f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
                     f"hover={cache_stats.get('hover_misses', 0)}. "
                     f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
