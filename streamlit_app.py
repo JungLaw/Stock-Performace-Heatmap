@@ -2592,11 +2592,18 @@ def _build_scd_cross_sectional_matrix(
 
         try:
             stage_started_at = time.perf_counter()
+
+            requested_date_strings = []
+            normalized_anchor_date = _normalize_scd_cache_date_value(anchor_date)
+            if normalized_anchor_date:
+                requested_date_strings = [normalized_anchor_date]
+
             bundle = _fetch_scd_rolling_bundle_for_ticker(
                 ticker=ticker,
                 window_days=window_days,
                 force_refresh=force_refresh,
                 anchor_date=anchor_date,
+                requested_date_strings=requested_date_strings,
             )
             ticker_profile["rolling_payload_seconds"] = round(
                 time.perf_counter() - stage_started_at,
@@ -6417,7 +6424,8 @@ def show_stock_comparison_dashboard():
             f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s), "
             f"{coverage_entry_count} coverage-aware bundle entry/entries. "
             f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-            f"hover={cache_stats.get('hover_hits', 0)}. "
+            f"hover={cache_stats.get('hover_hits', 0)}, "
+            f"coverage={cache_stats.get('coverage_hits', 0)}. "
             f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
             f"hover={cache_stats.get('hover_misses', 0)}. "
             f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
