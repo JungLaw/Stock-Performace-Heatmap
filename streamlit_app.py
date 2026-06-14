@@ -1263,6 +1263,103 @@ def _get_scd_cache_stats() -> Dict[str, int]:
     return st.session_state.scd_cache_stats
 
 
+def _get_scd_cache_diagnostics_snapshot() -> Dict[str, Any]:
+    """
+    Return a UI-ready snapshot of SCD session cache diagnostics.
+
+    Diagnostic only. This does not mutate cache state, fetch data, calculate
+    indicators, score signals, persist data, or change build behavior.
+    """
+    cache_stats = dict(_get_scd_cache_stats())
+    coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
+
+    coverage_entry_count = sum(
+        len(entries)
+        for entries in coverage_cache.values()
+        if isinstance(entries, list)
+    )
+
+    return {
+        "payload_count": len(st.session_state.get("scd_payload_cache", {})),
+        "hover_context_count": len(st.session_state.get("scd_hover_ohlcv_cache", {})),
+        "coverage_entry_count": coverage_entry_count,
+        "stats": cache_stats,
+    }
+
+
+def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
+    """
+    Return a plain-English cache activity summary for the current session.
+
+    Counters are cumulative session diagnostics, not a guaranteed latest-build
+    accounting record. This helper intentionally summarizes activity without
+    changing the underlying counters.
+    """
+    stats = snapshot.get("stats", {}) if isinstance(snapshot, dict) else {}
+
+    rolling_hits = int(stats.get("rolling_hits", 0) or 0)
+    hover_hits = int(stats.get("hover_hits", 0) or 0)
+    coverage_hits = int(stats.get("coverage_hits", 0) or 0)
+    rolling_misses = int(stats.get("rolling_misses", 0) or 0)
+    hover_misses = int(stats.get("hover_misses", 0) or 0)
+    force_refreshes = int(stats.get("force_refreshes", 0) or 0)
+
+    summary_parts: list[str] = []
+
+    if coverage_hits:
+        summary_parts.append(f"coverage reuse={coverage_hits}")
+
+    if rolling_hits or hover_hits:
+        summary_parts.append(
+            f"exact cache reuse: rolling={rolling_hits}, hover={hover_hits}"
+        )
+
+    if rolling_misses or hover_misses:
+        summary_parts.append(
+            f"fresh calculations: rolling={rolling_misses}, hover={hover_misses}"
+        )
+
+    if force_refreshes:
+        summary_parts.append(f"manual refreshes={force_refreshes}")
+
+    if not summary_parts:
+        return "Cache activity summary: no SCD cache activity recorded yet."
+
+    return "Cache activity summary: " + "; ".join(summary_parts) + "."
+
+
+def _render_scd_cache_diagnostics() -> None:
+    """
+    Render the shared SCD cache diagnostics UI.
+
+    This centralizes the repeated Single Indicator / Multiple Indicators cache
+    counter display. It is presentation-only and must not alter cache state.
+    """
+    snapshot = _get_scd_cache_diagnostics_snapshot()
+    cache_stats = snapshot["stats"]
+
+    st.caption(_format_scd_cache_activity_summary(snapshot))
+
+    st.caption(
+        "Counters are session totals and may include automatic builds, "
+        "manual rebuilds, and Streamlit reruns."
+    )
+
+    st.caption(
+        "Current session cache details: "
+        f"{snapshot['payload_count']} ticker result(s), "
+        f"{snapshot['hover_context_count']} hover-context result(s), "
+        f"{snapshot['coverage_entry_count']} coverage-aware bundle entry/entries. "
+        f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
+        f"hover={cache_stats.get('hover_hits', 0)}, "
+        f"coverage={cache_stats.get('coverage_hits', 0)}. "
+        f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
+        f"hover={cache_stats.get('hover_misses', 0)}. "
+        f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
+        f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
+    )
+
+
 def _clear_scd_session_cache() -> None:
     """
     Clear SCD session-only transport caches.
@@ -6546,32 +6643,7 @@ def show_stock_comparison_dashboard():
                 )
 
             with st.expander("Cache diagnostics", expanded=False):
-                cache_stats = _get_scd_cache_stats()
-                coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
-                coverage_entry_count = sum(
-                    len(entries)
-                    for entries in coverage_cache.values()
-                    if isinstance(entries, list)
-                )
-
-                st.caption(
-                    "Counters are session totals and may include automatic builds, "
-                    "manual rebuilds, and Streamlit reruns."
-                )
-
-                st.caption(
-                    "Current session cache status: "
-                    f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
-                    f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s), "
-                    f"{coverage_entry_count} coverage-aware bundle entry/entries. "
-                    f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-                    f"hover={cache_stats.get('hover_hits', 0)}, "
-                    f"coverage={cache_stats.get('coverage_hits', 0)}. "
-                    f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
-                    f"hover={cache_stats.get('hover_misses', 0)}. "
-                    f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
-                    f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
-                )
+                _render_scd_cache_diagnostics()
         else:
             st.info(
                 "Build the Single Indicator time-series matrix to prepare the "
@@ -6707,32 +6779,7 @@ def show_stock_comparison_dashboard():
             st.rerun()
 
     with st.expander("Cache diagnostics", expanded=False):
-        cache_stats = _get_scd_cache_stats()
-        coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
-        coverage_entry_count = sum(
-            len(entries)
-            for entries in coverage_cache.values()
-            if isinstance(entries, list)
-        )
-
-        st.caption(
-            "Counters are session totals and may include automatic builds, "
-            "manual rebuilds, and Streamlit reruns."
-        )
-
-        st.caption(
-            "Current session cache status: "
-            f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
-            f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s), "
-            f"{coverage_entry_count} coverage-aware bundle entry/entries. "
-            f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-            f"hover={cache_stats.get('hover_hits', 0)}, "
-            f"coverage={cache_stats.get('coverage_hits', 0)}. "
-            f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
-            f"hover={cache_stats.get('hover_misses', 0)}. "
-            f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
-            f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
-        )
+        _render_scd_cache_diagnostics()
 
 def main():
     """Main application function with page navigation"""
