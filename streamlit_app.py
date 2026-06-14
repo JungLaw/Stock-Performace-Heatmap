@@ -6404,20 +6404,25 @@ def show_stock_comparison_dashboard():
         selected_single_indicator = _render_scd_single_indicator_controls()
         single_indicator_date_request = _render_scd_single_indicator_date_controls()
 
-        st.subheader("Build Time-Series Matrix")
+        st.subheader("Time-Series Matrix")
+        st.caption(
+            "The default Single Indicator matrix builds automatically on first load. "
+            "Use Rebuild Time-Series Matrix when you want to rebuild the current "
+            "date × ticker view."
+        )
 
         force_refresh_single = st.checkbox(
-            "Force refresh Single Indicator cache for this build",
+            "Recalculate selected tickers for this build",
             value=False,
             key="scd_single_force_refresh",
             help=(
-                "Bypass the SCD session cache for this Single Indicator build. "
+                "Bypass the SCD session cache once for this Single Indicator build. "
                 "This does not change DB persistence behavior."
             ),
         )
 
         build_single_clicked = st.button(
-            "Build/Refresh Time-Series Matrix",
+            "Rebuild Time-Series Matrix",
             key="scd_single_build_matrix",
             type="primary",
             disabled=not selected_tickers or not selected_single_indicator,
@@ -6450,12 +6455,12 @@ def show_stock_comparison_dashboard():
         single_matrix = st.session_state.get("scd_single_indicator_matrix")
 
         if single_matrix:
-            st.success("Single Indicator time-series matrix is built.")
+            st.success("Time-Series Matrix ready.")
             st.caption(
-                f"Selected row: {single_matrix.get('row_key')} | "
+                f"Indicator: {single_matrix.get('row_key')} · "
                 f"Window: {single_matrix.get('window_start_date')} → "
-                f"{single_matrix.get('window_end_date')} | "
-                f"Dates: {len(single_matrix.get('dates', []))} | "
+                f"{single_matrix.get('window_end_date')} · "
+                f"Dates: {len(single_matrix.get('dates', []))} · "
                 f"Tickers: {len(single_matrix.get('tickers', []))}"
             )
 
@@ -6529,24 +6534,29 @@ def show_stock_comparison_dashboard():
                 with st.expander("View Single Indicator ticker errors", expanded=False):
                     st.write(single_matrix.get("errors"))
 
-            with st.expander("Single Indicator matrix status", expanded=False):
+            with st.expander("Ticker build diagnostics", expanded=False):
                 st.json(single_matrix.get("ticker_status", {}))
 
             profile = single_matrix.get("profile", {})
             if isinstance(profile, dict) and profile:
                 st.caption(
-                    f"Build time: {profile.get('total_seconds')}s | "
-                    f"Anchor mode: {single_matrix.get('anchor_mode')} | "
-                    f"Anchor date: {single_matrix.get('anchor_date')}"
+                    f"Built in {profile.get('total_seconds')}s · "
+                    f"Request mode: {single_matrix.get('anchor_mode')} · "
+                    f"Anchor: {single_matrix.get('anchor_date')}"
                 )
 
-            with st.expander("Cache status", expanded=False):
+            with st.expander("Cache diagnostics", expanded=False):
                 cache_stats = _get_scd_cache_stats()
                 coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
                 coverage_entry_count = sum(
                     len(entries)
                     for entries in coverage_cache.values()
                     if isinstance(entries, list)
+                )
+
+                st.caption(
+                    "Counters are session totals and may include automatic builds, "
+                    "manual rebuilds, and Streamlit reruns."
                 )
 
                 st.caption(
@@ -6618,7 +6628,7 @@ def show_stock_comparison_dashboard():
 
     with col_build:
         build_clicked = st.button(
-            "Build/Refresh Matrix",
+            "Rebuild Comparison Matrix",
             key="scd_build_matrix",
             type="primary",
             disabled=not can_build_matrix,
@@ -6696,13 +6706,18 @@ def show_stock_comparison_dashboard():
             _clear_scd_session_cache()
             st.rerun()
 
-    with st.expander("Cache status", expanded=False):
+    with st.expander("Cache diagnostics", expanded=False):
         cache_stats = _get_scd_cache_stats()
         coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
         coverage_entry_count = sum(
             len(entries)
             for entries in coverage_cache.values()
             if isinstance(entries, list)
+        )
+
+        st.caption(
+            "Counters are session totals and may include automatic builds, "
+            "manual rebuilds, and Streamlit reruns."
         )
 
         st.caption(
