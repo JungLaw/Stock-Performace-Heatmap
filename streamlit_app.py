@@ -1,4 +1,4 @@
-# Stamp: Fri, June 12, 2026 2:45PM
+# Stamp: Sun, June 14, 2026 10:39 AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1507,8 +1507,15 @@ def _can_reuse_scd_coverage_entry(
     available_dates = set(entry.get("available_dates", []) or [])
     completed_dates = set(entry.get("completed_dates", []) or [])
     live_dates = set(entry.get("live_dates", []) or [])
+    rolling_dates = _extract_scd_dates_from_rolling_payload(rolling_payload)
 
     if not requested_dates.issubset(available_dates):
+        return False
+
+    # The context dataframe can cover more dates than the rolling signal payload.
+    # Reuse is valid only when the rolling payload itself contains every
+    # requested visible date.
+    if not requested_dates.issubset(rolling_dates):
         return False
 
     if requested_dates & live_dates:
@@ -2296,6 +2303,230 @@ def _build_scd_price_cell_from_context_df(
         }
 
 
+# SCD-scaffolding for 'refresh "today"'
+def _build_scd_single_indicator_cell_from_bundle(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: str,
+    rolling_payload: Dict[str, Any],
+    adapter_lookup: Dict[tuple[str, str], Dict[str, Any]],
+    context_df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    """
+    Build one SCD Single Indicator date/ticker cell from an existing bundle.
+
+    This helper centralizes the same cell construction used by the normal
+    Single Indicator matrix build:
+    - extract the indicator cell from the rolling payload / adapter lookup
+    - build the attached Price cell from the context dataframe
+    - attach Price context only when available
+
+    It does not fetch data, compute indicators, score signals, rank tickers,
+    aggregate values, persist data, or reinterpret semantics.
+    """
+    cell = _extract_scd_cell_for_date(
+        ticker=ticker,
+        row_key=row_key,
+        date_key=date_key,
+        rolling_payload=rolling_payload,
+        adapter_lookup=adapter_lookup,
+    )
+
+    price_cell = _build_scd_price_cell_from_context_df(
+        ticker=ticker,
+        date_key=date_key,
+        context_df=context_df,
+    )
+    if price_cell.get("status") == "ok":
+        cell["price_cell"] = price_cell
+
+    return cell
+
+
+def _get_scd_current_live_date_key() -> Optional[str]:
+    """
+    Return today's date key only when today is a US trading day.
+
+    This helper is intentionally narrow:
+    - weekend / holiday returns None
+    - no market-hours inference is attempted
+    - no acquisition, scoring, persistence, or semantic behavior changes
+    """
+    today = datetime.now().date()
+    today_dt = datetime.combine(today, datetime.min.time())
+
+    if not is_us_trading_day(today_dt):
+        return None
+
+    return today.strftime("%Y-%m-%d")
+
+
+def _refresh_scd_single_indicator_live_date_cells(
+    *,
+    matrix: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Refresh only today's visible Single Indicator cells in an existing matrix.
+
+    This does not compute one-row indicators. It force-refreshes the existing
+    lookback-aware SCD bundled payload path for each matrix ticker, then splices
+    only today's rebuilt date/ticker cell back into the current matrix.
+
+    Preserved:
+    - historical matrix cells
+    - selected row identity
+    - selected ticker identity
+    - chart/detail/export consumers of the matrix
+    - existing acquisition/scoring/persistence boundaries
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        return matrix
+
+    live_date_key = _get_scd_current_live_date_key()
+    if not live_date_key:
+        refreshed_matrix = dict(matrix)
+        refreshed_matrix["last_live_refresh"] = {
+            "status": "skipped",
+            "message": "Today is not a US trading day.",
+            "date": None,
+            "tickers_refreshed": [],
+            "errors": [],
+            "total_seconds": round(time.perf_counter() - started_at, 3),
+        }
+        return refreshed_matrix
+
+    date_strings = [
+        str(date_key)
+        for date_key in matrix.get("dates", [])
+        if str(date_key).strip()
+    ]
+    if live_date_key not in date_strings:
+        refreshed_matrix = dict(matrix)
+        refreshed_matrix["last_live_refresh"] = {
+            "status": "skipped",
+            "message": f"{live_date_key} is not in the current Single Indicator matrix.",
+            "date": live_date_key,
+            "tickers_refreshed": [],
+            "errors": [],
+            "total_seconds": round(time.perf_counter() - started_at, 3),
+        }
+        return refreshed_matrix
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    row_key = str(matrix.get("row_key", "")).strip()
+    window_days = int(matrix.get("window_days", len(date_strings) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    refreshed_matrix = dict(matrix)
+    refreshed_matrix["cells"] = {
+        str(date_key): dict(cells_by_ticker)
+        for date_key, cells_by_ticker in dict(matrix.get("cells", {})).items()
+    }
+    refreshed_matrix["ticker_status"] = dict(matrix.get("ticker_status", {}))
+    refreshed_matrix["profile"] = dict(matrix.get("profile", {}))
+    refreshed_matrix["profile"]["tickers"] = dict(
+        refreshed_matrix["profile"].get("tickers", {})
+    )
+
+    refresh_report = {
+        "status": "ok",
+        "date": live_date_key,
+        "tickers_refreshed": [],
+        "errors": [],
+        "total_seconds": None,
+    }
+
+    if live_date_key not in refreshed_matrix["cells"]:
+        refreshed_matrix["cells"][live_date_key] = {}
+
+    for ticker in tickers:
+        ticker_started_at = time.perf_counter()
+
+        try:
+            bundle = _fetch_scd_rolling_bundle_for_ticker(
+                ticker=ticker,
+                window_days=window_days,
+                force_refresh=True,
+                anchor_date=anchor_date,
+                anchor_mode=anchor_mode,
+                requested_date_strings=[live_date_key],
+            )
+
+            rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+            context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+            bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+
+            if not isinstance(rolling_payload, dict) or not rolling_payload:
+                raise ValueError("No rolling payload returned during live-date refresh.")
+
+            adapter_lookup = _build_scd_adapter_lookup(
+                rolling_payload=rolling_payload,
+                row_keys=[row_key],
+                ohlcv_df=context_df,
+            )
+
+            refreshed_cell = _build_scd_single_indicator_cell_from_bundle(
+                ticker=ticker,
+                row_key=row_key,
+                date_key=live_date_key,
+                rolling_payload=rolling_payload,
+                adapter_lookup=adapter_lookup,
+                context_df=context_df,
+            )
+
+            refreshed_matrix["cells"][live_date_key][ticker] = refreshed_cell
+
+            existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
+            existing_status.update(
+                {
+                    "live_refresh_status": refreshed_cell.get("status", "unknown"),
+                    "live_refresh_date": live_date_key,
+                    "live_refresh_bundle_source": bundle_source,
+                    "live_refresh_seconds": round(
+                        time.perf_counter() - ticker_started_at,
+                        3,
+                    ),
+                }
+            )
+            refreshed_matrix["ticker_status"][ticker] = existing_status
+            refresh_report["tickers_refreshed"].append(ticker)
+
+        except Exception as e:
+            message = f"{ticker}: {e}"
+            refresh_report["errors"].append(message)
+
+            existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
+            existing_status.update(
+                {
+                    "live_refresh_status": "error",
+                    "live_refresh_date": live_date_key,
+                    "live_refresh_error": message,
+                    "live_refresh_seconds": round(
+                        time.perf_counter() - ticker_started_at,
+                        3,
+                    ),
+                }
+            )
+            refreshed_matrix["ticker_status"][ticker] = existing_status
+
+    if refresh_report["errors"]:
+        refresh_report["status"] = (
+            "partial"
+            if refresh_report["tickers_refreshed"]
+            else "error"
+        )
+
+    refresh_report["total_seconds"] = round(time.perf_counter() - started_at, 3)
+    refreshed_matrix["last_live_refresh"] = refresh_report
+    refreshed_matrix["profile"]["last_live_refresh"] = refresh_report
+
+    return refreshed_matrix
+
+
 def _build_scd_single_indicator_time_series_matrix(
     *,
     selected_tickers: list[str],
@@ -2441,21 +2672,14 @@ def _build_scd_single_indicator_time_series_matrix(
             missing_count = 0
 
             for date_key in date_strings:
-                cell = _extract_scd_cell_for_date(
+                cell = _build_scd_single_indicator_cell_from_bundle(
                     ticker=ticker,
                     row_key=row_key,
                     date_key=date_key,
                     rolling_payload=rolling_payload,
                     adapter_lookup=adapter_lookup,
-                )
-
-                price_cell = _build_scd_price_cell_from_context_df(
-                    ticker=ticker,
-                    date_key=date_key,
                     context_df=hover_ohlcv_df,
                 )
-                if price_cell.get("status") == "ok":
-                    cell["price_cell"] = price_cell
 
                 if cell.get("status") != "ok":
                     missing_count += 1
@@ -6235,7 +6459,70 @@ def show_stock_comparison_dashboard():
                 f"Tickers: {len(single_matrix.get('tickers', []))}"
             )
 
+            live_date_key = _get_scd_current_live_date_key()
+            live_date_in_matrix = (
+                bool(live_date_key)
+                and live_date_key in [str(date_key) for date_key in single_matrix.get("dates", [])]
+            )
+
+            refresh_today_clicked = st.button(
+                "Refresh today's cells",
+                key="scd_single_refresh_today_cells",
+                disabled=not live_date_in_matrix,
+                help=(
+                    "Refresh only today's visible date/ticker cells in the current "
+                    "Single Indicator matrix. This reruns the existing lookback-aware "
+                    "technical bundle per ticker, then splices only today's cells into "
+                    "the matrix. Historical cells remain unchanged."
+                ),
+            )
+
+            if not live_date_in_matrix:
+                st.caption(
+                    "Today-refresh is available only when the current Single Indicator "
+                    "matrix includes today's US trading date."
+                )
+
+            if refresh_today_clicked:
+                with st.spinner("Refreshing today's Single Indicator cells."):
+                    st.session_state.scd_single_indicator_matrix = (
+                        _refresh_scd_single_indicator_live_date_cells(
+                            matrix=single_matrix,
+                        )
+                    )
+                    st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
+                    single_matrix = st.session_state.get("scd_single_indicator_matrix")
+
+                refresh_report = (
+                    single_matrix.get("last_live_refresh", {})
+                    if isinstance(single_matrix, dict)
+                    else {}
+                )
+                if refresh_report.get("status") == "ok":
+                    st.success(
+                        "Today's cells refreshed for "
+                        f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
+                        f"in {refresh_report.get('total_seconds')}s."
+                    )
+                elif refresh_report.get("status") == "partial":
+                    st.warning(
+                        "Today's cells partially refreshed. "
+                        f"Refreshed {len(refresh_report.get('tickers_refreshed', []))} ticker(s); "
+                        f"errors: {len(refresh_report.get('errors', []))}."
+                    )
+                else:
+                    st.warning(
+                        refresh_report.get(
+                            "message",
+                            "Today-refresh did not complete.",
+                        )
+                    )
+
             _render_scd_single_indicator_matrix_view(single_matrix)
+
+            if single_matrix.get("last_live_refresh"):
+                with st.expander("Last today-refresh status", expanded=False):
+                    st.json(single_matrix.get("last_live_refresh"))
 
             if single_matrix.get("errors"):
                 st.warning("Some ticker payloads produced errors.")
