@@ -1183,6 +1183,35 @@ def _resolve_scd_effective_anchor_date(
     except Exception:
         return latest_completed
 
+
+def _resolve_scd_cross_sectional_target_date_key(
+    anchor_date: Optional[Any],
+) -> Optional[str]:
+    """
+    Resolve the target extraction date for the SCD Multiple Indicators matrix.
+
+    Scenario B treats weekend/holiday anchor dates as as-of requests and moves
+    backward to the nearest valid trading day. This helper mirrors that behavior
+    for the matrix extraction layer.
+
+    This is extraction-target metadata only. It does not fetch data, mutate
+    cache state, compute indicators, score signals, persist data, or alter
+    rule semantics.
+    """
+    if anchor_date is None:
+        return None
+
+    try:
+        target_date = _coerce_scd_date_to_datetime(anchor_date)
+    except Exception:
+        return None
+
+    while not is_us_trading_day(target_date):
+        target_date -= timedelta(days=1)
+
+    return pd.Timestamp(target_date).strftime("%Y-%m-%d")
+
+
 def _get_scd_ohlcv_request(
     window_days: int = 10,
     anchor_date: Optional[Any] = None,
@@ -2866,6 +2895,8 @@ def _build_scd_cross_sectional_matrix(
         if row_key != "__PRICE__"
     ]
 
+    target_date_key = _resolve_scd_cross_sectional_target_date_key(anchor_date)
+
     profile_started_at = time.perf_counter()
 
     matrix = {
@@ -2873,6 +2904,7 @@ def _build_scd_cross_sectional_matrix(
         "window_days": int(window_days),
         "anchor_mode": "asof",
         "anchor_date": anchor_date,
+        "target_date": target_date_key,
         "tickers": tickers,
         "row_keys": row_keys,
         "cells": {row_key: {} for row_key in row_keys},
@@ -2882,6 +2914,7 @@ def _build_scd_cross_sectional_matrix(
             "ticker_count": len(tickers),
             "row_count": len(row_keys),
             "anchor_date": str(anchor_date),
+            "target_date": target_date_key,
             "total_seconds": None,
             "tickers": {},
         },
@@ -2914,10 +2947,7 @@ def _build_scd_cross_sectional_matrix(
         try:
             stage_started_at = time.perf_counter()
 
-            requested_date_strings = []
-            normalized_anchor_date = _normalize_scd_cache_date_value(anchor_date)
-            if normalized_anchor_date:
-                requested_date_strings = [normalized_anchor_date]
+            requested_date_strings = [target_date_key] if target_date_key else []
 
             bundle = _fetch_scd_rolling_bundle_for_ticker(
                 ticker=ticker,
@@ -2973,6 +3003,7 @@ def _build_scd_cross_sectional_matrix(
                 "status": payload_status,
                 "dates": payload_dates,
                 "latest_date": payload_dates[-1] if payload_dates else None,
+                "target_date": target_date_key,
                 "bundle_source": bundle_source,
                 "has_indicator_context": (
                     isinstance(hover_ohlcv_df, pd.DataFrame)
@@ -2993,12 +3024,21 @@ def _build_scd_cross_sectional_matrix(
 
             stage_started_at = time.perf_counter()
             for row_key in row_keys:
-                matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
-                    ticker=ticker,
-                    row_key=row_key,
-                    rolling_payload=rolling_payload,
-                    adapter_lookup=adapter_lookup,
-                )
+                if target_date_key:
+                    matrix["cells"][row_key][ticker] = _extract_scd_cell_for_date(
+                        ticker=ticker,
+                        row_key=row_key,
+                        date_key=target_date_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                    )
+                else:
+                    matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
+                        ticker=ticker,
+                        row_key=row_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                    )
             ticker_profile["latest_cell_extraction_seconds"] = round(
                 time.perf_counter() - stage_started_at,
                 3,

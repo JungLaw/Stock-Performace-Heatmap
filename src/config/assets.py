@@ -132,14 +132,15 @@ CUSTOM_DEFAULT = [
     ('AMZN', 'Amazon'),
     ('META', 'Meta'),
     ('NVDA', 'NVIDIA'),
-    ('AAPL', 'Apple'),
     ('GOOGL', 'Alphabet'),
     ('MSFT', 'Microsoft'),
     ('TSM', 'TSMC'),
     ('MU', 'Micron'),
     ('GEV', 'GE Vernova'),
-    ('VYMI', 'Intl. High Div.'),
     ('V', 'Visa'),
+    ('MRVL', 'Marvell'),     # ('VYMI', 'Intl. High Div.')
+    ('VRT', 'VRT'),                  # ('V', 'Visa')
+    ('AAPL', 'Apple'),
     ('BABA', 'Alibaba'),
     ('SPY', 'S&P 500'),
     ('ONEQ', 'Nasdaq'),
