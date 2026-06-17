@@ -296,6 +296,8 @@ def initialize_session_state():
             "clears": 0,
             "coverage_writes": 0,
             "coverage_hits": 0,
+            "today_cell_refreshes": 0,
+            "today_cell_tickers_refreshed": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -1281,6 +1283,8 @@ def _get_scd_cache_stats() -> Dict[str, int]:
         "clears": 0,
         "coverage_writes": 0,
         "coverage_hits": 0,
+        "today_cell_refreshes": 0,
+        "today_cell_tickers_refreshed": 0,
     }
 
     if 'scd_cache_stats' not in st.session_state:
@@ -1332,6 +1336,10 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
     rolling_misses = int(stats.get("rolling_misses", 0) or 0)
     hover_misses = int(stats.get("hover_misses", 0) or 0)
     force_refreshes = int(stats.get("force_refreshes", 0) or 0)
+    today_cell_refreshes = int(stats.get("today_cell_refreshes", 0) or 0)
+    today_cell_tickers_refreshed = int(
+        stats.get("today_cell_tickers_refreshed", 0) or 0
+    )
 
     summary_parts: list[str] = []
 
@@ -1349,7 +1357,14 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
         )
 
     if force_refreshes:
-        summary_parts.append(f"manual refreshes={force_refreshes}")
+        summary_parts.append(f"force-refresh builds={force_refreshes}")
+
+    if today_cell_refreshes:
+        summary_parts.append(
+            "today-cell refreshes="
+            f"{today_cell_refreshes} "
+            f"({today_cell_tickers_refreshed} ticker cell(s))"
+        )
 
     if not summary_parts:
         return "Cache activity summary: no SCD cache activity recorded yet."
@@ -1385,7 +1400,10 @@ def _render_scd_cache_diagnostics() -> None:
         f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
         f"hover={cache_stats.get('hover_misses', 0)}. "
         f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
-        f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
+        f"Force-refresh builds={cache_stats.get('force_refreshes', 0)}. "
+        f"Today-cell refreshes={cache_stats.get('today_cell_refreshes', 0)}. "
+        f"Today refreshed ticker cells="
+        f"{cache_stats.get('today_cell_tickers_refreshed', 0)}."
     )
 
 
@@ -1408,6 +1426,8 @@ def _clear_scd_session_cache() -> None:
         "clears": st.session_state.get("scd_cache_stats", {}).get("clears", 0) + 1,
         "coverage_writes": 0,
         "coverage_hits": 0,
+        "today_cell_refreshes": 0,
+        "today_cell_tickers_refreshed": 0,
     }
 
 
@@ -6578,6 +6598,9 @@ def show_stock_comparison_dashboard():
                 else "Building default Single Indicator time-series matrix."
             )
 
+            if build_single_clicked and force_refresh_single:
+                _get_scd_cache_stats()["force_refreshes"] += 1
+
             with st.spinner(spinner_text):
                 st.session_state.scd_single_indicator_matrix = (
                     _build_scd_single_indicator_time_series_matrix(
@@ -6640,6 +6663,14 @@ def show_stock_comparison_dashboard():
                     if isinstance(single_matrix, dict)
                     else {}
                 )
+
+                if refresh_report.get("status") in {"ok", "partial"}:
+                    cache_stats = _get_scd_cache_stats()
+                    cache_stats["today_cell_refreshes"] += 1
+                    cache_stats["today_cell_tickers_refreshed"] += len(
+                        refresh_report.get("tickers_refreshed", [])
+                    )
+
                 if refresh_report.get("status") == "ok":
                     st.success(
                         "Today's cells refreshed for "

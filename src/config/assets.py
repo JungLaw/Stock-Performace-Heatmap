@@ -137,13 +137,13 @@ CUSTOM_DEFAULT = [
     ('TSM', 'TSMC'),
     ('MU', 'Micron'),
     ('GEV', 'GE Vernova'),
-    ('V', 'Visa'),
+    #('V', 'Visa'),
     ('MRVL', 'Marvell'),     # ('VYMI', 'Intl. High Div.')
     ('VRT', 'VRT'),                  # ('V', 'Visa')
     ('AAPL', 'Apple'),
     ('BABA', 'Alibaba'),
     ('SPY', 'S&P 500'),
-    ('ONEQ', 'Nasdaq'),
+#    ('ONEQ', 'Nasdaq'),
 ]
 
 # Helper functions to work with ticker/name pairs
