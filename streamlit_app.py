@@ -1,4 +1,4 @@
-# Stamp: Thu, June 18, 2026 3:15 PM
+# Stamp: Thu, June 18, 2026 6:30 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -2768,6 +2768,165 @@ def _get_scd_current_live_date_key() -> Optional[str]:
     return today.strftime("%Y-%m-%d")
 
 
+def _format_scd_live_as_of_label(as_of: Any) -> Optional[str]:
+    """
+    Return a compact UI label for live/current-day SCD timestamps.
+
+    Example:
+        (a/o: 6/18 @ 12:15 PM)
+
+    This is display metadata only. It does not imply market-data exchange
+    timestamp precision.
+    """
+    if as_of is None:
+        return None
+
+    try:
+        ts = pd.Timestamp(as_of)
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+
+        dt = ts.to_pydatetime()
+        time_label = dt.strftime("%I:%M %p").lstrip("0")
+        return f"(a/o: {dt.month}/{dt.day} @ {time_label})"
+    except Exception:
+        return None
+
+
+def _get_scd_live_as_of_meta(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return stored live/current-day as-of metadata for a matrix/date.
+
+    This reads matrix/session display metadata only. It does not fetch data,
+    compute indicators, score signals, persist data, or reinterpret semantics.
+    """
+    if not isinstance(matrix, dict):
+        return None
+
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+    if not normalized_date:
+        return None
+
+    live_as_of = matrix.get("live_as_of", {})
+    if not isinstance(live_as_of, dict):
+        return None
+
+    meta = live_as_of.get(normalized_date)
+    if not isinstance(meta, dict):
+        return None
+
+    return dict(meta)
+
+
+def _get_scd_live_as_of_caption(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+) -> Optional[str]:
+    """
+    Return a compact caption for live/current-day SCD matrix data.
+    """
+    meta = _get_scd_live_as_of_meta(matrix=matrix, date_key=date_key)
+    if not meta:
+        return None
+
+    label = meta.get("label") or _format_scd_live_as_of_label(meta.get("as_of"))
+    if not label:
+        return None
+
+    return f"{label}"
+
+
+def _mark_scd_live_cells_as_of(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+    as_of: Any,
+    source: str,
+) -> None:
+    """
+    Mark live/current-day cells in an existing SCD matrix with as-of metadata.
+
+    This mutates only display/session metadata on already-built matrix cells.
+    It does not fetch data, compute indicators, score signals, persist data,
+    rank tickers, aggregate values, or reinterpret semantics.
+    """
+    if not isinstance(matrix, dict):
+        return
+
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+    live_date_key = _get_scd_current_live_date_key()
+
+    if not normalized_date or normalized_date != live_date_key:
+        return
+
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is not None:
+        as_of_ts = as_of_ts.tz_localize(None)
+
+    as_of_iso = as_of_ts.isoformat(timespec="seconds")
+    label = _format_scd_live_as_of_label(as_of_ts)
+
+    meta = {
+        "date": normalized_date,
+        "as_of": as_of_iso,
+        "label": label,
+        "source": str(source),
+    }
+
+    matrix.setdefault("live_as_of", {})
+    matrix["live_as_of"][normalized_date] = dict(meta)
+
+    matrix.setdefault("profile", {})
+    matrix["profile"].setdefault("live_as_of", {})
+    matrix["profile"]["live_as_of"][normalized_date] = dict(meta)
+
+    view = str(matrix.get("view", "")).strip()
+
+    if view == "single_indicator_time_series":
+        cells_by_ticker = matrix.get("cells", {}).get(normalized_date, {})
+        if not isinstance(cells_by_ticker, dict):
+            return
+
+        for cell in cells_by_ticker.values():
+            if not isinstance(cell, dict):
+                continue
+            if _normalize_scd_cache_date_value(cell.get("date")) != normalized_date:
+                continue
+
+            cell["date_status"] = "live"
+            cell["live_as_of"] = as_of_iso
+            cell["live_as_of_label"] = label
+
+            price_cell = cell.get("price_cell")
+            if isinstance(price_cell, dict):
+                price_cell["date_status"] = "live"
+                price_cell["live_as_of"] = as_of_iso
+                price_cell["live_as_of_label"] = label
+
+        return
+
+    for cells_by_ticker in matrix.get("cells", {}).values():
+        if not isinstance(cells_by_ticker, dict):
+            continue
+
+        for cell in cells_by_ticker.values():
+            if not isinstance(cell, dict):
+                continue
+            if _normalize_scd_cache_date_value(cell.get("date")) != normalized_date:
+                continue
+
+            cell["date_status"] = "live"
+            cell["live_as_of"] = as_of_iso
+            cell["live_as_of_label"] = label
+
+
 def _refresh_scd_single_indicator_live_date_cells(
     *,
     matrix: Dict[str, Any],
@@ -2926,7 +3085,18 @@ def _refresh_scd_single_indicator_live_date_cells(
             else "error"
         )
 
+    as_of_dt = datetime.now()
     refresh_report["total_seconds"] = round(time.perf_counter() - started_at, 3)
+    refresh_report["as_of"] = as_of_dt.isoformat(timespec="seconds")
+    refresh_report["as_of_label"] = _format_scd_live_as_of_label(as_of_dt)
+
+    _mark_scd_live_cells_as_of(
+        matrix=refreshed_matrix,
+        date_key=live_date_key,
+        as_of=as_of_dt,
+        source="single_indicator_today_refresh",
+    )
+
     refreshed_matrix["last_live_refresh"] = refresh_report
     refreshed_matrix["profile"]["last_live_refresh"] = refresh_report
 
@@ -3211,6 +3381,15 @@ def _build_scd_single_indicator_time_series_matrix(
         time.perf_counter() - profile_started_at,
         3,
     )
+
+    live_date_key = _get_scd_current_live_date_key()
+    if live_date_key and live_date_key in date_strings:
+        _mark_scd_live_cells_as_of(
+            matrix=matrix,
+            date_key=live_date_key,
+            as_of=datetime.now(),
+            source="single_indicator_build",
+        )
 
     result_cell_writes = _store_scd_result_cells_from_matrix(
         matrix=matrix,
@@ -3502,6 +3681,19 @@ def _build_scd_cross_sectional_matrix(
         time.perf_counter() - profile_started_at,
         3,
     )
+
+    live_date_key = _get_scd_current_live_date_key()
+    if (
+        target_date_key
+        and live_date_key
+        and _normalize_scd_cache_date_value(target_date_key) == live_date_key
+    ):
+        _mark_scd_live_cells_as_of(
+            matrix=matrix,
+            date_key=live_date_key,
+            as_of=datetime.now(),
+            source="multiple_indicators_build",
+        )
 
     result_cell_writes = _store_scd_result_cells_from_matrix(
         matrix=matrix,
@@ -7043,18 +7235,12 @@ def show_stock_comparison_dashboard():
                 key="scd_single_refresh_today_cells",
                 disabled=not live_date_in_matrix,
                 help=(
-                    "Refresh only today's visible date/ticker cells in the current "
-                    "Single Indicator matrix. This reruns the existing lookback-aware "
-                    "technical bundle per ticker, then splices only today's cells into "
-                    "the matrix. Historical cells remain unchanged."
+                    "Refresh today's visible date/ticker cells in the current "
+                    "Single Indicator matrix. The app recalculates enough data to "
+                    "produce today's values, replaces only today's visible cells, "
+                    "and leaves historical cells unchanged."
                 ),
             )
-
-            if not live_date_in_matrix:
-                st.caption(
-                    "Today-refresh is available only when the current Single Indicator "
-                    "matrix includes today's US trading date."
-                )
 
             if refresh_today_clicked:
                 with st.spinner("Refreshing today's Single Indicator cells."):
@@ -7099,11 +7285,18 @@ def show_stock_comparison_dashboard():
                         )
                     )
 
-            _render_scd_single_indicator_matrix_view(single_matrix)
+            if live_date_in_matrix:
+                live_caption = _get_scd_live_as_of_caption(
+                    matrix=single_matrix,
+                    date_key=live_date_key,
+                )
+                st.caption(
+                    live_caption
+                    if live_caption
+                    else "Today's data: no current-session timestamp available yet."
+                )
 
-            if single_matrix.get("last_live_refresh"):
-                with st.expander("Last today-refresh status", expanded=False):
-                    st.json(single_matrix.get("last_live_refresh"))
+            _render_scd_single_indicator_matrix_view(single_matrix)
 
             if single_matrix.get("errors"):
                 st.warning("Some ticker payloads produced errors.")
@@ -7223,6 +7416,23 @@ def show_stock_comparison_dashboard():
      
     if st.session_state.scd_matrix_last_run:
         st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
+
+    live_date_key = _get_scd_current_live_date_key()
+    current_matrix = st.session_state.get("scd_signal_matrix")
+    if (
+        isinstance(current_matrix, dict)
+        and live_date_key
+        and _normalize_scd_cache_date_value(current_matrix.get("target_date")) == live_date_key
+    ):
+        live_caption = _get_scd_live_as_of_caption(
+            matrix=current_matrix,
+            date_key=live_date_key,
+        )
+        st.caption(
+            live_caption
+            if live_caption
+            else "Today's data: no current-session timestamp available yet."
+        )
 
     _render_scd_matrix_view(st.session_state.scd_signal_matrix)
 
