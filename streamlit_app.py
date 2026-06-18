@@ -1,4 +1,4 @@
-# Stamp: Sun, June 14, 2026 10:39 AM
+# Stamp: Wed, June 17, 2026 605 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -286,6 +286,13 @@ def initialize_session_state():
     if 'scd_bundle_coverage_cache' not in st.session_state:
         st.session_state.scd_bundle_coverage_cache = {}
 
+    # D3-A: completed historical result-cell cache.
+    # Session-only store of final SCD matrix cells keyed by
+    # (ticker, row_key, date). Commit 1 writes completed cells only; later
+    # D3-A steps may read this to avoid recalculating completed historical cells.
+    if 'scd_result_cell_cache' not in st.session_state:
+        st.session_state.scd_result_cell_cache = {}
+
     if 'scd_cache_stats' not in st.session_state:
         st.session_state.scd_cache_stats = {
             "rolling_hits": 0,
@@ -298,6 +305,7 @@ def initialize_session_state():
             "coverage_hits": 0,
             "today_cell_refreshes": 0,
             "today_cell_tickers_refreshed": 0,
+            "result_cell_writes": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -1285,6 +1293,7 @@ def _get_scd_cache_stats() -> Dict[str, int]:
         "coverage_hits": 0,
         "today_cell_refreshes": 0,
         "today_cell_tickers_refreshed": 0,
+        "result_cell_writes": 0,
     }
 
     if 'scd_cache_stats' not in st.session_state:
@@ -1316,6 +1325,7 @@ def _get_scd_cache_diagnostics_snapshot() -> Dict[str, Any]:
         "payload_count": len(st.session_state.get("scd_payload_cache", {})),
         "hover_context_count": len(st.session_state.get("scd_hover_ohlcv_cache", {})),
         "coverage_entry_count": coverage_entry_count,
+        "result_cell_count": len(st.session_state.get("scd_result_cell_cache", {})),
         "stats": cache_stats,
     }
 
@@ -1340,6 +1350,7 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
     today_cell_tickers_refreshed = int(
         stats.get("today_cell_tickers_refreshed", 0) or 0
     )
+    result_cell_writes = int(stats.get("result_cell_writes", 0) or 0)
 
     summary_parts: list[str] = []
 
@@ -1365,6 +1376,9 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
             f"{today_cell_refreshes} "
             f"({today_cell_tickers_refreshed} ticker cell(s))"
         )
+
+    if result_cell_writes:
+        summary_parts.append(f"result-cell writes={result_cell_writes}")
 
     if not summary_parts:
         return "Cache activity summary: no SCD cache activity recorded yet."
@@ -1393,13 +1407,15 @@ def _render_scd_cache_diagnostics() -> None:
         "Current session cache details: "
         f"{snapshot['payload_count']} ticker result(s), "
         f"{snapshot['hover_context_count']} hover-context result(s), "
-        f"{snapshot['coverage_entry_count']} coverage-aware bundle entry/entries. "
+        f"{snapshot['coverage_entry_count']} coverage-aware bundle entry/entries, "
+        f"{snapshot['result_cell_count']} completed result-cell entrie(s). "
         f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
         f"hover={cache_stats.get('hover_hits', 0)}, "
         f"coverage={cache_stats.get('coverage_hits', 0)}. "
         f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
         f"hover={cache_stats.get('hover_misses', 0)}. "
         f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
+        f"Result-cell writes={cache_stats.get('result_cell_writes', 0)}. "
         f"Force-refresh builds={cache_stats.get('force_refreshes', 0)}. "
         f"Today-cell refreshes={cache_stats.get('today_cell_refreshes', 0)}. "
         f"Today refreshed ticker cells="
@@ -1417,6 +1433,7 @@ def _clear_scd_session_cache() -> None:
     st.session_state.scd_payload_cache = {}
     st.session_state.scd_hover_ohlcv_cache = {}
     st.session_state.scd_bundle_coverage_cache = {}
+    st.session_state.scd_result_cell_cache = {}
     st.session_state.scd_cache_stats = {
         "rolling_hits": 0,
         "rolling_misses": 0,
@@ -1428,6 +1445,7 @@ def _clear_scd_session_cache() -> None:
         "coverage_hits": 0,
         "today_cell_refreshes": 0,
         "today_cell_tickers_refreshed": 0,
+        "result_cell_writes": 0,
     }
 
 
@@ -1520,6 +1538,130 @@ def _classify_scd_cache_dates(date_strings: set[str]) -> Dict[str, set[str]]:
         "completed_dates": completed_dates,
         "live_dates": live_dates,
     }
+
+
+def _get_scd_result_cell_cache() -> Dict[tuple[str, str, str], Dict[str, Any]]:
+    """
+    Return initialized SCD result-cell cache.
+
+    D3-A Commit 1 writes completed historical cells only. Later D3-A steps may
+    read this cache to avoid recalculating completed historical cells.
+    """
+    if 'scd_result_cell_cache' not in st.session_state:
+        st.session_state.scd_result_cell_cache = {}
+    return st.session_state.scd_result_cell_cache
+
+
+def _is_scd_completed_cache_date(date_key: Any) -> bool:
+    """
+    Return True when date_key is a completed historical cache date.
+
+    This reuses the existing SCD completed/live date policy. Today's date is
+    treated as live only when today is a US trading day.
+    """
+    normalized = _normalize_scd_cache_date_value(date_key)
+    if not normalized:
+        return False
+
+    classified = _classify_scd_cache_dates({normalized})
+    return normalized in classified.get("completed_dates", set())
+
+
+def _store_scd_result_cell_cache_entry(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: Any,
+    cell: Dict[str, Any],
+    source: str,
+) -> bool:
+    """
+    Store one completed historical SCD result cell.
+
+    This helper does not fetch data, calculate indicators, score signals,
+    persist data, rank tickers, aggregate values, or change matrix contents.
+    It only stores already-built final SCD cells for future reuse.
+    """
+    if not isinstance(cell, dict):
+        return False
+
+    if cell.get("status") != "ok":
+        return False
+
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+    normalized_date = _normalize_scd_cache_date_value(date_key or cell.get("date"))
+
+    if not normalized_ticker or not normalized_row_key or not normalized_date:
+        return False
+
+    if not _is_scd_completed_cache_date(normalized_date):
+        return False
+
+    cache = _get_scd_result_cell_cache()
+    cache[(normalized_ticker, normalized_row_key, normalized_date)] = {
+        "ticker": normalized_ticker,
+        "row_key": normalized_row_key,
+        "date": normalized_date,
+        "date_status": "completed",
+        "cell": dict(cell),
+        "source": str(source),
+        "created_at": datetime.now(),
+    }
+
+    _get_scd_cache_stats()["result_cell_writes"] += 1
+    return True
+
+
+def _store_scd_result_cells_from_matrix(
+    *,
+    matrix: Dict[str, Any],
+    source: str,
+) -> int:
+    """
+    Store completed historical cells from an existing SCD matrix.
+
+    Supports both current SCD matrix shapes:
+      - Single Indicator: matrix["cells"][date_key][ticker]
+      - Multiple Indicators: matrix["cells"][row_key][ticker]
+    """
+    if not isinstance(matrix, dict):
+        return 0
+
+    view = str(matrix.get("view", "")).strip()
+    stored_count = 0
+
+    if view == "single_indicator_time_series":
+        row_key = str(matrix.get("row_key", "")).strip()
+        for date_key, cells_by_ticker in dict(matrix.get("cells", {})).items():
+            if not isinstance(cells_by_ticker, dict):
+                continue
+            for ticker, cell in cells_by_ticker.items():
+                if _store_scd_result_cell_cache_entry(
+                    ticker=str(ticker),
+                    row_key=row_key,
+                    date_key=date_key,
+                    cell=cell,
+                    source=source,
+                ):
+                    stored_count += 1
+
+        return stored_count
+
+    row_keys = list(matrix.get("row_keys", []))
+    for row_key in row_keys:
+        cells_by_ticker = dict(matrix.get("cells", {}).get(row_key, {}))
+        for ticker, cell in cells_by_ticker.items():
+            if _store_scd_result_cell_cache_entry(
+                ticker=str(ticker),
+                row_key=str(row_key),
+                date_key=cell.get("date") if isinstance(cell, dict) else None,
+                cell=cell,
+                source=source,
+            ):
+                stored_count += 1
+
+    return stored_count
 
 
 def _store_scd_coverage_cache_entry(
@@ -2880,6 +3022,12 @@ def _build_scd_single_indicator_time_series_matrix(
         3,
     )
 
+    result_cell_writes = _store_scd_result_cells_from_matrix(
+        matrix=matrix,
+        source="single_indicator_build",
+    )
+    matrix["profile"]["result_cell_writes"] = result_cell_writes
+
     if matrix["errors"]:
         matrix["status"] = "partial"
 
@@ -3101,10 +3249,16 @@ def _build_scd_cross_sectional_matrix(
         3,
     )
 
+    result_cell_writes = _store_scd_result_cells_from_matrix(
+        matrix=matrix,
+        source="multiple_indicators_build",
+    )
+    matrix["profile"]["result_cell_writes"] = result_cell_writes
+
     return matrix
 
 
-def _get_scd_row_display_name(row_key: str) -> str:
+def _get_scd_row_display_name(row_key: str):
     """
     Return the adapter-owned display label for a canonical SCD row_key.
     """
