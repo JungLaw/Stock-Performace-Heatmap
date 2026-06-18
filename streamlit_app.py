@@ -1,4 +1,4 @@
-# Stamp: Wed, June 17, 2026 605 PM
+# Stamp: Thu, June 18, 2026 2:26 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -306,6 +306,9 @@ def initialize_session_state():
             "today_cell_refreshes": 0,
             "today_cell_tickers_refreshed": 0,
             "result_cell_writes": 0,
+            "result_cell_hits": 0,
+            "result_cell_misses": 0,
+            "ticker_calculations_skipped": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -1294,6 +1297,9 @@ def _get_scd_cache_stats() -> Dict[str, int]:
         "today_cell_refreshes": 0,
         "today_cell_tickers_refreshed": 0,
         "result_cell_writes": 0,
+        "result_cell_hits": 0,
+        "result_cell_misses": 0,
+        "ticker_calculations_skipped": 0,
     }
 
     if 'scd_cache_stats' not in st.session_state:
@@ -1351,6 +1357,11 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
         stats.get("today_cell_tickers_refreshed", 0) or 0
     )
     result_cell_writes = int(stats.get("result_cell_writes", 0) or 0)
+    result_cell_hits = int(stats.get("result_cell_hits", 0) or 0)
+    result_cell_misses = int(stats.get("result_cell_misses", 0) or 0)
+    ticker_calculations_skipped = int(
+        stats.get("ticker_calculations_skipped", 0) or 0
+    )
 
     summary_parts: list[str] = []
 
@@ -1379,6 +1390,17 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
 
     if result_cell_writes:
         summary_parts.append(f"result-cell writes={result_cell_writes}")
+
+    if result_cell_hits:
+        summary_parts.append(f"result-cell reuse={result_cell_hits}")
+
+    if result_cell_misses:
+        summary_parts.append(f"result-cell misses={result_cell_misses}")
+
+    if ticker_calculations_skipped:
+        summary_parts.append(
+            f"ticker calculations skipped={ticker_calculations_skipped}"
+        )
 
     if not summary_parts:
         return "Cache activity summary: no SCD cache activity recorded yet."
@@ -1416,6 +1438,10 @@ def _render_scd_cache_diagnostics() -> None:
         f"hover={cache_stats.get('hover_misses', 0)}. "
         f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
         f"Result-cell writes={cache_stats.get('result_cell_writes', 0)}. "
+        f"Result-cell reuse={cache_stats.get('result_cell_hits', 0)}. "
+        f"Result-cell misses={cache_stats.get('result_cell_misses', 0)}. "
+        f"Ticker calculations skipped="
+        f"{cache_stats.get('ticker_calculations_skipped', 0)}. "
         f"Force-refresh builds={cache_stats.get('force_refreshes', 0)}. "
         f"Today-cell refreshes={cache_stats.get('today_cell_refreshes', 0)}. "
         f"Today refreshed ticker cells="
@@ -1446,6 +1472,9 @@ def _clear_scd_session_cache() -> None:
         "today_cell_refreshes": 0,
         "today_cell_tickers_refreshed": 0,
         "result_cell_writes": 0,
+        "result_cell_hits": 0,
+        "result_cell_misses": 0,
+        "ticker_calculations_skipped": 0,
     }
 
 
@@ -1552,6 +1581,88 @@ def _get_scd_result_cell_cache() -> Dict[tuple[str, str, str], Dict[str, Any]]:
     return st.session_state.scd_result_cell_cache
 
 
+def _get_scd_completed_result_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: Any,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return one cached completed historical SCD cell, if available.
+
+    This helper reads final cells produced by the existing SCD build path. It
+    does not fetch data, calculate indicators, score signals, persist data,
+    rank tickers, aggregate values, or reinterpret semantics.
+    """
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+
+    if not normalized_ticker or not normalized_row_key or not normalized_date:
+        return None
+
+    if not _is_scd_completed_cache_date(normalized_date):
+        return None
+
+    cache = _get_scd_result_cell_cache()
+    entry = cache.get((normalized_ticker, normalized_row_key, normalized_date))
+    if not isinstance(entry, dict):
+        return None
+
+    cell = entry.get("cell")
+    if not isinstance(cell, dict):
+        return None
+
+    if cell.get("status") != "ok":
+        return None
+
+    return dict(cell)
+
+
+def _load_completed_result_cells_for_ticker(
+    *,
+    ticker: str,
+    row_keys: list[str],
+    date_keys: list[str],
+) -> tuple[Dict[tuple[str, str], Dict[str, Any]], list[tuple[str, str]]]:
+    """
+    Load cached completed historical cells for one ticker.
+
+    Returns:
+      - cached cells keyed by (row_key, date_key)
+      - missing (row_key, date_key) pairs
+
+    Callers decide whether the cache coverage is sufficient to skip the
+    expensive technical path. This helper only reads cache state.
+    """
+    cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+    missing_cells: list[tuple[str, str]] = []
+
+    for row_key in row_keys:
+        normalized_row_key = str(row_key).strip()
+        if not normalized_row_key:
+            continue
+
+        for date_key in date_keys:
+            normalized_date = _normalize_scd_cache_date_value(date_key)
+            if not normalized_date or not _is_scd_completed_cache_date(normalized_date):
+                missing_cells.append((normalized_row_key, str(date_key)))
+                continue
+
+            cached_cell = _get_scd_completed_result_cell(
+                ticker=ticker,
+                row_key=normalized_row_key,
+                date_key=normalized_date,
+            )
+            if cached_cell is None:
+                missing_cells.append((normalized_row_key, normalized_date))
+                continue
+
+            cached_cells[(normalized_row_key, normalized_date)] = cached_cell
+
+    return cached_cells, missing_cells
+
+
 def _is_scd_completed_cache_date(date_key: Any) -> bool:
     """
     Return True when date_key is a completed historical cache date.
@@ -1599,12 +1710,19 @@ def _store_scd_result_cell_cache_entry(
         return False
 
     cache = _get_scd_result_cell_cache()
-    cache[(normalized_ticker, normalized_row_key, normalized_date)] = {
+    cache_key = (normalized_ticker, normalized_row_key, normalized_date)
+    new_cell = dict(cell)
+
+    existing_entry = cache.get(cache_key)
+    if isinstance(existing_entry, dict) and existing_entry.get("cell") == new_cell:
+        return False
+
+    cache[cache_key] = {
         "ticker": normalized_ticker,
         "row_key": normalized_row_key,
         "date": normalized_date,
         "date_status": "completed",
-        "cell": dict(cell),
+        "cell": new_cell,
         "source": str(source),
         "created_at": datetime.now(),
     }
@@ -2902,6 +3020,50 @@ def _build_scd_single_indicator_time_series_matrix(
         }
         matrix["profile"]["tickers"][ticker] = ticker_profile
 
+        requested_dates_completed = all(
+            _is_scd_completed_cache_date(date_key)
+            for date_key in date_strings
+        )
+
+        if not force_refresh and requested_dates_completed:
+            cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
+                ticker=ticker,
+                row_keys=[row_key],
+                date_keys=date_strings,
+            )
+
+            if not missing_cells:
+                for date_key in date_strings:
+                    normalized_date = _normalize_scd_cache_date_value(date_key)
+                    matrix["cells"][date_key][ticker] = cached_cells[
+                        (row_key, normalized_date)
+                    ]
+
+                stats = _get_scd_cache_stats()
+                stats["result_cell_hits"] += len(date_strings)
+                stats["ticker_calculations_skipped"] += 1
+
+                matrix["ticker_status"][ticker] = {
+                    "status": "result_cell_cache",
+                    "message": "All requested completed historical cells reused.",
+                    "bundle_source": "result_cell_cache",
+                    "missing_cells": 0,
+                }
+
+                ticker_profile["rolling_payload_seconds"] = 0.0
+                ticker_profile["hover_context_seconds"] = 0.0
+                ticker_profile["adapter_lookup_seconds"] = 0.0
+                ticker_profile["cell_extraction_seconds"] = 0.0
+                ticker_profile["bundle_source"] = "result_cell_cache"
+                ticker_profile["status"] = "result_cell_cache"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
+                continue
+
+            _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+
         try:
             stage_started_at = time.perf_counter()
             bundle = _fetch_scd_rolling_bundle_for_ticker(
@@ -3111,6 +3273,50 @@ def _build_scd_cross_sectional_matrix(
             "status": "started",
         }
         matrix["profile"]["tickers"][ticker] = ticker_profile
+
+        target_date_completed = (
+            bool(target_date_key)
+            and _is_scd_completed_cache_date(target_date_key)
+        )
+
+        if not force_refresh and target_date_completed:
+            cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
+                ticker=ticker,
+                row_keys=row_keys,
+                date_keys=[target_date_key],
+            )
+
+            if not missing_cells:
+                normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
+                for row_key in row_keys:
+                    matrix["cells"][row_key][ticker] = cached_cells[
+                        (row_key, normalized_target_date)
+                    ]
+
+                stats = _get_scd_cache_stats()
+                stats["result_cell_hits"] += len(row_keys)
+                stats["ticker_calculations_skipped"] += 1
+
+                matrix["ticker_status"][ticker] = {
+                    "status": "result_cell_cache",
+                    "message": "All requested completed historical cells reused.",
+                    "target_date": target_date_key,
+                    "bundle_source": "result_cell_cache",
+                }
+
+                ticker_profile["rolling_payload_seconds"] = 0.0
+                ticker_profile["hover_context_seconds"] = 0.0
+                ticker_profile["adapter_lookup_seconds"] = 0.0
+                ticker_profile["latest_cell_extraction_seconds"] = 0.0
+                ticker_profile["bundle_source"] = "result_cell_cache"
+                ticker_profile["status"] = "result_cell_cache"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
+                continue
+
+            _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
 
         try:
             stage_started_at = time.perf_counter()
