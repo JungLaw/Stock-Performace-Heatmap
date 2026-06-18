@@ -1,4 +1,4 @@
-# Stamp: Thu, June 18, 2026 2:26 PM
+# Stamp: Thu, June 18, 2026 3:15 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -3020,27 +3020,36 @@ def _build_scd_single_indicator_time_series_matrix(
         }
         matrix["profile"]["tickers"][ticker] = ticker_profile
 
-        requested_dates_completed = all(
-            _is_scd_completed_cache_date(date_key)
+        completed_date_strings = [
+            date_key
             for date_key in date_strings
-        )
+            if _is_scd_completed_cache_date(date_key)
+        ]
 
-        if not force_refresh and requested_dates_completed:
+        cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+        missing_cells: list[tuple[str, str]] = []
+        fetch_requested_date_strings = list(date_strings)
+
+        if not force_refresh and completed_date_strings:
             cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
                 ticker=ticker,
                 row_keys=[row_key],
-                date_keys=date_strings,
+                date_keys=completed_date_strings,
             )
 
-            if not missing_cells:
-                for date_key in date_strings:
-                    normalized_date = _normalize_scd_cache_date_value(date_key)
-                    matrix["cells"][date_key][ticker] = cached_cells[
-                        (row_key, normalized_date)
-                    ]
+            if cached_cells:
+                for (cached_row_key, cached_date_key), cached_cell in cached_cells.items():
+                    if cached_row_key != row_key:
+                        continue
+                    matrix["cells"][cached_date_key][ticker] = cached_cell
 
+                _get_scd_cache_stats()["result_cell_hits"] += len(cached_cells)
+
+            if missing_cells:
+                _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+
+            if not missing_cells and len(completed_date_strings) == len(date_strings):
                 stats = _get_scd_cache_stats()
-                stats["result_cell_hits"] += len(date_strings)
                 stats["ticker_calculations_skipped"] += 1
 
                 matrix["ticker_status"][ticker] = {
@@ -3062,7 +3071,15 @@ def _build_scd_single_indicator_time_series_matrix(
                 )
                 continue
 
-            _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+            cached_date_strings = {
+                cached_date_key
+                for (_, cached_date_key) in cached_cells.keys()
+            }
+            fetch_requested_date_strings = [
+                date_key
+                for date_key in date_strings
+                if _normalize_scd_cache_date_value(date_key) not in cached_date_strings
+            ]
 
         try:
             stage_started_at = time.perf_counter()
@@ -3072,7 +3089,7 @@ def _build_scd_single_indicator_time_series_matrix(
                 force_refresh=force_refresh,
                 anchor_date=anchor_date,
                 anchor_mode=anchor_mode,
-                requested_date_strings=date_strings,
+                requested_date_strings=fetch_requested_date_strings,
             )
             ticker_profile["rolling_payload_seconds"] = round(
                 time.perf_counter() - stage_started_at,
@@ -3093,6 +3110,13 @@ def _build_scd_single_indicator_time_series_matrix(
                     "bundle_source": bundle_source,
                 }
                 for date_key in date_strings:
+                    normalized_date = _normalize_scd_cache_date_value(date_key)
+                    if (row_key, normalized_date) in cached_cells:
+                        matrix["cells"][date_key][ticker] = cached_cells[
+                            (row_key, normalized_date)
+                        ]
+                        continue
+
                     matrix["cells"][date_key][ticker] = {
                         "ticker": ticker,
                         "row_key": row_key,
@@ -3122,14 +3146,18 @@ def _build_scd_single_indicator_time_series_matrix(
             missing_count = 0
 
             for date_key in date_strings:
-                cell = _build_scd_single_indicator_cell_from_bundle(
-                    ticker=ticker,
-                    row_key=row_key,
-                    date_key=date_key,
-                    rolling_payload=rolling_payload,
-                    adapter_lookup=adapter_lookup,
-                    context_df=hover_ohlcv_df,
-                )
+                normalized_date = _normalize_scd_cache_date_value(date_key)
+                if (row_key, normalized_date) in cached_cells:
+                    cell = cached_cells[(row_key, normalized_date)]
+                else:
+                    cell = _build_scd_single_indicator_cell_from_bundle(
+                        ticker=ticker,
+                        row_key=row_key,
+                        date_key=date_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                        context_df=hover_ohlcv_df,
+                    )
 
                 if cell.get("status") != "ok":
                     missing_count += 1
@@ -3279,6 +3307,9 @@ def _build_scd_cross_sectional_matrix(
             and _is_scd_completed_cache_date(target_date_key)
         )
 
+        cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+        missing_cells: list[tuple[str, str]] = []
+
         if not force_refresh and target_date_completed:
             cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
                 ticker=ticker,
@@ -3286,15 +3317,21 @@ def _build_scd_cross_sectional_matrix(
                 date_keys=[target_date_key],
             )
 
-            if not missing_cells:
+            if cached_cells:
                 normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
                 for row_key in row_keys:
-                    matrix["cells"][row_key][ticker] = cached_cells[
-                        (row_key, normalized_target_date)
-                    ]
+                    cached_cell = cached_cells.get((row_key, normalized_target_date))
+                    if cached_cell is None:
+                        continue
+                    matrix["cells"][row_key][ticker] = cached_cell
 
+                _get_scd_cache_stats()["result_cell_hits"] += len(cached_cells)
+
+            if missing_cells:
+                _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+
+            if not missing_cells:
                 stats = _get_scd_cache_stats()
-                stats["result_cell_hits"] += len(row_keys)
                 stats["ticker_calculations_skipped"] += 1
 
                 matrix["ticker_status"][ticker] = {
@@ -3315,8 +3352,6 @@ def _build_scd_cross_sectional_matrix(
                     3,
                 )
                 continue
-
-            _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
 
         try:
             stage_started_at = time.perf_counter()
@@ -3351,7 +3386,14 @@ def _build_scd_cross_sectional_matrix(
                     "message": "No rolling payload returned.",
                     "bundle_source": bundle_source,
                 }
+                normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
                 for row_key in row_keys:
+                    if (row_key, normalized_target_date) in cached_cells:
+                        matrix["cells"][row_key][ticker] = cached_cells[
+                            (row_key, normalized_target_date)
+                        ]
+                        continue
+
                     matrix["cells"][row_key][ticker] = {
                         "ticker": ticker,
                         "row_key": row_key,
@@ -3397,8 +3439,14 @@ def _build_scd_cross_sectional_matrix(
             )
 
             stage_started_at = time.perf_counter()
+            normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
+
             for row_key in row_keys:
-                if target_date_key:
+                if target_date_key and (row_key, normalized_target_date) in cached_cells:
+                    matrix["cells"][row_key][ticker] = cached_cells[
+                        (row_key, normalized_target_date)
+                    ]
+                elif target_date_key:
                     matrix["cells"][row_key][ticker] = _extract_scd_cell_for_date(
                         ticker=ticker,
                         row_key=row_key,
