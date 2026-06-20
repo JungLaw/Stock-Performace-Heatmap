@@ -1,4 +1,4 @@
-# Stamp: Thu, June 18, 2026 6:30 PM
+# Stamp: Fri, June 19, 2026 7:02 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -60,6 +60,11 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     build_plotly_heatmap_inputs,
 )
+
+# Developer-only diagnostic controls.
+# Keep False for normal app use. Set True temporarily when running D3-C
+# tail-buffer equivalence checks.
+SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC = False
 
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
     """
@@ -1229,12 +1234,17 @@ def _get_scd_ohlcv_request(
     window_days: int = 10,
     anchor_date: Optional[Any] = None,
     anchor_mode: str = "asof",
+    historical_buffer_days: int = 435,
 ) -> Dict[str, Any]:
     """
     Return the Scenario B-style OHLCV request used by the comparison dashboard.
 
     Multiple Indicators uses the default as-of semantics. Single Indicator may
     request start-date semantics through the same existing Scenario B path.
+
+    D3-C diagnostics may pass a smaller historical_buffer_days value only for
+    equivalence testing against the 435-day reference. Production callers keep
+    the default 435-day Scenario B buffer.
     """
     resolved_anchor_mode = str(anchor_mode).strip().lower()
     if resolved_anchor_mode not in {"asof", "start"}:
@@ -1245,7 +1255,7 @@ def _get_scd_ohlcv_request(
         "window_days": int(window_days),
         "anchor_mode": resolved_anchor_mode,
         "anchor_date": anchor_date,
-        "historical_buffer_days": 435,
+        "historical_buffer_days": int(historical_buffer_days),
     }
 
 def _get_scd_cache_key(
@@ -1255,6 +1265,7 @@ def _get_scd_cache_key(
     payload_kind: str,
     anchor_date: Optional[Any] = None,
     anchor_mode: str = "asof",
+    historical_buffer_days: int = 435,
 ) -> tuple:
     """
     Return a deterministic comparison dashboard session-cache key.
@@ -1271,6 +1282,7 @@ def _get_scd_cache_key(
         window_days=window_days,
         anchor_date=anchor_date,
         anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
     request_signature = tuple(
         sorted((str(key), repr(value)) for key, value in request.items())
@@ -2101,6 +2113,7 @@ def _fetch_scd_rolling_bundle_for_ticker(
     anchor_date: Optional[Any] = None,
     anchor_mode: str = "asof",
     requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]] = None,
+    historical_buffer_days: int = 435,
 ) -> Dict[str, Any]:
     """
     Fetch rolling payload and hover/context dataframe through one technical pass.
@@ -2128,6 +2141,7 @@ def _fetch_scd_rolling_bundle_for_ticker(
         payload_kind="rolling_payload",
         anchor_date=anchor_date,
         anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
     hover_cache_key = _get_scd_cache_key(
         ticker=ticker,
@@ -2135,6 +2149,7 @@ def _fetch_scd_rolling_bundle_for_ticker(
         payload_kind="hover_ohlcv",
         anchor_date=anchor_date,
         anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
 
     rolling_hit = (
@@ -2216,6 +2231,7 @@ def _fetch_scd_rolling_bundle_for_ticker(
             window_days=window_days,
             anchor_date=anchor_date,
             anchor_mode=anchor_mode,
+            historical_buffer_days=historical_buffer_days,
         ),
     )
 
@@ -2925,6 +2941,288 @@ def _mark_scd_live_cells_as_of(
             cell["date_status"] = "live"
             cell["live_as_of"] = as_of_iso
             cell["live_as_of_label"] = label
+
+
+def _normalize_scd_compare_value(value: Any) -> Any:
+    """
+    Normalize a cell field for D3-C tail-buffer comparison.
+
+    This is diagnostic-only. It does not change cells, scoring, rendering, or
+    persistence behavior.
+    """
+    if value is None:
+        return None
+
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(value, (int, float)):
+        return round(float(value), 8)
+
+    return value
+
+
+def _compare_scd_tail_cells(
+    *,
+    reference_cell: Dict[str, Any],
+    candidate_cell: Dict[str, Any],
+    value_tolerance: float = 1e-6,
+) -> Dict[str, Any]:
+    """
+    Compare one candidate reduced-tail cell against the 435-day reference cell.
+
+    Equivalence is intentionally strict for production gating:
+    - score must match
+    - signal must match
+    - status must match
+    - display_text must match
+    - numeric value must match within tolerance
+    """
+    reference_value = _normalize_scd_compare_value(reference_cell.get("value"))
+    candidate_value = _normalize_scd_compare_value(candidate_cell.get("value"))
+
+    if isinstance(reference_value, float) and isinstance(candidate_value, float):
+        value_delta = abs(reference_value - candidate_value)
+        value_match = value_delta <= float(value_tolerance)
+    else:
+        value_delta = None
+        value_match = reference_value == candidate_value
+
+    checks = {
+        "status_match": reference_cell.get("status") == candidate_cell.get("status"),
+        "score_match": reference_cell.get("score") == candidate_cell.get("score"),
+        "signal_match": reference_cell.get("signal") == candidate_cell.get("signal"),
+        "display_text_match": reference_cell.get("display_text") == candidate_cell.get("display_text"),
+        "value_match": value_match,
+    }
+
+    return {
+        "safe_for_candidate": all(checks.values()),
+        "reference_value": reference_value,
+        "candidate_value": candidate_value,
+        "value_delta": value_delta,
+        "reference_score": reference_cell.get("score"),
+        "candidate_score": candidate_cell.get("score"),
+        "reference_signal": reference_cell.get("signal"),
+        "candidate_signal": candidate_cell.get("signal"),
+        "reference_status": reference_cell.get("status"),
+        "candidate_status": candidate_cell.get("status"),
+        **checks,
+    }
+
+
+def _build_scd_tail_diagnostic_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: str,
+    window_days: int,
+    anchor_date: Any,
+    anchor_mode: str,
+    historical_buffer_days: int,
+) -> Dict[str, Any]:
+    """
+    Build one SCD cell through the existing technical/rule-engine path using
+    a specified Scenario B historical buffer.
+
+    Diagnostic-only:
+    - no session cache writes
+    - no result-cell writes
+    - no scoring changes
+    - no formula changes
+    - no direct yfinance calls from SCD
+    - no persistence behavior
+    """
+    started_at = time.perf_counter()
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
+            historical_buffer_days=historical_buffer_days,
+        ),
+    )
+
+    rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+    context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        raise ValueError(
+            f"No rolling payload returned for {ticker} using "
+            f"historical_buffer_days={historical_buffer_days}."
+        )
+
+    adapter_lookup = _build_scd_adapter_lookup(
+        rolling_payload=rolling_payload,
+        row_keys=[row_key],
+        ohlcv_df=context_df,
+    )
+
+    cell = _build_scd_single_indicator_cell_from_bundle(
+        ticker=ticker,
+        row_key=row_key,
+        date_key=date_key,
+        rolling_payload=rolling_payload,
+        adapter_lookup=adapter_lookup,
+        context_df=context_df,
+    )
+
+    return {
+        "cell": cell,
+        "seconds": round(time.perf_counter() - started_at, 3),
+        "context_rows": len(context_df) if isinstance(context_df, pd.DataFrame) else None,
+        "context_first_date": (
+            pd.Timestamp(context_df.index.min()).strftime("%Y-%m-%d")
+            if isinstance(context_df, pd.DataFrame) and not context_df.empty
+            else None
+        ),
+        "context_last_date": (
+            pd.Timestamp(context_df.index.max()).strftime("%Y-%m-%d")
+            if isinstance(context_df, pd.DataFrame) and not context_df.empty
+            else None
+        ),
+    }
+
+
+def _run_scd_tail_buffer_equivalence_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+    candidate_buffers: list[int],
+) -> Dict[str, Any]:
+    """
+    Compare reduced Scenario B buffers against the 435-day reference for one
+    visible Single Indicator matrix date.
+
+    This produces evidence only. It does not enable reduced-tail production
+    refresh.
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Tail-buffer diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Tail-buffer diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    candidate_buffers = [
+        int(buffer)
+        for buffer in candidate_buffers
+        if int(buffer) > 0 and int(buffer) != 435
+    ]
+
+    if not candidate_buffers:
+        raise ValueError("Select at least one candidate buffer other than 435.")
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+    )
+
+    reference_cell = reference["cell"]
+    candidates = []
+
+    for buffer_days in candidate_buffers:
+        candidate_record = {
+            "ticker": normalized_ticker,
+            "row_key": row_key,
+            "date": selected_date_key,
+            "reference_buffer_days": 435,
+            "candidate_buffer_days": int(buffer_days),
+            "candidate_seconds": None,
+            "candidate_context_rows": None,
+            "candidate_context_first_date": None,
+            "candidate_context_last_date": None,
+            "safe_for_candidate": False,
+            "error": None,
+        }
+
+        try:
+            candidate = _build_scd_tail_diagnostic_cell(
+                ticker=normalized_ticker,
+                row_key=row_key,
+                date_key=selected_date_key,
+                window_days=window_days,
+                anchor_date=anchor_date,
+                anchor_mode=anchor_mode,
+                historical_buffer_days=int(buffer_days),
+            )
+
+            comparison = _compare_scd_tail_cells(
+                reference_cell=reference_cell,
+                candidate_cell=candidate["cell"],
+            )
+
+            candidate_record.update(comparison)
+            candidate_record.update(
+                {
+                    "candidate_seconds": candidate["seconds"],
+                    "candidate_context_rows": candidate["context_rows"],
+                    "candidate_context_first_date": candidate["context_first_date"],
+                    "candidate_context_last_date": candidate["context_last_date"],
+                }
+            )
+
+        except Exception as e:
+            candidate_record["error"] = str(e)
+
+        candidates.append(candidate_record)
+
+    report = {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "date": selected_date_key,
+        "reference_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "reference_context_rows": reference["context_rows"],
+        "reference_context_first_date": reference["context_first_date"],
+        "reference_context_last_date": reference["context_last_date"],
+        "candidate_buffers": candidate_buffers,
+        "candidates": candidates,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    return report
 
 
 def _refresh_scd_single_indicator_live_date_cells(
@@ -7295,6 +7593,138 @@ def show_stock_comparison_dashboard():
                     if live_caption
                     else "Today's data: no current-session timestamp available yet."
                 )
+
+            if SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC:
+                with st.expander("Tail-buffer equivalence diagnostic", expanded=False):
+                    st.caption(
+                        "Diagnostic only. Compares reduced Scenario B buffers against "
+                        "the 435-day reference for one ticker, one visible matrix date, "
+                        "and the selected Single Indicator row. This does not change "
+                        "refresh behavior."
+                    )
+
+                    diagnostic_tickers = _dedupe_preserve_order_str(
+                        single_matrix.get("tickers", [])
+                    )
+                    diagnostic_dates = [
+                        _normalize_scd_cache_date_value(date_key)
+                        for date_key in single_matrix.get("dates", [])
+                    ]
+                    diagnostic_dates = [
+                        date_key for date_key in diagnostic_dates if date_key
+                    ]
+
+                    if not diagnostic_tickers or not diagnostic_dates:
+                        st.info(
+                            "Build a populated Single Indicator matrix before running "
+                            "the tail-buffer diagnostic."
+                        )
+                    else:
+                        selected_diag_ticker = st.selectbox(
+                            "Diagnostic ticker",
+                            options=diagnostic_tickers,
+                            index=0,
+                            key="scd_tail_diag_ticker",
+                        )
+
+                        selected_diag_date = st.selectbox(
+                            "Diagnostic date",
+                            options=diagnostic_dates,
+                            index=len(diagnostic_dates) - 1,
+                            key="scd_tail_diag_date",
+                            help=(
+                                "The diagnostic can run on any visible matrix date. "
+                                "This is separate from production today-refresh."
+                            ),
+                        )
+
+                        selected_candidate_buffers = st.multiselect(
+                            "Candidate buffer(s)",
+                            options=[80, 120, 180, 250, 320, 365, 400],
+                            default=[365],
+                            key="scd_tail_diag_buffers",
+                            help=(
+                                "Each candidate is compared against the 435-day Scenario B "
+                                "reference. Start with one buffer to keep runtime manageable. "
+                                "Larger buffers are slower but may be necessary for the full "
+                                "rule-engine path to produce comparable results."
+                            ),
+                        )
+                        if st.button(
+                            "Run tail-buffer diagnostic",
+                            key="scd_run_tail_buffer_diagnostic",
+                        ):
+                            with st.spinner("Running tail-buffer equivalence diagnostic."):
+                                try:
+                                    diagnostic_report = (
+                                        _run_scd_tail_buffer_equivalence_diagnostic(
+                                            matrix=single_matrix,
+                                            ticker=selected_diag_ticker,
+                                            diagnostic_date_key=selected_diag_date,
+                                            candidate_buffers=list(selected_candidate_buffers),
+                                        )
+                                    )
+                                    st.session_state.scd_tail_buffer_diagnostic_last = (
+                                        diagnostic_report
+                                    )
+                                except Exception as e:
+                                    st.session_state.scd_tail_buffer_diagnostic_last = {
+                                        "status": "error",
+                                        "error": str(e),
+                                        "created_at": datetime.now().isoformat(
+                                            timespec="seconds"
+                                        ),
+                                    }
+
+                    diagnostic_report = st.session_state.get(
+                        "scd_tail_buffer_diagnostic_last"
+                    )
+                    if isinstance(diagnostic_report, dict):
+                        if diagnostic_report.get("status") == "ok":
+                            st.caption(
+                                "Reference run: "
+                                f"{diagnostic_report.get('reference_seconds')}s · "
+                                f"Rows: {diagnostic_report.get('reference_context_rows')} · "
+                                f"Window: {diagnostic_report.get('reference_context_first_date')} → "
+                                f"{diagnostic_report.get('reference_context_last_date')}"
+                            )
+
+                            candidates_df = pd.DataFrame(
+                                diagnostic_report.get("candidates", [])
+                            )
+                            if not candidates_df.empty:
+                                display_cols = [
+                                    col
+                                    for col in [
+                                        "candidate_buffer_days",
+                                        "safe_for_candidate",
+                                        "candidate_seconds",
+                                        "candidate_context_rows",
+                                        "value_match",
+                                        "score_match",
+                                        "signal_match",
+                                        "display_text_match",
+                                        "status_match",
+                                        "value_delta",
+                                        "error",
+                                    ]
+                                    if col in candidates_df.columns
+                                ]
+                                st.dataframe(
+                                    candidates_df[display_cols],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                            with st.expander("Raw tail-buffer diagnostic report", expanded=False):
+                                st.json(diagnostic_report)
+                        else:
+                            st.warning(
+                                diagnostic_report.get(
+                                    "error",
+                                    "Tail-buffer diagnostic did not complete.",
+                                )
+                            )
 
             _render_scd_single_indicator_matrix_view(single_matrix)
 
