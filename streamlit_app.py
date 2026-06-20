@@ -1,4 +1,4 @@
-# Stamp: Fri, June 19, 2026 7:02 PM
+# Stamp: Sat, June 20, 2026 2:22 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -3023,6 +3023,7 @@ def _build_scd_tail_diagnostic_cell(
     anchor_date: Any,
     anchor_mode: str,
     historical_buffer_days: int,
+    scoring_indicators: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     """
     Build one SCD cell through the existing technical/rule-engine path using
@@ -3042,6 +3043,7 @@ def _build_scd_tail_diagnostic_cell(
         ticker=ticker,
         feature_scope="heatmap",
         save_to_db=False,
+        indicators=scoring_indicators,
         use_meta_coverage=True,
         return_type="rolling_with_context",
         ohlcv_request=_get_scd_ohlcv_request(
@@ -3079,6 +3081,7 @@ def _build_scd_tail_diagnostic_cell(
     return {
         "cell": cell,
         "seconds": round(time.perf_counter() - started_at, 3),
+        "scoring_indicators": list(scoring_indicators) if scoring_indicators else None,
         "context_rows": len(context_df) if isinstance(context_df, pd.DataFrame) else None,
         "context_first_date": (
             pd.Timestamp(context_df.index.min()).strftime("%Y-%m-%d")
@@ -3223,6 +3226,132 @@ def _run_scd_tail_buffer_equivalence_diagnostic(
     }
 
     return report
+
+
+def _get_scd_engine_indicator_for_row_key(row_key: str) -> Optional[str]:
+    """
+    Resolve a canonical SCD / Rolling Heatmap row_key to its rule-engine family.
+
+    Diagnostic-only. This reads the existing technical calculator metadata and
+    falls back to ROW_CLASSIFICATION for display/catalog-backed family labels.
+    """
+    normalized_row_key = str(row_key).strip()
+    if not normalized_row_key:
+        return None
+
+    try:
+        optionc_meta = st.session_state.technical_calculator._get_optionc_meta()
+        for meta in optionc_meta:
+            if str(meta.get("display_key", "")).strip() == normalized_row_key:
+                engine_indicator = str(meta.get("engine_indicator", "")).strip()
+                return engine_indicator or None
+    except Exception:
+        pass
+
+    fallback_family = ROW_CLASSIFICATION.get(normalized_row_key, {}).get("family")
+    return str(fallback_family).strip() if fallback_family else None
+
+
+def _run_scd_selected_family_scoring_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+) -> Dict[str, Any]:
+    """
+    Compare the full current scoring path against selected-family scoring for
+    one visible Single Indicator matrix cell.
+
+    This diagnostic isolates scoring breadth only:
+    - same 435-day Scenario B buffer
+    - same numeric computation path
+    - same existing rule-engine / rolling payload path
+    - candidate passes indicators=[selected_engine_indicator]
+    - no production refresh behavior changes
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Selected-family scoring diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    engine_indicator = _get_scd_engine_indicator_for_row_key(row_key)
+    if not engine_indicator:
+        raise ValueError(f"Could not resolve engine indicator for row_key={row_key!r}.")
+
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=None,
+    )
+
+    candidate = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+    )
+
+    comparison = _compare_scd_tail_cells(
+        reference_cell=reference["cell"],
+        candidate_cell=candidate["cell"],
+    )
+
+    return {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "engine_indicator": engine_indicator,
+        "date": selected_date_key,
+        "reference_mode": "full_current_scoring",
+        "candidate_mode": "selected_family_scoring",
+        "reference_buffer_days": 435,
+        "candidate_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "candidate_seconds": candidate["seconds"],
+        "seconds_delta": round(reference["seconds"] - candidate["seconds"], 3),
+        "reference_context_rows": reference["context_rows"],
+        "candidate_context_rows": candidate["context_rows"],
+        "reference_scoring_indicators": reference["scoring_indicators"],
+        "candidate_scoring_indicators": candidate["scoring_indicators"],
+        **comparison,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def _refresh_scd_single_indicator_live_date_cells(
@@ -7675,6 +7804,92 @@ def show_stock_comparison_dashboard():
                                             timespec="seconds"
                                         ),
                                     }
+
+                    st.markdown("---")
+                    st.caption(
+                        "Selected-family scoring diagnostic. Compares the full current "
+                        "scoring path against scoring only the selected row's rule-engine "
+                        "family, using the same 435-day buffer and same numeric path."
+                    )
+
+                    if st.button(
+                        "Run selected-family scoring diagnostic",
+                        key="scd_run_selected_family_scoring_diagnostic",
+                    ):
+                        with st.spinner("Running selected-family scoring diagnostic."):
+                            try:
+                                scoring_report = (
+                                    _run_scd_selected_family_scoring_diagnostic(
+                                        matrix=single_matrix,
+                                        ticker=selected_diag_ticker,
+                                        diagnostic_date_key=selected_diag_date,
+                                    )
+                                )
+                                st.session_state.scd_selected_family_scoring_diagnostic_last = (
+                                    scoring_report
+                                )
+                            except Exception as e:
+                                st.session_state.scd_selected_family_scoring_diagnostic_last = {
+                                    "status": "error",
+                                    "error": str(e),
+                                    "created_at": datetime.now().isoformat(
+                                        timespec="seconds"
+                                    ),
+                                }
+
+                    scoring_report = st.session_state.get(
+                        "scd_selected_family_scoring_diagnostic_last"
+                    )
+                    if isinstance(scoring_report, dict):
+                        if scoring_report.get("status") == "ok":
+                            st.caption(
+                                "Selected-family scoring run: "
+                                f"reference={scoring_report.get('reference_seconds')}s · "
+                                f"candidate={scoring_report.get('candidate_seconds')}s · "
+                                f"delta={scoring_report.get('seconds_delta')}s · "
+                                f"family={scoring_report.get('engine_indicator')}"
+                            )
+
+                            scoring_df = pd.DataFrame([scoring_report])
+                            display_cols = [
+                                col
+                                for col in [
+                                    "engine_indicator",
+                                    "safe_for_candidate",
+                                    "reference_seconds",
+                                    "candidate_seconds",
+                                    "seconds_delta",
+                                    "value_match",
+                                    "score_match",
+                                    "signal_match",
+                                    "display_text_match",
+                                    "status_match",
+                                    "value_delta",
+                                    "reference_score",
+                                    "candidate_score",
+                                    "reference_signal",
+                                    "candidate_signal",
+                                ]
+                                if col in scoring_df.columns
+                            ]
+                            st.dataframe(
+                                scoring_df[display_cols],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            with st.expander(
+                                "Raw selected-family scoring diagnostic report",
+                                expanded=False,
+                            ):
+                                st.json(scoring_report)
+                        else:
+                            st.warning(
+                                scoring_report.get(
+                                    "error",
+                                    "Selected-family scoring diagnostic did not complete.",
+                                )
+                            )
 
                     diagnostic_report = st.session_state.get(
                         "scd_tail_buffer_diagnostic_last"
