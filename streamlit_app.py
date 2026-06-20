@@ -1,4 +1,4 @@
-# Stamp: Sat, June 20, 2026 2:22 PM
+# Stamp: Sat, June 20, 2026 4:18 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -3024,6 +3024,7 @@ def _build_scd_tail_diagnostic_cell(
     anchor_mode: str,
     historical_buffer_days: int,
     scoring_indicators: Optional[list[str]] = None,
+    compute_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build one SCD cell through the existing technical/rule-engine path using
@@ -3043,6 +3044,7 @@ def _build_scd_tail_diagnostic_cell(
         ticker=ticker,
         feature_scope="heatmap",
         save_to_db=False,
+        config=compute_config,
         indicators=scoring_indicators,
         use_meta_coverage=True,
         return_type="rolling_with_context",
@@ -3082,6 +3084,11 @@ def _build_scd_tail_diagnostic_cell(
         "cell": cell,
         "seconds": round(time.perf_counter() - started_at, 3),
         "scoring_indicators": list(scoring_indicators) if scoring_indicators else None,
+        "compute_config_keys": (
+            sorted(compute_config.keys())
+            if isinstance(compute_config, dict)
+            else None
+        ),
         "context_rows": len(context_df) if isinstance(context_df, pd.DataFrame) else None,
         "context_first_date": (
             pd.Timestamp(context_df.index.min()).strftime("%Y-%m-%d")
@@ -3346,6 +3353,217 @@ def _run_scd_selected_family_scoring_diagnostic(
         "seconds_delta": round(reference["seconds"] - candidate["seconds"], 3),
         "reference_context_rows": reference["context_rows"],
         "candidate_context_rows": candidate["context_rows"],
+        "reference_scoring_indicators": reference["scoring_indicators"],
+        "candidate_scoring_indicators": candidate["scoring_indicators"],
+        **comparison,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _get_scd_optionc_meta_for_row_key(row_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Return the technical-calculator optionc_meta record for a canonical row_key.
+
+    Diagnostic-only. This keeps selected-row diagnostics anchored to the same
+    metadata source used by the existing rolling payload path.
+    """
+    normalized_row_key = str(row_key).strip()
+    if not normalized_row_key:
+        return None
+
+    try:
+        optionc_meta = st.session_state.technical_calculator._get_optionc_meta()
+        for meta in optionc_meta:
+            if str(meta.get("display_key", "")).strip() == normalized_row_key:
+                return dict(meta)
+    except Exception:
+        return None
+
+    return None
+
+
+def _parse_scd_single_int_param_key(param_key: Any) -> int:
+    """Parse a one-part numeric param_key such as '14' or 14."""
+    raw = str(param_key).strip()
+    if "_" in raw:
+        raise ValueError(f"Expected a single integer param_key, got {raw!r}.")
+    return int(raw)
+
+
+def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
+    """
+    Build a minimal diagnostic compute config for one selected SCD row.
+
+    D3-D2 starts with RSI and SMA only:
+    - RSI_<len>: compute only RSI_<len>
+    - SMA_<len>: compute SMA_<len>, ATR/ATRP_<len>, and SMA slope aliases
+
+    This is diagnostic-only. It does not alter production refresh behavior.
+    """
+    meta = _get_scd_optionc_meta_for_row_key(row_key)
+    if not meta:
+        raise ValueError(f"No optionc_meta record found for row_key={row_key!r}.")
+
+    engine_indicator = str(meta.get("engine_indicator", "")).strip()
+    param_key = str(meta.get("param_key", "")).strip()
+
+    if engine_indicator == "RSI":
+        length = _parse_scd_single_int_param_key(param_key)
+        return {
+            "RSI": [length],
+        }
+
+    if engine_indicator == "SMA":
+        length = _parse_scd_single_int_param_key(param_key)
+        return {
+            "SMA": [length],
+            "ATR": [length],
+            "ATRP": [length],
+            "SLOPE": {
+                "window": 14,
+                "method": "linreg",
+                "emit_aliases": True,
+                "vwma_anchor": 20,
+                "hma_anchor": 21,
+                "families": ["SMA"],
+                "canonical_pattern": "{base_col}_slope__{method}_{window}",
+                "compatibility_aliases": [
+                    "SMA_<len>_slope",
+                    "EMA_<len>_slope",
+                    "VWMA_slope",
+                    "HMA_slope",
+                ],
+            },
+        }
+
+    raise ValueError(
+        "D3-D2 selected-row numeric config diagnostic currently supports "
+        f"RSI and SMA rows only. Got row_key={row_key!r}, "
+        f"engine_indicator={engine_indicator!r}."
+    )
+
+
+def _summarize_scd_compute_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a compact diagnostic summary for a compute_config dict."""
+    if not isinstance(config, dict):
+        return {}
+
+    summary: Dict[str, Any] = {}
+    for key, value in config.items():
+        if key == "SLOPE" and isinstance(value, dict):
+            summary[key] = {
+                "window": value.get("window"),
+                "method": value.get("method"),
+                "emit_aliases": value.get("emit_aliases"),
+                "families": value.get("families"),
+            }
+        else:
+            summary[key] = value
+
+    return summary
+
+
+def _run_scd_selected_row_numeric_config_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+) -> Dict[str, Any]:
+    """
+    Compare selected-family scoring with broad numeric computation against
+    selected-family scoring with selected-row numeric computation.
+
+    This isolates D3-D2's numeric-config question:
+    - same 435-day Scenario B buffer
+    - same selected-family scoring
+    - reference uses current broad numeric config path
+    - candidate uses minimal selected-row compute_config
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Selected-row numeric config diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    engine_indicator = _get_scd_engine_indicator_for_row_key(row_key)
+    if not engine_indicator:
+        raise ValueError(f"Could not resolve engine indicator for row_key={row_key!r}.")
+
+    selected_compute_config = _build_scd_selected_row_compute_config(row_key)
+
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+        compute_config=None,
+    )
+
+    candidate = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+        compute_config=selected_compute_config,
+    )
+
+    comparison = _compare_scd_tail_cells(
+        reference_cell=reference["cell"],
+        candidate_cell=candidate["cell"],
+    )
+
+    return {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "engine_indicator": engine_indicator,
+        "date": selected_date_key,
+        "reference_mode": "selected_family_scoring_broad_numeric",
+        "candidate_mode": "selected_row_numeric_config",
+        "reference_buffer_days": 435,
+        "candidate_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "candidate_seconds": candidate["seconds"],
+        "seconds_delta": round(reference["seconds"] - candidate["seconds"], 3),
+        "reference_context_rows": reference["context_rows"],
+        "candidate_context_rows": candidate["context_rows"],
+        "reference_compute_config_keys": reference["compute_config_keys"],
+        "candidate_compute_config_keys": candidate["compute_config_keys"],
+        "candidate_compute_config": _summarize_scd_compute_config(selected_compute_config),
         "reference_scoring_indicators": reference["scoring_indicators"],
         "candidate_scoring_indicators": candidate["scoring_indicators"],
         **comparison,
@@ -7888,6 +8106,95 @@ def show_stock_comparison_dashboard():
                                 scoring_report.get(
                                     "error",
                                     "Selected-family scoring diagnostic did not complete.",
+                                )
+                            )
+
+                    st.markdown("---")
+                    st.caption(
+                        "Selected-row numeric config diagnostic. Compares selected-family "
+                        "scoring with the broad numeric path against selected-family "
+                        "scoring with a minimal selected-row compute config. D3-D2 "
+                        "currently supports RSI and SMA rows."
+                    )
+
+                    if st.button(
+                        "Run selected-row numeric config diagnostic",
+                        key="scd_run_selected_row_numeric_config_diagnostic",
+                    ):
+                        with st.spinner("Running selected-row numeric config diagnostic."):
+                            try:
+                                numeric_config_report = (
+                                    _run_scd_selected_row_numeric_config_diagnostic(
+                                        matrix=single_matrix,
+                                        ticker=selected_diag_ticker,
+                                        diagnostic_date_key=selected_diag_date,
+                                    )
+                                )
+                                st.session_state.scd_selected_row_numeric_config_diagnostic_last = (
+                                    numeric_config_report
+                                )
+                            except Exception as e:
+                                st.session_state.scd_selected_row_numeric_config_diagnostic_last = {
+                                    "status": "error",
+                                    "error": str(e),
+                                    "created_at": datetime.now().isoformat(
+                                        timespec="seconds"
+                                    ),
+                                }
+
+                    numeric_config_report = st.session_state.get(
+                        "scd_selected_row_numeric_config_diagnostic_last"
+                    )
+                    if isinstance(numeric_config_report, dict):
+                        if numeric_config_report.get("status") == "ok":
+                            st.caption(
+                                "Selected-row numeric config run: "
+                                f"reference={numeric_config_report.get('reference_seconds')}s · "
+                                f"candidate={numeric_config_report.get('candidate_seconds')}s · "
+                                f"delta={numeric_config_report.get('seconds_delta')}s · "
+                                f"family={numeric_config_report.get('engine_indicator')}"
+                            )
+
+                            numeric_config_df = pd.DataFrame([numeric_config_report])
+                            display_cols = [
+                                col
+                                for col in [
+                                    "engine_indicator",
+                                    "safe_for_candidate",
+                                    "reference_seconds",
+                                    "candidate_seconds",
+                                    "seconds_delta",
+                                    "value_match",
+                                    "score_match",
+                                    "signal_match",
+                                    "display_text_match",
+                                    "status_match",
+                                    "value_delta",
+                                    "reference_compute_config_keys",
+                                    "candidate_compute_config_keys",
+                                    "reference_score",
+                                    "candidate_score",
+                                    "reference_signal",
+                                    "candidate_signal",
+                                ]
+                                if col in numeric_config_df.columns
+                            ]
+                            st.dataframe(
+                                numeric_config_df[display_cols],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            with st.expander(
+                                "Raw selected-row numeric config diagnostic report",
+                                expanded=False,
+                            ):
+                                st.json(numeric_config_report)
+                        else:
+                            st.warning(
+                                numeric_config_report.get(
+                                    "error",
+                                    "Selected-row numeric config diagnostic did not complete.",
                                 )
                             )
 
