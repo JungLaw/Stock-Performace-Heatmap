@@ -1,4 +1,4 @@
-# Stamp: Sat, June 20, 2026 4:18 PM
+# Stamp: Sun, June 21, 2026 11:31 AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -3395,9 +3395,16 @@ def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
     """
     Build a minimal diagnostic compute config for one selected SCD row.
 
-    D3-D2 starts with RSI and SMA only:
+    D3-D2 started with RSI and SMA:
     - RSI_<len>: compute only RSI_<len>
     - SMA_<len>: compute SMA_<len>, ATR/ATRP_<len>, and SMA slope aliases
+
+    D3-D4 expands Tier 1 direct-family rows:
+    - ROC_<len>
+    - WILLR_<len> / Williams_R
+    - CCI_<len>
+    - MFI_<len>
+    - CMF_<len>
 
     This is diagnostic-only. It does not alter production refresh behavior.
     """
@@ -3437,10 +3444,25 @@ def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
             },
         }
 
+    direct_single_length_config_keys = {
+        "ROC": "ROC",
+        "Williams_R": "WILLR",
+        "CCI": "CCI",
+        "MFI": "MFI",
+        "CMF": "CMF",
+    }
+
+    if engine_indicator in direct_single_length_config_keys:
+        length = _parse_scd_single_int_param_key(param_key)
+        config_key = direct_single_length_config_keys[engine_indicator]
+        return {
+            config_key: [length],
+        }
+
     raise ValueError(
-        "D3-D2 selected-row numeric config diagnostic currently supports "
-        f"RSI and SMA rows only. Got row_key={row_key!r}, "
-        f"engine_indicator={engine_indicator!r}."
+        "D3-D4 selected-row numeric config diagnostic currently supports "
+        "RSI, SMA, ROC, Williams_R, CCI, MFI, and CMF rows only. "
+        f"Got row_key={row_key!r}, engine_indicator={engine_indicator!r}."
     )
 
 
@@ -8113,8 +8135,9 @@ def show_stock_comparison_dashboard():
                     st.caption(
                         "Selected-row numeric config diagnostic. Compares selected-family "
                         "scoring with the broad numeric path against selected-family "
-                        "scoring with a minimal selected-row compute config. D3-D2 "
-                        "currently supports RSI and SMA rows."
+                        "scoring with a minimal selected-row compute config. D3-D4 "
+                        "currently supports RSI, SMA, ROC, Williams %R, CCI, MFI, "
+                        "and CMF rows."
                     )
 
                     if st.button(
