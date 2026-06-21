@@ -1,4 +1,4 @@
-# Stamp: Sun, June 21, 2026 11:31 AM
+# Stamp: Sun, June 21, 2026 12:50 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -3391,6 +3391,76 @@ def _parse_scd_single_int_param_key(param_key: Any) -> int:
     return int(raw)
 
 
+def _build_scd_moving_average_compute_config(
+    *,
+    engine_indicator: str,
+    length: int,
+) -> Dict[str, Any]:
+    """
+    Build a diagnostic selected-row compute config for moving-average families.
+
+    D3-D5 target families:
+    - SMA: parameterized slope aliases, e.g. SMA_100_slope
+    - EMA: parameterized slope aliases, e.g. EMA_20_slope
+    - HMA: rulebook uses unparameterized HMA_slope, anchored to HMA_21
+    - VWMA: rulebook uses unparameterized VWMA_slope, anchored to VWMA_20
+
+    This helper intentionally preserves the existing preprocessor slope shape.
+    It does not introduce formulas, scoring, persistence, or production behavior.
+    """
+    family = str(engine_indicator).strip().upper()
+    length = int(length)
+
+    if family not in {"SMA", "EMA", "HMA", "VWMA"}:
+        raise ValueError(f"Unsupported moving-average family: {engine_indicator!r}.")
+
+    base_lengths = [length]
+    atrp_lengths = [length]
+
+    # HMA rules use HMA_slope, which the preprocessor resolves from hma_anchor.
+    # The broad reference path anchors HMA_slope to HMA_21. Include HMA_21
+    # whenever testing a non-21 HMA row so the diagnostic candidate can match
+    # the broad path's alias behavior.
+    if family == "HMA" and 21 not in base_lengths:
+        base_lengths.append(21)
+
+    # HMA_55 rulebook neutral-zone logic references ATRP_50, not ATRP_55.
+    # Keep this explicit until a rulebook-expression dependency resolver exists.
+    if family == "HMA" and length == 55 and 50 not in atrp_lengths:
+        atrp_lengths.append(50)
+
+    # VWMA rules use VWMA_slope, which the preprocessor resolves from vwma_anchor.
+    # The broad reference path anchors VWMA_slope to VWMA_20. Include VWMA_20
+    # whenever testing a non-20 VWMA row so the diagnostic candidate can match
+    # the broad path's alias behavior.
+    if family == "VWMA" and 20 not in base_lengths:
+        base_lengths.append(20)
+
+    base_lengths = sorted(set(base_lengths))
+    atrp_lengths = sorted(set(atrp_lengths))
+
+    return {
+        family: base_lengths,
+        "ATR": atrp_lengths,
+        "ATRP": atrp_lengths,
+        "SLOPE": {
+            "window": 14,
+            "method": "linreg",
+            "emit_aliases": True,
+            "vwma_anchor": 20,
+            "hma_anchor": 21,
+            "families": [family],
+            "canonical_pattern": "{base_col}_slope__{method}_{window}",
+            "compatibility_aliases": [
+                "SMA_<len>_slope",
+                "EMA_<len>_slope",
+                "VWMA_slope",
+                "HMA_slope",
+            ],
+        },
+    }
+
+
 def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
     """
     Build a minimal diagnostic compute config for one selected SCD row.
@@ -3399,12 +3469,18 @@ def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
     - RSI_<len>: compute only RSI_<len>
     - SMA_<len>: compute SMA_<len>, ATR/ATRP_<len>, and SMA slope aliases
 
-    D3-D4 expands Tier 1 direct-family rows:
+    D3-D4 expanded Tier 1 direct-family rows:
     - ROC_<len>
     - WILLR_<len> / Williams_R
     - CCI_<len>
     - MFI_<len>
     - CMF_<len>
+
+    D3-D5 expands moving-average rows:
+    - SMA_<len>
+    - EMA_<len>
+    - HMA_<len>
+    - VWMA_<len>
 
     This is diagnostic-only. It does not alter production refresh behavior.
     """
@@ -3421,28 +3497,12 @@ def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
             "RSI": [length],
         }
 
-    if engine_indicator == "SMA":
+    if engine_indicator in {"SMA", "EMA", "HMA", "VWMA"}:
         length = _parse_scd_single_int_param_key(param_key)
-        return {
-            "SMA": [length],
-            "ATR": [length],
-            "ATRP": [length],
-            "SLOPE": {
-                "window": 14,
-                "method": "linreg",
-                "emit_aliases": True,
-                "vwma_anchor": 20,
-                "hma_anchor": 21,
-                "families": ["SMA"],
-                "canonical_pattern": "{base_col}_slope__{method}_{window}",
-                "compatibility_aliases": [
-                    "SMA_<len>_slope",
-                    "EMA_<len>_slope",
-                    "VWMA_slope",
-                    "HMA_slope",
-                ],
-            },
-        }
+        return _build_scd_moving_average_compute_config(
+            engine_indicator=engine_indicator,
+            length=length,
+        )
 
     direct_single_length_config_keys = {
         "ROC": "ROC",
@@ -3460,8 +3520,8 @@ def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
         }
 
     raise ValueError(
-        "D3-D4 selected-row numeric config diagnostic currently supports "
-        "RSI, SMA, ROC, Williams_R, CCI, MFI, and CMF rows only. "
+        "D3-D5 selected-row numeric config diagnostic currently supports "
+        "RSI, SMA, EMA, HMA, VWMA, ROC, Williams_R, CCI, MFI, and CMF rows only. "
         f"Got row_key={row_key!r}, engine_indicator={engine_indicator!r}."
     )
 
@@ -8135,9 +8195,9 @@ def show_stock_comparison_dashboard():
                     st.caption(
                         "Selected-row numeric config diagnostic. Compares selected-family "
                         "scoring with the broad numeric path against selected-family "
-                        "scoring with a minimal selected-row compute config. D3-D4 "
-                        "currently supports RSI, SMA, ROC, Williams %R, CCI, MFI, "
-                        "and CMF rows."
+                        "scoring with a minimal selected-row compute config. D3-D5 "
+                        "currently supports RSI, SMA, EMA, HMA, VWMA, ROC, "
+                        "Williams %R, CCI, MFI, and CMF rows."
                     )
 
                     if st.button(
