@@ -1,4 +1,4 @@
-# Stamp: Sun, June 21, 2026 12:50 PM
+# Stamp: Sun, June 21, 2026 4:42 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -314,6 +314,10 @@ def initialize_session_state():
             "result_cell_hits": 0,
             "result_cell_misses": 0,
             "ticker_calculations_skipped": 0,
+            "selected_row_refreshes": 0,
+            "selected_row_refresh_tickers": 0,
+            "selected_row_refresh_fallbacks": 0,
+            "selected_row_refresh_errors": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -1312,6 +1316,10 @@ def _get_scd_cache_stats() -> Dict[str, int]:
         "result_cell_hits": 0,
         "result_cell_misses": 0,
         "ticker_calculations_skipped": 0,
+        "selected_row_refreshes": 0,
+        "selected_row_refresh_tickers": 0,
+        "selected_row_refresh_fallbacks": 0,
+        "selected_row_refresh_errors": 0,
     }
 
     if 'scd_cache_stats' not in st.session_state:
@@ -1374,6 +1382,16 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
     ticker_calculations_skipped = int(
         stats.get("ticker_calculations_skipped", 0) or 0
     )
+    selected_row_refreshes = int(stats.get("selected_row_refreshes", 0) or 0)
+    selected_row_refresh_tickers = int(
+        stats.get("selected_row_refresh_tickers", 0) or 0
+    )
+    selected_row_refresh_fallbacks = int(
+        stats.get("selected_row_refresh_fallbacks", 0) or 0
+    )
+    selected_row_refresh_errors = int(
+        stats.get("selected_row_refresh_errors", 0) or 0
+    )
 
     summary_parts: list[str] = []
 
@@ -1412,6 +1430,15 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
     if ticker_calculations_skipped:
         summary_parts.append(
             f"ticker calculations skipped={ticker_calculations_skipped}"
+        )
+
+    if selected_row_refreshes:
+        summary_parts.append(
+            "selected-row refreshes="
+            f"{selected_row_refreshes} "
+            f"({selected_row_refresh_tickers} ticker cell(s); "
+            f"fallbacks={selected_row_refresh_fallbacks}; "
+            f"errors={selected_row_refresh_errors})"
         )
 
     if not summary_parts:
@@ -1457,7 +1484,14 @@ def _render_scd_cache_diagnostics() -> None:
         f"Force-refresh builds={cache_stats.get('force_refreshes', 0)}. "
         f"Today-cell refreshes={cache_stats.get('today_cell_refreshes', 0)}. "
         f"Today refreshed ticker cells="
-        f"{cache_stats.get('today_cell_tickers_refreshed', 0)}."
+        f"{cache_stats.get('today_cell_tickers_refreshed', 0)}. "
+        f"Selected-row refreshes={cache_stats.get('selected_row_refreshes', 0)}. "
+        f"Selected-row refreshed ticker cells="
+        f"{cache_stats.get('selected_row_refresh_tickers', 0)}. "
+        f"Selected-row fallbacks="
+        f"{cache_stats.get('selected_row_refresh_fallbacks', 0)}. "
+        f"Selected-row errors="
+        f"{cache_stats.get('selected_row_refresh_errors', 0)}."
     )
 
 
@@ -1487,6 +1521,10 @@ def _clear_scd_session_cache() -> None:
         "result_cell_hits": 0,
         "result_cell_misses": 0,
         "ticker_calculations_skipped": 0,
+        "selected_row_refreshes": 0,
+        "selected_row_refresh_tickers": 0,
+        "selected_row_refresh_fallbacks": 0,
+        "selected_row_refresh_errors": 0,
     }
 
 
@@ -3546,6 +3584,94 @@ def _summarize_scd_compute_config(config: Optional[Dict[str, Any]]) -> Dict[str,
     return summary
 
 
+def _fetch_scd_selected_row_refresh_bundle_for_ticker(
+    *,
+    ticker: str,
+    row_key: str,
+    window_days: int,
+    anchor_date: Any,
+    anchor_mode: str,
+    requested_date_strings: list[str],
+) -> Dict[str, Any]:
+    """
+    Fetch a selected-row SCD bundle for Single Indicator live-date refresh.
+
+    Production use is intentionally narrow:
+    - Single Indicator → Refresh today's cells only
+    - supported selected-row families only
+    - existing technical calculator / rule-engine path only
+    - no formula, scoring, persistence, chart, heatmap, export, or DB changes
+
+    Unsupported families raise and are handled by the caller's fallback path.
+    """
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+
+    if not normalized_ticker:
+        raise ValueError("Ticker is required for selected-row refresh.")
+
+    if not normalized_row_key:
+        raise ValueError("row_key is required for selected-row refresh.")
+
+    engine_indicator = _get_scd_engine_indicator_for_row_key(normalized_row_key)
+    if not engine_indicator:
+        raise ValueError(
+            f"Could not resolve engine indicator for row_key={normalized_row_key!r}."
+        )
+
+    compute_config = _build_scd_selected_row_compute_config(normalized_row_key)
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=normalized_ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        config=compute_config,
+        indicators=[engine_indicator],
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
+            historical_buffer_days=435,
+        ),
+    )
+
+    if not isinstance(bundle, dict):
+        raise ValueError("Selected-row refresh did not return a valid bundle.")
+
+    rolling_payload = bundle.get("rolling_payload")
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        raise ValueError("Selected-row refresh returned no rolling payload.")
+
+    available_dates = _extract_scd_dates_from_rolling_payload(rolling_payload)
+    requested_dates = {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in requested_date_strings
+        )
+        if normalized
+    }
+
+    missing_dates = sorted(requested_dates - available_dates)
+    if missing_dates:
+        raise ValueError(
+            "Selected-row refresh payload is missing requested date(s): "
+            + ", ".join(missing_dates)
+        )
+
+    selected_bundle = dict(bundle)
+    selected_bundle["source"] = "selected_row_live_refresh"
+    selected_bundle["selected_row_engine_indicator"] = engine_indicator
+    selected_bundle["selected_row_compute_config"] = _summarize_scd_compute_config(
+        compute_config
+    )
+    selected_bundle["selected_row_compute_config_keys"] = sorted(compute_config.keys())
+
+    return selected_bundle
+
+
 def _run_scd_selected_row_numeric_config_diagnostic(
     *,
     matrix: Dict[str, Any],
@@ -3661,16 +3787,18 @@ def _refresh_scd_single_indicator_live_date_cells(
     """
     Refresh only today's visible Single Indicator cells in an existing matrix.
 
-    This does not compute one-row indicators. It force-refreshes the existing
-    lookback-aware SCD bundled payload path for each matrix ticker, then splices
-    only today's rebuilt date/ticker cell back into the current matrix.
+    D3-D7 production behavior:
+    - use selected-row computation for allowlisted/proven-safe families
+    - fall back to the existing full bundle path for unsupported/error cases
+    - splice only today's rebuilt date/ticker cell back into the current matrix
 
     Preserved:
     - historical matrix cells
     - selected row identity
     - selected ticker identity
     - chart/detail/export consumers of the matrix
-    - existing acquisition/scoring/persistence boundaries
+    - existing rule-engine scoring semantics
+    - existing non-persistence boundary
     """
     started_at = time.perf_counter()
 
@@ -3728,9 +3856,15 @@ def _refresh_scd_single_indicator_live_date_cells(
         "status": "ok",
         "date": live_date_key,
         "tickers_refreshed": [],
+        "selected_row_tickers": [],
+        "fallback_tickers": [],
+        "fallback_reasons": {},
         "errors": [],
         "total_seconds": None,
     }
+
+    cache_stats = _get_scd_cache_stats()
+    cache_stats["selected_row_refreshes"] += 1
 
     if live_date_key not in refreshed_matrix["cells"]:
         refreshed_matrix["cells"][live_date_key] = {}
@@ -3739,14 +3873,34 @@ def _refresh_scd_single_indicator_live_date_cells(
         ticker_started_at = time.perf_counter()
 
         try:
-            bundle = _fetch_scd_rolling_bundle_for_ticker(
-                ticker=ticker,
-                window_days=window_days,
-                force_refresh=True,
-                anchor_date=anchor_date,
-                anchor_mode=anchor_mode,
-                requested_date_strings=[live_date_key],
-            )
+            refresh_path = "selected_row"
+            fallback_reason = None
+
+            try:
+                bundle = _fetch_scd_selected_row_refresh_bundle_for_ticker(
+                    ticker=ticker,
+                    row_key=row_key,
+                    window_days=window_days,
+                    anchor_date=anchor_date,
+                    anchor_mode=anchor_mode,
+                    requested_date_strings=[live_date_key],
+                )
+            except Exception as selected_row_error:
+                refresh_path = "full_fallback"
+                fallback_reason = str(selected_row_error)
+
+                cache_stats["selected_row_refresh_fallbacks"] += 1
+                refresh_report["fallback_tickers"].append(ticker)
+                refresh_report["fallback_reasons"][ticker] = fallback_reason
+
+                bundle = _fetch_scd_rolling_bundle_for_ticker(
+                    ticker=ticker,
+                    window_days=window_days,
+                    force_refresh=True,
+                    anchor_date=anchor_date,
+                    anchor_mode=anchor_mode,
+                    requested_date_strings=[live_date_key],
+                )
 
             rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
             context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
@@ -3772,24 +3926,36 @@ def _refresh_scd_single_indicator_live_date_cells(
 
             refreshed_matrix["cells"][live_date_key][ticker] = refreshed_cell
 
+            if refresh_path == "selected_row":
+                cache_stats["selected_row_refresh_tickers"] += 1
+                refresh_report["selected_row_tickers"].append(ticker)
+
             existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
             existing_status.update(
                 {
                     "live_refresh_status": refreshed_cell.get("status", "unknown"),
                     "live_refresh_date": live_date_key,
                     "live_refresh_bundle_source": bundle_source,
+                    "live_refresh_path": refresh_path,
                     "live_refresh_seconds": round(
                         time.perf_counter() - ticker_started_at,
                         3,
                     ),
                 }
             )
+
+            if fallback_reason:
+                existing_status["live_refresh_fallback_reason"] = fallback_reason
+            else:
+                existing_status.pop("live_refresh_fallback_reason", None)
+
             refreshed_matrix["ticker_status"][ticker] = existing_status
             refresh_report["tickers_refreshed"].append(ticker)
 
         except Exception as e:
             message = f"{ticker}: {e}"
             refresh_report["errors"].append(message)
+            cache_stats["selected_row_refresh_errors"] += 1
 
             existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
             existing_status.update(
@@ -3797,6 +3963,7 @@ def _refresh_scd_single_indicator_live_date_cells(
                     "live_refresh_status": "error",
                     "live_refresh_date": live_date_key,
                     "live_refresh_error": message,
+                    "live_refresh_path": "error",
                     "live_refresh_seconds": round(
                         time.perf_counter() - ticker_started_at,
                         3,
@@ -7992,18 +8159,60 @@ def show_stock_comparison_dashboard():
                         refresh_report.get("tickers_refreshed", [])
                     )
 
+                    cache_stats["selected_row_refreshes"] += int(
+                        refresh_report.get("selected_row_refreshes", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_tickers"] += int(
+                        refresh_report.get("selected_row_refresh_tickers", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_fallbacks"] += int(
+                        refresh_report.get("selected_row_refresh_fallbacks", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_errors"] += int(
+                        refresh_report.get("selected_row_refresh_errors", 0) or 0
+                    )
+
+                selected_row_tickers = int(
+                    refresh_report.get("selected_row_refresh_tickers", 0) or 0
+                )
+                fallback_tickers = int(
+                    refresh_report.get("selected_row_refresh_fallbacks", 0) or 0
+                )
+
+                refresh_path_caption = None
+                if selected_row_tickers and fallback_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: selected-row calculation used for "
+                        f"{selected_row_tickers} ticker cell(s); full calculation "
+                        f"full fallback used for {fallback_tickers} ticker cell(s)."
+                    )
+                elif selected_row_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: selected-row calculation used for "
+                        f"{selected_row_tickers} ticker cell(s)."
+                    )
+                elif fallback_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: full calculation fallback used for "
+                        f"{fallback_tickers} ticker cell(s)."
+                    )
+
                 if refresh_report.get("status") == "ok":
                     st.success(
                         "Today's cells refreshed for "
                         f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
                         f"in {refresh_report.get('total_seconds')}s."
                     )
+                    if refresh_path_caption:
+                        st.caption(refresh_path_caption)
                 elif refresh_report.get("status") == "partial":
                     st.warning(
                         "Today's cells partially refreshed. "
                         f"Refreshed {len(refresh_report.get('tickers_refreshed', []))} ticker(s); "
                         f"errors: {len(refresh_report.get('errors', []))}."
                     )
+                    if refresh_path_caption:
+                        st.caption(refresh_path_caption)
                 else:
                     st.warning(
                         refresh_report.get(
