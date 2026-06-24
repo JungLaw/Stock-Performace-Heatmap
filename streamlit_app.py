@@ -1,4 +1,4 @@
-# Stamp: Sun, June 21, 2026 4:42 PM
+# Stamp: Wed, June 24, 2026 11:52 AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -281,6 +281,12 @@ def initialize_session_state():
     # aggregation, or semantic reinterpretation.
     if 'scd_payload_cache' not in st.session_state:
         st.session_state.scd_payload_cache = {}
+
+    # Session-only freshness metadata for scd_payload_cache entries.
+    # This is display metadata only, used to distinguish live data freshness
+    # from the time a cached matrix was re-rendered.
+    if 'scd_payload_cache_meta' not in st.session_state:
+        st.session_state.scd_payload_cache_meta = {}
 
     if 'scd_hover_ohlcv_cache' not in st.session_state:
         st.session_state.scd_hover_ohlcv_cache = {}
@@ -1503,6 +1509,7 @@ def _clear_scd_session_cache() -> None:
     repopulate caches through the existing SCD fetch path.
     """
     st.session_state.scd_payload_cache = {}
+    st.session_state.scd_payload_cache_meta = {}
     st.session_state.scd_hover_ohlcv_cache = {}
     st.session_state.scd_bundle_coverage_cache = {}
     st.session_state.scd_result_cell_cache = {}
@@ -2168,8 +2175,13 @@ def _fetch_scd_rolling_bundle_for_ticker(
     if 'scd_payload_cache' not in st.session_state:
         st.session_state.scd_payload_cache = {}
 
+    if 'scd_payload_cache_meta' not in st.session_state:
+        st.session_state.scd_payload_cache_meta = {}
+
     if 'scd_hover_ohlcv_cache' not in st.session_state:
         st.session_state.scd_hover_ohlcv_cache = {}
+
+    stats = _get_scd_cache_stats()
 
     stats = _get_scd_cache_stats()
 
@@ -2205,11 +2217,17 @@ def _fetch_scd_rolling_bundle_for_ticker(
 
         rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
         cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+        cache_meta = st.session_state.scd_payload_cache_meta.get(
+            rolling_cache_key,
+            {},
+        )
 
         return {
             "rolling_payload": rolling_payload,
             "indicator_context_df": cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df,
             "source": "cache",
+            "cache_as_of": cache_meta.get("as_of"),
+            "cache_as_of_source": cache_meta.get("source"),
         }
 
     coverage_entry = None
@@ -2232,6 +2250,8 @@ def _fetch_scd_rolling_bundle_for_ticker(
                 else indicator_context_df
             ),
             "source": "coverage_cache",
+            "cache_as_of": coverage_entry.get("created_at"),
+            "cache_as_of_source": coverage_entry.get("source"),
         }
 
     if rolling_hit:
@@ -2239,6 +2259,10 @@ def _fetch_scd_rolling_bundle_for_ticker(
         # fill the missing hover/context dataframe through the legacy fallback.
         stats["rolling_hits"] += 1
         rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        cache_meta = st.session_state.scd_payload_cache_meta.get(
+            rolling_cache_key,
+            {},
+        )
         hover_df = _fetch_scd_hover_ohlcv_df_for_ticker(
             ticker=ticker,
             window_days=window_days,
@@ -2251,6 +2275,8 @@ def _fetch_scd_rolling_bundle_for_ticker(
             "rolling_payload": rolling_payload,
             "indicator_context_df": hover_df,
             "source": "partial_cache_hover_fallback",
+            "cache_as_of": cache_meta.get("as_of"),
+            "cache_as_of_source": cache_meta.get("source"),
         }
 
     stats["rolling_misses"] += 1
@@ -2282,9 +2308,15 @@ def _fetch_scd_rolling_bundle_for_ticker(
 
     rolling_payload = bundle.get("rolling_payload")
     indicator_context_df = bundle.get("indicator_context_df")
+    bundled_as_of = datetime.now().isoformat(timespec="seconds")
+    bundled_source = "force_refresh" if force_refresh else "bundled"
 
     if isinstance(rolling_payload, dict) and rolling_payload:
         st.session_state.scd_payload_cache[rolling_cache_key] = rolling_payload
+        st.session_state.scd_payload_cache_meta[rolling_cache_key] = {
+            "as_of": bundled_as_of,
+            "source": bundled_source,
+        }
 
     if isinstance(indicator_context_df, pd.DataFrame) and not indicator_context_df.empty:
         st.session_state.scd_hover_ohlcv_cache[hover_cache_key] = indicator_context_df.copy()
@@ -2299,13 +2331,15 @@ def _fetch_scd_rolling_bundle_for_ticker(
         anchor_date=anchor_date,
         rolling_payload=rolling_payload,
         indicator_context_df=indicator_context_df,
-        source="bundled",
+        source=bundled_source,
     )
 
     return {
         "rolling_payload": rolling_payload,
         "indicator_context_df": indicator_context_df,
         "source": "bundled",
+        "cache_as_of": bundled_as_of,
+        "cache_as_of_source": bundled_source,
     }
 
 
@@ -4329,6 +4363,7 @@ def _build_scd_cross_sectional_matrix(
     target_date_key = _resolve_scd_cross_sectional_target_date_key(anchor_date)
 
     profile_started_at = time.perf_counter()
+    live_as_of_candidates: list[Any] = []
 
     matrix = {
         "status": "ok",
@@ -4446,6 +4481,11 @@ def _build_scd_cross_sectional_matrix(
             rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
             hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
             bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+            bundle_as_of = bundle.get("cache_as_of") if isinstance(bundle, dict) else None
+
+            if bundle_as_of is not None:
+                live_as_of_candidates.append(bundle_as_of)
+                ticker_profile["bundle_as_of"] = str(bundle_as_of)
 
             # Hover/context is now supplied by the same technical-layer pass as
             # the rolling payload. There is no separate hover fetch in the
@@ -4582,10 +4622,24 @@ def _build_scd_cross_sectional_matrix(
         and live_date_key
         and _normalize_scd_cache_date_value(target_date_key) == live_date_key
     ):
+        live_as_of_values = []
+        for candidate in live_as_of_candidates:
+            try:
+                ts = pd.Timestamp(candidate)
+                if pd.isna(ts):
+                    continue
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
+                live_as_of_values.append(ts)
+            except Exception:
+                continue
+
+        live_as_of = min(live_as_of_values) if live_as_of_values else datetime.now()
+
         _mark_scd_live_cells_as_of(
             matrix=matrix,
             date_key=live_date_key,
-            as_of=datetime.now(),
+            as_of=live_as_of,
             source="multiple_indicators_build",
         )
 
@@ -8720,7 +8774,7 @@ def show_stock_comparison_dashboard():
             )
      
     if st.session_state.scd_matrix_last_run:
-        st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
+        st.caption(f"Last SCD matrix render/build: {st.session_state.scd_matrix_last_run}")
 
     live_date_key = _get_scd_current_live_date_key()
     current_matrix = st.session_state.get("scd_signal_matrix")
