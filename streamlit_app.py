@@ -8608,11 +8608,28 @@ def show_stock_comparison_dashboard():
     else:
         st.caption(f"Snapshot date: Latest available completed snapshot ({effective_anchor_date})")
 
+    target_date_key_for_build = _resolve_scd_cross_sectional_target_date_key(
+        effective_anchor_date
+    )
+    live_date_key_for_build = _get_scd_current_live_date_key()
+    is_live_snapshot = (
+        bool(target_date_key_for_build)
+        and bool(live_date_key_for_build)
+        and _normalize_scd_cache_date_value(target_date_key_for_build)
+        == live_date_key_for_build
+    )
+
+    if is_live_snapshot:
+        st.caption(
+            "Today/live snapshot: Build uses available session cache by default "
+            "for speed. Use Refresh today's values when you want current values."
+        )
+
     can_build_matrix = bool(selected_tickers) and bool(selected_row_keys)
     if not can_build_matrix:
         st.info("Select at least one ticker and one indicator row to build the SCD matrix.")
 
-    col_build, col_clear_matrix = st.columns([0.45, 0.55])
+    col_build, col_refresh_live, col_clear_matrix = st.columns([0.34, 0.33, 0.33])
 
     with col_build:
         build_clicked = st.button(
@@ -8621,6 +8638,23 @@ def show_stock_comparison_dashboard():
             type="primary",
             disabled=not can_build_matrix,
             use_container_width=True,
+            help=(
+                "Builds the comparison matrix using available session cache when possible. "
+                "This is the speed-first default."
+            ),
+        )
+
+    with col_refresh_live:
+        refresh_live_clicked = st.button(
+            "Refresh today's values",
+            key="scd_refresh_live_matrix",
+            disabled=not can_build_matrix or not is_live_snapshot,
+            use_container_width=True,
+            help=(
+                "Available only when the Multiple Indicators as-of date resolves to "
+                "today's live trading date. Bypasses the SCD session cache for the "
+                "currently selected tickers and rebuilds the matrix with current values."
+            ),
         )
 
     with col_clear_matrix:
@@ -8638,17 +8672,25 @@ def show_stock_comparison_dashboard():
             st.session_state.scd_matrix_last_run = None
             st.rerun()
 
-    if build_clicked:
-        # Read from Session State at build time so the recalculation value used
-        # by the matrix builder matches the active widget state for this run.
+    if build_clicked or refresh_live_clicked:
+        # Build remains cache-first by default. The explicit live-refresh action
+        # bypasses the session cache for today's Multiple Indicators values only.
         force_refresh_for_build = bool(
             st.session_state.get("scd_force_refresh_cache", False)
         )
+        if refresh_live_clicked:
+            force_refresh_for_build = True
 
         if force_refresh_for_build:
             _get_scd_cache_stats()["force_refreshes"] += 1
 
-        with st.spinner("Building comparison matrix from existing rolling signal data..."):
+        spinner_text = (
+            "Refreshing today's Multiple Indicators values..."
+            if refresh_live_clicked
+            else "Building comparison matrix from existing rolling signal data..."
+        )
+
+        with st.spinner(spinner_text):
             st.session_state.scd_signal_matrix = _build_scd_cross_sectional_matrix(
                 selected_tickers=selected_tickers,
                 selected_row_keys=selected_row_keys,
@@ -8657,6 +8699,25 @@ def show_stock_comparison_dashboard():
                 anchor_date=effective_anchor_date,
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
+
+        refreshed_matrix = st.session_state.get("scd_signal_matrix")
+        refreshed_profile = (
+            refreshed_matrix.get("profile", {})
+            if isinstance(refreshed_matrix, dict)
+            else {}
+        )
+
+        if refresh_live_clicked:
+            st.success(
+                "Today's Multiple Indicators values refreshed for "
+                f"{len(selected_tickers)} ticker(s)"
+                + (
+                    f" in {refreshed_profile.get('total_seconds')}s."
+                    if isinstance(refreshed_profile, dict)
+                    and refreshed_profile.get("total_seconds") is not None
+                    else "."
+                )
+            )
      
     if st.session_state.scd_matrix_last_run:
         st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
