@@ -1,4 +1,4 @@
-# Stamp: Wed, June 24, 2026 11:52 AM
+# Stamp: Fri, June 26, 2026 5:16 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -1423,12 +1423,6 @@ def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
             f"{today_cell_refreshes} "
             f"({today_cell_tickers_refreshed} ticker cell(s))"
         )
-
-    if result_cell_writes:
-        summary_parts.append(f"result-cell writes={result_cell_writes}")
-
-    if result_cell_hits:
-        summary_parts.append(f"result-cell reuse={result_cell_hits}")
 
     if result_cell_misses:
         summary_parts.append(f"result-cell misses={result_cell_misses}")
@@ -4061,6 +4055,7 @@ def _build_scd_single_indicator_time_series_matrix(
     anchor_mode = str(date_request.get("scenario_b_anchor_mode", "asof"))
 
     profile_started_at = time.perf_counter()
+    live_as_of_candidates: list[Any] = []
 
     matrix = {
         "status": "ok",
@@ -4197,6 +4192,11 @@ def _build_scd_single_indicator_time_series_matrix(
             rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
             hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
             bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+            bundle_as_of = bundle.get("cache_as_of") if isinstance(bundle, dict) else None
+
+            if bundle_as_of is not None:
+                live_as_of_candidates.append(bundle_as_of)
+                ticker_profile["bundle_as_of"] = str(bundle_as_of)
 
             ticker_profile["hover_context_seconds"] = 0.0
             ticker_profile["bundle_source"] = bundle_source
@@ -4312,10 +4312,24 @@ def _build_scd_single_indicator_time_series_matrix(
 
     live_date_key = _get_scd_current_live_date_key()
     if live_date_key and live_date_key in date_strings:
+        live_as_of_values = []
+        for candidate in live_as_of_candidates:
+            try:
+                ts = pd.Timestamp(candidate)
+                if pd.isna(ts):
+                    continue
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
+                live_as_of_values.append(ts)
+            except Exception:
+                continue
+
+        live_as_of = min(live_as_of_values) if live_as_of_values else datetime.now()
+
         _mark_scd_live_cells_as_of(
             matrix=matrix,
             date_key=live_date_key,
-            as_of=datetime.now(),
+            as_of=live_as_of,
             source="single_indicator_build",
         )
 
@@ -8284,6 +8298,12 @@ def show_stock_comparison_dashboard():
                     live_caption
                     if live_caption
                     else "Today's data: no current-session timestamp available yet."
+                )
+
+            if st.session_state.scd_single_indicator_matrix_last_run:
+                st.caption(
+                    "Last Single Indicator matrix render/build: "
+                    f"{st.session_state.scd_single_indicator_matrix_last_run.isoformat(timespec='seconds')}"
                 )
 
             if SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC:
