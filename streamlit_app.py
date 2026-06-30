@@ -3811,13 +3811,20 @@ def _run_scd_selected_row_numeric_config_diagnostic(
 def _refresh_scd_single_indicator_live_date_cells(
     *,
     matrix: Dict[str, Any],
+    refresh_scope: str = "selected_indicator",
 ) -> Dict[str, Any]:
     """
-    Refresh only today's visible Single Indicator cells in an existing matrix.
+    Refresh today's visible Single Indicator cells in an existing matrix.
 
-    D3-D7 production behavior:
-    - use selected-row computation for allowlisted/proven-safe families
-    - fall back to the existing full bundle path for unsupported/error cases
+    Supported scopes:
+    - selected_indicator:
+        use selected-row computation for allowlisted/proven-safe families and
+        fall back to the existing full bundle path for unsupported/error cases.
+    - all_indicators:
+        bypass selected-row computation and force the existing full bundle path
+        so the shared today payload is refreshed for the selected ticker set.
+
+    Preserved behavior:
     - splice only today's rebuilt date/ticker cell back into the current matrix
 
     Preserved:
@@ -3829,6 +3836,9 @@ def _refresh_scd_single_indicator_live_date_cells(
     - existing non-persistence boundary
     """
     started_at = time.perf_counter()
+    refresh_scope = str(refresh_scope or "selected_indicator").strip()
+    if refresh_scope not in {"selected_indicator", "all_indicators"}:
+        refresh_scope = "selected_indicator"
 
     if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
         return matrix
@@ -3840,6 +3850,7 @@ def _refresh_scd_single_indicator_live_date_cells(
             "status": "skipped",
             "message": "Today is not a US trading day.",
             "date": None,
+            "refresh_scope": refresh_scope,
             "tickers_refreshed": [],
             "errors": [],
             "total_seconds": round(time.perf_counter() - started_at, 3),
@@ -3857,6 +3868,7 @@ def _refresh_scd_single_indicator_live_date_cells(
             "status": "skipped",
             "message": f"{live_date_key} is not in the current Single Indicator matrix.",
             "date": live_date_key,
+            "refresh_scope": refresh_scope,
             "tickers_refreshed": [],
             "errors": [],
             "total_seconds": round(time.perf_counter() - started_at, 3),
@@ -3883,16 +3895,19 @@ def _refresh_scd_single_indicator_live_date_cells(
     refresh_report = {
         "status": "ok",
         "date": live_date_key,
+        "refresh_scope": refresh_scope,
         "tickers_refreshed": [],
         "selected_row_tickers": [],
         "fallback_tickers": [],
+        "broad_refresh_tickers": [],
         "fallback_reasons": {},
         "errors": [],
         "total_seconds": None,
     }
 
     cache_stats = _get_scd_cache_stats()
-    cache_stats["selected_row_refreshes"] += 1
+    if refresh_scope == "selected_indicator":
+        cache_stats["selected_row_refreshes"] += 1
 
     if live_date_key not in refreshed_matrix["cells"]:
         refreshed_matrix["cells"][live_date_key] = {}
@@ -3901,25 +3916,11 @@ def _refresh_scd_single_indicator_live_date_cells(
         ticker_started_at = time.perf_counter()
 
         try:
-            refresh_path = "selected_row"
             fallback_reason = None
 
-            try:
-                bundle = _fetch_scd_selected_row_refresh_bundle_for_ticker(
-                    ticker=ticker,
-                    row_key=row_key,
-                    window_days=window_days,
-                    anchor_date=anchor_date,
-                    anchor_mode=anchor_mode,
-                    requested_date_strings=[live_date_key],
-                )
-            except Exception as selected_row_error:
-                refresh_path = "full_fallback"
-                fallback_reason = str(selected_row_error)
-
-                cache_stats["selected_row_refresh_fallbacks"] += 1
-                refresh_report["fallback_tickers"].append(ticker)
-                refresh_report["fallback_reasons"][ticker] = fallback_reason
+            if refresh_scope == "all_indicators":
+                refresh_path = "full_refresh"
+                refresh_report["broad_refresh_tickers"].append(ticker)
 
                 bundle = _fetch_scd_rolling_bundle_for_ticker(
                     ticker=ticker,
@@ -3929,6 +3930,34 @@ def _refresh_scd_single_indicator_live_date_cells(
                     anchor_mode=anchor_mode,
                     requested_date_strings=[live_date_key],
                 )
+            else:
+                refresh_path = "selected_row"
+
+                try:
+                    bundle = _fetch_scd_selected_row_refresh_bundle_for_ticker(
+                        ticker=ticker,
+                        row_key=row_key,
+                        window_days=window_days,
+                        anchor_date=anchor_date,
+                        anchor_mode=anchor_mode,
+                        requested_date_strings=[live_date_key],
+                    )
+                except Exception as selected_row_error:
+                    refresh_path = "full_fallback"
+                    fallback_reason = str(selected_row_error)
+
+                    cache_stats["selected_row_refresh_fallbacks"] += 1
+                    refresh_report["fallback_tickers"].append(ticker)
+                    refresh_report["fallback_reasons"][ticker] = fallback_reason
+
+                    bundle = _fetch_scd_rolling_bundle_for_ticker(
+                        ticker=ticker,
+                        window_days=window_days,
+                        force_refresh=True,
+                        anchor_date=anchor_date,
+                        anchor_mode=anchor_mode,
+                        requested_date_strings=[live_date_key],
+                    )
 
             rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
             context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
@@ -8192,23 +8221,58 @@ def show_stock_comparison_dashboard():
                 and live_date_key in [str(date_key) for date_key in single_matrix.get("dates", [])]
             )
 
-            refresh_today_clicked = st.button(
-                "Refresh today's cells",
-                key="scd_single_refresh_today_cells",
-                disabled=not live_date_in_matrix,
-                help=(
-                    "Refresh today's visible date/ticker cells in the current "
-                    "Single Indicator matrix. The app recalculates enough data to "
-                    "produce today's values, replaces only today's visible cells, "
-                    "and leaves historical cells unchanged."
-                ),
+            col_refresh_selected, col_refresh_all = st.columns([0.5, 0.5])
+
+            with col_refresh_selected:
+                refresh_selected_today_clicked = st.button(
+                    "Refresh this indicator only",
+                    key="scd_single_refresh_selected_today_cells",
+                    disabled=not live_date_in_matrix,
+                    use_container_width=True,
+                    help=(
+                        "Refresh today's visible cells for the currently selected "
+                        "Single Indicator row. Supported rows use the faster "
+                        "selected-row path; unsupported rows fall back to the full path."
+                    ),
+                )
+
+            with col_refresh_all:
+                refresh_all_today_clicked = st.button(
+                    "Refresh all indicators for today",
+                    key="scd_single_refresh_all_today_values",
+                    disabled=not live_date_in_matrix,
+                    use_container_width=True,
+                    help=(
+                        "Refresh today's broad payload for the selected ticker set. "
+                        "This is slower, but it lets other Single Indicator rows reuse "
+                        "the refreshed today data when rebuilt."
+                    ),
+                )
+
+            refresh_today_clicked = (
+                refresh_selected_today_clicked or refresh_all_today_clicked
+            )
+            refresh_scope = (
+                "all_indicators"
+                if refresh_all_today_clicked
+                else "selected_indicator"
             )
 
             if refresh_today_clicked:
-                with st.spinner("Refreshing today's Single Indicator cells."):
+                spinner_text = (
+                    "Refreshing all Single Indicator today values."
+                    if refresh_scope == "all_indicators"
+                    else "Refreshing this Single Indicator row."
+                )
+
+                if refresh_scope == "all_indicators":
+                    _get_scd_cache_stats()["force_refreshes"] += 1
+
+                with st.spinner(spinner_text):
                     st.session_state.scd_single_indicator_matrix = (
                         _refresh_scd_single_indicator_live_date_cells(
                             matrix=single_matrix,
+                            refresh_scope=refresh_scope,
                         )
                     )
                     st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
@@ -8246,9 +8310,18 @@ def show_stock_comparison_dashboard():
                 fallback_tickers = int(
                     refresh_report.get("selected_row_refresh_fallbacks", 0) or 0
                 )
+                broad_refresh_tickers = len(
+                    refresh_report.get("broad_refresh_tickers", []) or []
+                )
 
                 refresh_path_caption = None
-                if selected_row_tickers and fallback_tickers:
+                if broad_refresh_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: full today refresh used for "
+                        f"{broad_refresh_tickers} ticker cell(s). Other Single "
+                        "Indicator rows can reuse the refreshed today payload when rebuilt."
+                    )
+                elif selected_row_tickers and fallback_tickers:
                     refresh_path_caption = (
                         "Refresh path: selected-row calculation used for "
                         f"{selected_row_tickers} ticker cell(s); full calculation "
@@ -8266,11 +8339,19 @@ def show_stock_comparison_dashboard():
                     )
 
                 if refresh_report.get("status") == "ok":
-                    st.success(
-                        "Today's cells refreshed for "
-                        f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
-                        f"in {refresh_report.get('total_seconds')}s."
-                    )
+                    if refresh_report.get("refresh_scope") == "all_indicators":
+                        st.success(
+                            "Today's indicator payload refreshed for "
+                            f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
+                            f"in {refresh_report.get('total_seconds')}s."
+                        )
+                    else:
+                        st.success(
+                            "This indicator's today cells refreshed for "
+                            f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
+                            f"in {refresh_report.get('total_seconds')}s."
+                        )
+
                     if refresh_path_caption:
                         st.caption(refresh_path_caption)
                 elif refresh_report.get("status") == "partial":
