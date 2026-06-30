@@ -1,5 +1,5 @@
 {
-  "version": "0.2.5",
+  "version": "0.2.6",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -390,35 +390,36 @@
         "feature_scopes": {
           "heatmap": {
             "9": {
-              "strong_buy": "Close > HMA_9 and HMA_slope > 0.002 and rising_2bar(HMA_9)",
-              "buy": "Close > HMA_9 and HMA_slope > 0",
-              "neutral": "abs(Close/HMA_9 - 1) <= 0.25 * ATRP_9",
-              "sell": "Close < HMA_9 and HMA_slope < 0",
-              "strong_sell": "Close < HMA_9 and HMA_slope < -0.002 and falling_2bar(HMA_9)",
+              "strong_buy": "Close > HMA_9 and HMA_9_slope > 0.002 and rising_2bar(HMA_9)",
+              "buy": "Close > HMA_9 and HMA_9_slope > 0",
+              "neutral": "abs(Close/HMA_9 - 1) * 100 <= 0.25 * ATRP_9",
+              "sell": "Close < HMA_9 and HMA_9_slope < 0",
+              "strong_sell": "Close < HMA_9 and HMA_9_slope < -0.002 and falling_2bar(HMA_9)",
               "notes": "HMA is very reactive; slope matters more than price crossover."
             },
             "21": {
-              "strong_buy": "Close > HMA_21 and HMA_slope > 0.0015 and rising_2bar(HMA_21)",
-              "buy": "Close > HMA_21 and HMA_slope > 0",
-              "neutral": "abs(Close/HMA_21 - 1) <= 0.50 * ATRP_21",
-              "sell": "Close < HMA_21 and HMA_slope < 0",
-              "strong_sell": "Close < HMA_21 and HMA_slope < -0.0015 and falling_2bar(HMA_21)",
+              "strong_buy": "Close > HMA_21 and HMA_21_slope > 0.0015 and rising_2bar(HMA_21)",
+              "buy": "Close > HMA_21 and HMA_21_slope > 0",
+              "neutral": "abs(Close/HMA_21 - 1) * 100 <= 0.50 * ATRP_21",
+              "sell": "Close < HMA_21 and HMA_21_slope < 0",
+              "strong_sell": "Close < HMA_21 and HMA_21_slope < -0.0015 and falling_2bar(HMA_21)",
               "notes": "Intermediate HMA = smoother, so thresholds lower."
             },
             "50": {
-              "strong_buy": "Close > HMA_50 and HMA_slope > 0.001 and rising_2bar(HMA_50)",
-              "buy": "Close > HMA_50 and HMA_slope > 0",
-              "neutral": "abs(Close/HMA_50 - 1) <= 1.0 * ATRP_50",
-              "sell": "Close < HMA_50 and HMA_slope < 0",
-              "strong_sell": "Close < HMA_50 and HMA_slope < -0.001 and falling_2bar(HMA_50)",
+              "strong_buy": "Close > HMA_50 and HMA_50_slope > 0.001 and rising_2bar(HMA_50)",
+              "buy": "Close > HMA_50 and HMA_50_slope > 0",
+              "neutral": "abs(Close/HMA_50 - 1) * 100 <= 1.0 * ATRP_50",
+              "sell": "Close < HMA_50 and HMA_50_slope < 0",
+              "strong_sell": "Close < HMA_50 and HMA_50_slope < -0.001 and falling_2bar(HMA_50)",
               "notes": "Long-term HMA reacts slowly; slope thresholds adjust accordingly."
+
             },
             "55": {
-              "strong_buy": "Close > HMA_55 and HMA_slope > 0.001 and rising_2bar(HMA_55)",
-              "buy": "Close > HMA_55 and HMA_slope > 0",
-              "neutral": "abs(Close/HMA_55 - 1) <= 1.0 * ATRP_50",
-              "sell": "Close < HMA_55 and HMA_slope < 0",
-              "strong_sell": "Close < HMA_55 and HMA_slope < -0.001 and falling_2bar(HMA_55)",
+              "strong_buy": "Close > HMA_55 and HMA_55_slope > 0.001 and rising_2bar(HMA_55)",
+              "buy": "Close > HMA_55 and HMA_55_slope > 0",
+              "neutral": "abs(Close/HMA_55 - 1) * 100 <= 1.0 * ATRP_50",
+              "sell": "Close < HMA_55 and HMA_55_slope < 0",
+              "strong_sell": "Close < HMA_55 and HMA_55_slope < -0.001 and falling_2bar(HMA_55)",
               "notes": "Particularly effective as a dynamic support/resistance level in trending markets."
             }
           },
@@ -1331,7 +1332,7 @@
             "10": {
               "strong_buy": "(High - EMA_10_10) > 0.75*ATR_10 and rising_2bar(EMA_10, 2)",
               "buy": "(High - EMA_10_10) > 0",
-              "neutral": "abs(Close - EMA_10) <= 0.5 * ATRP_10",
+              "neutral": "abs(Close - EMA_10) <= 0.5 * ATR_10",
               "sell": "(Low - EMA_10_10) < 0",
               "strong_sell": "(Low - EMA_10_10) < -0.75*ATR_10 and falling_2bar(EMA_10, 2)",
               "notes": "Uses EMA baseline; strong signals require deviation AND slope confirmation."
@@ -1339,7 +1340,7 @@
             "13": {
               "strong_buy": "(High - EMA_13_13) > 0.75*ATR_13 and rising_2bar(EMA_13, 2)",
               "buy": "(High - EMA_13_13) > 0",
-              "neutral": "abs(Close - EMA_13) <= 0.5 * ATRP_13",
+              "neutral": "abs(Close - EMA_13) <= 0.5 * ATR_13",
               "sell": "(Low - EMA_13_13) < 0",
               "strong_sell": "(Low - EMA_13_13) < -0.75*ATR_13 and falling_2bar(EMA_13, 2)",
               "notes": "Intermediate = classic ERI(13). Neutral zone derived from ATR%."
@@ -1347,7 +1348,7 @@
             "21": {
               "strong_buy": "(High - EMA_21_21) > 0.75*ATR_21 and rising_2bar(EMA_21, 2)",
               "buy": "(High - EMA_21_21) > 0",
-              "neutral": "abs(Close - EMA_21) <= 0.5 * ATRP_21",
+              "neutral": "abs(Close - EMA_21) <= 0.5 * ATR_21",
               "sell": "(Low - EMA_21_21) < 0",
               "strong_sell": "(Low - EMA_21_21) < -0.75*ATR_21 and falling_2bar(EMA_21, 2)",
               "notes": "Long-term baseline smooths volatility; deviations still ATR-based."

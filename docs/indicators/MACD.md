@@ -15,6 +15,9 @@ Status: Incomplete
 **Signals & Interpretation:**
 - MACD above zero = bullish momentum
 - MACD below zero = bearish momentum
+    - When the histogram is below zero, it means the MACD line is trading below the signal line. 
+    - This condition typically implies that bearish momentum is currently in control of the asset
+
 - MACD crosses above signal line = bullish signal
 - MACD crosses below signal line = bearish signal
 - Histogram shows momentum acceleration/deceleration

@@ -451,6 +451,7 @@ def compute_all_indicators(
             if emit_aliases and (
                 base_col.startswith("SMA_")
                 or base_col.startswith("EMA_")
+#                or base_col.startswith("VWMA_")
                 or base_col.startswith("HMA_")
             ):
                 slope_columns[f"{base_col}_slope"] = slope_series

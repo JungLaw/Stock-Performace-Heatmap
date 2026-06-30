@@ -1,9 +1,13 @@
-
 The Detrended Price Oscillator (DPO) strips away long-term price trends to expose short-term cyclical patterns and overbought or oversold extremes. Its primary value is cycle timing—helping traders estimate the duration between historical peaks and troughs to anticipate future turning points, independent of the broader bull or bear market.
-
 
 The result: DPO tells you **where you are in the current price cycle** — independent of whether the trend is up, down, or sideways.
 
+---
+DPO: a way to remove the longer trend from price so shorter cycles are easier to see. 
+- DPO is not designed for momentum signals; 
+- it is used to identify cycle highs/lows and estimate cycle length. 
+
+---
 #### What It's Used For
 For **timing entries within existing trends** — adding to positions on pullbacks, scaling in and out during a run. In that use case it is genuinely differentiated from everything else in your roster.
 
