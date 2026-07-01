@@ -15,11 +15,64 @@ Status: Incomplete
 **Signals & Interpretation:**
 - MACD above zero = bullish momentum
 - MACD below zero = bearish momentum
+    - When the histogram is below zero, it means the MACD line is trading below the signal line. 
+    - This condition typically implies that bearish momentum is currently in control of the asset
+
 - MACD crosses above signal line = bullish signal
 - MACD crosses below signal line = bearish signal
 - Histogram shows momentum acceleration/deceleration
 - Divergences between MACD and price signal potential reversals
 
+**Terms**:
+
+Here’s the precise meaning of each component of MACD(12,26,9):
+
+- **MACD Line** — the core indicator  
+    - $\text{MACD line} = \text{EMA}_{12} - \text{EMA}_{26}$
+
+- **Signal Line** — a smoothed version of the MACD line  
+  It’s a 9‑period EMA of the MACD line.
+
+- **MACD Histogram** — the *difference* between the two  
+    - $\text{Histogram} = \text{MACD line} - \text{Signal line}$
+
+So when someone says "MACD", they mean the **MACD line** unless they explicitly say "signal line" or "histogram".
+
+
+
+| Component | What It Measures | What It Tells You |
+| --- | --- | --- |
+| **MACD Line** | Trend momentum (fast EMA vs slow EMA) | Direction + strength of the trend |
+| **Signal Line** | Smoothed MACD | Helps generate crossover signals |
+| **MACD Histogram** | Difference between MACD & signal line | Acceleration/deceleration of momentum |
+
+| Term | What it refers to | What people mean when they say it |
+| --- | --- | --- |
+| **MACD** | The MACD line (12 EMA − 26 EMA) | **Default meaning** |
+| **Signal Line** | 9‑EMA of MACD line | Only used when explicitly named |
+| **MACD Histogram** | MACD line − Signal line | Only used when explicitly named |
+
+The MACD line and the MACD histogram measure related but different aspects of momentum. The cleanest way to think about it is:
+
+- The MACD line measures "trend momentum".
+    - the overall momentum direction and strength
+- The MACD histogram measures the "change in that momentum".
+    - shows momentum acceleration or deceleration
+
+**What the MACD Line Represents**
+- It’s the difference between the fast and slow EMAs (12‑period minus 26‑period).
+
+- When the fast EMA pulls away from the slow EMA, the MACD line moves farther from zero → momentum strengthening.
+
+- When they converge, the MACD line moves toward zero → momentum weakening.
+
+**What the MACD Histogram Represents**
+- It’s the visual distance between the MACD line and the signal line (the 9‑EMA of the MACD).
+- Bars grow when momentum is accelerating.
+- Bars shrink when momentum is decelerating.
+-   Shrinking bars often warn that a MACD–signal line crossover is approaching.
+
+---
 **Optimal Conditions:** Most effective in trending markets on daily and weekly timeframes. Works well for swing trading and position trading.
 
 **Limitations:** Can produce false signals in sideways markets. As a lagging indicator, may miss early trend changes in fast-moving markets.
@@ -61,3 +114,15 @@ Pro-Tip: The "Percentage Price Oscillator (PPO)"
 
 - **The Problem:** MACD is based on absolute dollar values. A MACD of -1.83 for a $20 stock is massive, but for a $500 stock, it’s negligible.
 - **The Standard:** The PPO converts the MACD into a percentage. This allows you to track and compare the "momentum strength" across your entire portfolio using one standardized scale. 
+
+
+#### What it means when the histogram is falling
+A falling MACD histogram means:
+
+- Momentum is fading in the current trend direction.
+(Bars shrink toward zero — convergence.) 
+
+- If bars are above zero and falling → bullish momentum is weakening.
+- If bars are below zero and falling → bearish momentum is weakening.
+
+- A falling histogram often precedes a MACD–signal line crossover, because shrinking bars indicate the two lines are converging

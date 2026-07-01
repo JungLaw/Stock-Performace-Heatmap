@@ -1,4 +1,4 @@
-# Stamp: Sun, May 10, 2026 3:11PM
+# Stamp: Wed, June 10, 2026 2:27PM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -676,25 +676,6 @@ class DatabaseIntegratedTechnicalCalculator:
                 )
             )
             logger.info("=== END columns: SMA/Slope/ATRP===")
-        # ============================================
-        # BASELINE SNAPSHOT (TEMP — pre-Option E/F)
-        # ============================================
-        try:
-            from pathlib import Path
-
-            # Limit to one representative ticker to avoid repeated writes
-            if ticker == "AAPL":
-                output_dir = Path("baseline")
-                output_dir.mkdir(exist_ok=True)
-
-                output_path = output_dir / "indicator_baseline_AAPL.csv"
-
-                # Save the most recent 100 rows of the raw computed indicator dataframe
-                df_ind.tail(100).to_csv(output_path)
-
-                logger.info(f"[BASELINE] Indicator snapshot saved to: {output_path}")
-        except Exception as e:
-            logger.warning(f"[BASELINE ERROR] {e}")
 
         return df_ind
 
@@ -926,11 +907,18 @@ class DatabaseIntegratedTechnicalCalculator:
             )
 
         if return_type in ("rolling", "rolling_with_context"):
+            rolling_days = 10
+            if isinstance(ohlcv_request, dict):
+                try:
+                    rolling_days = int(ohlcv_request.get("window_days", 10))
+                except (TypeError, ValueError):
+                    rolling_days = 10
+
             rolling_payload = self._build_optionc_rolling_signals(
                 ticker=ticker,
                 df_ind=df_ind,
                 scores=scores,
-                days=10,
+                days=rolling_days,
             )
 
             if return_type == "rolling_with_context":

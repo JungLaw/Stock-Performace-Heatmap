@@ -1,4 +1,4 @@
-# Stamp: Fri, June 5, 2026 6:37PM
+# Stamp: Fri, June 26, 2026 5:16 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -25,6 +25,8 @@ sys.path.insert(0, str(src_path))
 from calculations.performance import (
     DatabaseIntegratedPerformanceCalculator,
     get_last_completed_trading_day,
+    get_last_n_trading_days,
+    is_us_trading_day,
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
@@ -43,6 +45,7 @@ from config.assets import (
 # renders controls, stores session state, and passes resolved row_key sets
 # into the existing downstream manual-control/render path.
 from ui.rolling_heatmap_presets import CUSTOM_DEFAULT as RH_CUSTOM_DEFAULT
+from ui.rolling_heatmap_classification import ROW_CLASSIFICATION
 from ui.rolling_heatmap_selection import (
     describe_empty_selection,
     get_category_names,
@@ -57,6 +60,11 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     build_plotly_heatmap_inputs,
 )
+
+# Developer-only diagnostic controls.
+# Keep False for normal app use. Set True temporarily when running D3-C
+# tail-buffer equivalence checks.
+SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC = False
 
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
     """
@@ -160,6 +168,52 @@ def initialize_session_state():
     if 'scd_ticker_limit' not in st.session_state:
         st.session_state.scd_ticker_limit = 10
 
+    # Stock Comparison Dashboard analysis-mode routing.
+    # Multiple Indicators preserves the existing SCD cross-sectional matrix.
+    # Single Indicator is the planned time-series view route.
+    if 'scd_analysis_mode' not in st.session_state:
+        st.session_state.scd_analysis_mode = 'Single Indicator'
+
+    # Stock Comparison Dashboard Single Indicator selector state.
+    # These controls select one canonical Rolling Heatmap row_key for the
+    # planned dates × tickers time-series view. They do not build data yet.
+    if 'scd_single_indicator_source' not in st.session_state:
+        st.session_state.scd_single_indicator_source = 'Main Indicators'
+
+    if 'scd_single_indicator_family' not in st.session_state:
+        st.session_state.scd_single_indicator_family = 'RSI'
+
+    if 'scd_single_indicator_row_key' not in st.session_state:
+        st.session_state.scd_single_indicator_row_key = 'RSI_14'
+
+    # Stock Comparison Dashboard Single Indicator selector state.
+    # These controls select one canonical Rolling Heatmap row_key for the
+    # planned dates × tickers time-series view. They do not build data yet.
+    if 'scd_single_indicator_source' not in st.session_state:
+        st.session_state.scd_single_indicator_source = 'Main Indicators'
+
+    if 'scd_single_indicator_family' not in st.session_state:
+        st.session_state.scd_single_indicator_family = 'RSI'
+
+    if 'scd_single_indicator_row_key' not in st.session_state:
+        st.session_state.scd_single_indicator_row_key = 'RSI_14'
+
+    # Stock Comparison Dashboard Single Indicator date-window state.
+    # These controls resolve a visible trading-day window only. They do not
+    # fetch data, build matrices, or change cache/acquisition behavior yet.
+    if 'scd_single_trading_days' not in st.session_state:
+        st.session_state.scd_single_trading_days = 20
+
+    if 'scd_single_anchor_mode' not in st.session_state:
+        st.session_state.scd_single_anchor_mode = 'End date'
+
+    if 'scd_single_use_anchor_date' not in st.session_state:
+        st.session_state.scd_single_use_anchor_date = True
+        #st.session_state.scd_single_use_anchor_date = False
+
+    if 'scd_single_anchor_date' not in st.session_state:
+        st.session_state.scd_single_anchor_date = datetime.now().date()        
+
     # Stock Comparison Dashboard v1 indicator-selection session state.
     # These keys are SCD-specific but resolve through the existing Rolling
     # Heatmap row-selection resolver and catalog.
@@ -197,6 +251,21 @@ def initialize_session_state():
     if 'scd_matrix_last_run' not in st.session_state:
         st.session_state.scd_matrix_last_run = None
 
+    # Stock Comparison Dashboard Single Indicator matrix transport state.
+    # This stores reshaped existing Rolling Heatmap cells only, but oriented
+    # as dates × tickers for one selected indicator.
+    if 'scd_single_indicator_matrix_last_run' not in st.session_state:
+        st.session_state.scd_single_indicator_matrix_last_run = None
+
+    # Stock Comparison Dashboard Single Indicator chart display state.
+    # These controls affect only the chart layer. They must not remove data
+    # from the matrix, heatmap, detail table, export, cache, or payload.
+    if 'scd_single_chart_value_mode' not in st.session_state:
+        st.session_state.scd_single_chart_value_mode = 'Auto'
+
+    if 'scd_single_chart_visible_tickers' not in st.session_state:
+        st.session_state.scd_single_chart_visible_tickers = []
+
     # Stock Comparison Dashboard v1: Date-anchor controls
     # These are display/request controls only. They do not create a new
     # acquisition path, scoring path, or persistence behavior.
@@ -213,8 +282,27 @@ def initialize_session_state():
     if 'scd_payload_cache' not in st.session_state:
         st.session_state.scd_payload_cache = {}
 
+    # Session-only freshness metadata for scd_payload_cache entries.
+    # This is display metadata only, used to distinguish live data freshness
+    # from the time a cached matrix was re-rendered.
+    if 'scd_payload_cache_meta' not in st.session_state:
+        st.session_state.scd_payload_cache_meta = {}
+
     if 'scd_hover_ohlcv_cache' not in st.session_state:
         st.session_state.scd_hover_ohlcv_cache = {}
+
+    # WS11-G: coverage-aware bundle metadata cache.
+    # Write-only in WS11-G-A/B. Later WS11-G steps may read this to reuse
+    # completed historical coverage across overlapping SCD requests.
+    if 'scd_bundle_coverage_cache' not in st.session_state:
+        st.session_state.scd_bundle_coverage_cache = {}
+
+    # D3-A: completed historical result-cell cache.
+    # Session-only store of final SCD matrix cells keyed by
+    # (ticker, row_key, date). Commit 1 writes completed cells only; later
+    # D3-A steps may read this to avoid recalculating completed historical cells.
+    if 'scd_result_cell_cache' not in st.session_state:
+        st.session_state.scd_result_cell_cache = {}
 
     if 'scd_cache_stats' not in st.session_state:
         st.session_state.scd_cache_stats = {
@@ -224,6 +312,18 @@ def initialize_session_state():
             "hover_misses": 0,
             "force_refreshes": 0,
             "clears": 0,
+            "coverage_writes": 0,
+            "coverage_hits": 0,
+            "today_cell_refreshes": 0,
+            "today_cell_tickers_refreshed": 0,
+            "result_cell_writes": 0,
+            "result_cell_hits": 0,
+            "result_cell_misses": 0,
+            "ticker_calculations_skipped": 0,
+            "selected_row_refreshes": 0,
+            "selected_row_refresh_tickers": 0,
+            "selected_row_refresh_fallbacks": 0,
+            "selected_row_refresh_errors": 0,
         }
 
     # Rolling Heatmap Selection & Catalog session state.
@@ -359,6 +459,342 @@ def _get_scd_selected_tickers() -> list[str]:
     ticker_limit = int(st.session_state.get("scd_ticker_limit", 10))
 
     return selected_tickers[:ticker_limit]
+
+
+def _format_scd_indicator_display_label(row_key: str) -> str:
+    """
+    Return a user-facing indicator label while preserving row_key identity.
+
+    Examples:
+        RSI_14 -> RSI(14)
+        MACD_12_26_9 -> MACD(12,26,9)
+        SMA_50 -> SMA(50)
+    """
+    row_key = str(row_key).strip()
+
+    display_name = INDICATOR_DEFS.get(row_key, {}).get("display_name")
+    if display_name:
+        # Normalize existing labels such as "RSI (14)" to "RSI(14)".
+        return display_name.replace(" (", "(").strip()
+
+    parts = row_key.split("_")
+    if len(parts) <= 1:
+        return row_key
+
+    family = parts[0]
+    params = ",".join(parts[1:])
+
+    family_display = {
+        "STOCH": "Stoch",
+        "WILLR": "Williams %R",
+        "UO": "UO",
+        "BB": "BB",
+    }.get(family, family)
+
+    return f"{family_display}({params})"
+
+
+def _get_scd_single_indicator_main_rows() -> list[str]:
+    """
+    Return quick-access Single Indicator candidates.
+
+    Main Indicators are derived from the existing Rolling Heatmap Custom
+    default membership so they stay aligned with curated Custom changes.
+    """
+    return [
+        row_key
+        for row_key in RH_CUSTOM_DEFAULT
+        if row_key in ROW_CLASSIFICATION
+    ]
+
+
+def _get_scd_single_indicator_available_rows() -> list[str]:
+    """
+    Return catalog-backed Single Indicator candidates.
+
+    v1 intentionally uses known Rolling Heatmap row keys and excludes Price.
+    """
+    return [
+        row_key
+        for row_key in ROW_CLASSIFICATION.keys()
+        if row_key in INDICATOR_DEFS
+    ]
+
+
+def _get_scd_single_indicator_family_options(row_keys: list[str]) -> list[str]:
+    """Return sorted family names available for the provided row keys."""
+    families = sorted(
+        {
+            ROW_CLASSIFICATION[row_key].get("family", "")
+            for row_key in row_keys
+            if row_key in ROW_CLASSIFICATION
+        }
+    )
+    return [family for family in families if family]
+
+
+def _render_scd_single_indicator_controls() -> str | None:
+    """
+    Render selector controls for the planned SCD Single Indicator time-series view.
+
+    This returns one canonical row_key. It does not build time-series data.
+    """
+    st.subheader("Single Indicator")
+
+    source_options = ["Main Indicators", "Available Indicators"]
+    current_source = st.session_state.get(
+        "scd_single_indicator_source",
+        "Main Indicators",
+    )
+    if current_source not in source_options:
+        current_source = "Main Indicators"
+
+    selected_source = st.selectbox(
+        "Indicator Source",
+        options=source_options,
+        index=source_options.index(current_source),
+        key="scd_single_indicator_source_widget",
+        help=(
+            "Main Indicators are derived from the current Custom default row set. "
+            "Available Indicators are drawn from the Rolling Heatmap row catalog."
+        ),
+    )
+    st.session_state.scd_single_indicator_source = selected_source
+
+    if selected_source == "Main Indicators":
+        candidate_rows = _get_scd_single_indicator_main_rows()
+    else:
+        candidate_rows = _get_scd_single_indicator_available_rows()
+
+    if not candidate_rows:
+        st.warning("No Single Indicator candidates are available.")
+        st.session_state.scd_single_indicator_row_key = None
+        return None
+
+    family_options = _get_scd_single_indicator_family_options(candidate_rows)
+
+    current_family = st.session_state.get(
+        "scd_single_indicator_family",
+        "RSI",
+    )
+    if current_family not in family_options:
+        current_family = family_options[0] if family_options else None
+
+    if selected_source == "Available Indicators" and family_options:
+        selected_family = st.selectbox(
+            "Indicator Family",
+            options=family_options,
+            index=family_options.index(current_family),
+            key="scd_single_indicator_family_widget",
+            help="Choose an indicator family, then select one parameter setting.",
+        )
+        st.session_state.scd_single_indicator_family = selected_family
+
+        candidate_rows = [
+            row_key
+            for row_key in candidate_rows
+            if ROW_CLASSIFICATION.get(row_key, {}).get("family") == selected_family
+        ]
+    else:
+        selected_family = ROW_CLASSIFICATION.get(
+            st.session_state.get("scd_single_indicator_row_key", "RSI_14"),
+            {},
+        ).get("family", "RSI")
+        st.session_state.scd_single_indicator_family = selected_family
+
+    current_row_key = st.session_state.get(
+        "scd_single_indicator_row_key",
+        "RSI_14",
+    )
+    if current_row_key not in candidate_rows:
+        if "RSI_14" in candidate_rows:
+            current_row_key = "RSI_14"
+        else:
+            current_row_key = candidate_rows[0]
+
+    selected_row_key = st.selectbox(
+        "Indicator",
+        options=candidate_rows,
+        index=candidate_rows.index(current_row_key),
+        key="scd_single_indicator_row_key_widget",
+        format_func=_format_scd_indicator_display_label,
+        help="Select one indicator row for the planned dates × tickers view.",
+    )
+
+    st.session_state.scd_single_indicator_row_key = selected_row_key
+
+    selected_label = _format_scd_indicator_display_label(selected_row_key)
+    selected_family = ROW_CLASSIFICATION.get(selected_row_key, {}).get("family", "Unknown")
+
+    st.success(f"Selected indicator: {selected_label}")
+    st.caption(f"Canonical row key: {selected_row_key} | Family: {selected_family}")
+
+    return selected_row_key
+
+
+def _coerce_scd_date_to_datetime(value: Any) -> datetime:
+    """Return a normalized naive datetime for an SCD date-control value."""
+    try:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts.normalize().to_pydatetime()
+    except Exception:
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _get_next_n_trading_days_for_scd(start_date: datetime, n: int) -> list[datetime]:
+    """Return n trading days starting at or after start_date."""
+    trading_days: list[datetime] = []
+    cursor = _coerce_scd_date_to_datetime(start_date)
+
+    while len(trading_days) < int(n):
+        if is_us_trading_day(cursor):
+            trading_days.append(cursor)
+        cursor += timedelta(days=1)
+
+    return trading_days
+
+
+def _resolve_scd_single_indicator_date_window(
+    *,
+    trading_days: int,
+    anchor_mode: str,
+    use_anchor_date: bool,
+    anchor_date: Any,
+) -> Dict[str, Any]:
+    """
+    Resolve the Single Indicator visible trading-day window.
+
+    This is a UI/request helper only. It does not fetch data, build a matrix,
+    change cache identity, or alter acquisition behavior.
+    """
+    trading_days = int(trading_days)
+
+    if use_anchor_date and anchor_date is not None:
+        effective_anchor = _coerce_scd_date_to_datetime(anchor_date)
+    else:
+        effective_anchor = _coerce_scd_date_to_datetime(get_last_completed_trading_day())
+
+    if anchor_mode == "Start date":
+        window_dates = _get_next_n_trading_days_for_scd(effective_anchor, trading_days)
+        scenario_b_anchor_mode = "start"
+    else:
+        # Default behavior: visible window ends on the anchor date.
+        window_dates = get_last_n_trading_days(effective_anchor, trading_days)
+        scenario_b_anchor_mode = "asof"
+
+    date_strings = [
+        pd.Timestamp(day).strftime("%Y-%m-%d")
+        for day in window_dates
+    ]
+
+    window_start = date_strings[0] if date_strings else None
+    window_end = date_strings[-1] if date_strings else None
+
+    return {
+        "trading_days": trading_days,
+        "anchor_mode": anchor_mode,
+        "scenario_b_anchor_mode": scenario_b_anchor_mode,
+        "use_anchor_date": bool(use_anchor_date),
+        "anchor_date": pd.Timestamp(effective_anchor).date(),
+        "window_start_date": window_start,
+        "window_end_date": window_end,
+        "date_strings": date_strings,
+    }
+
+
+def _render_scd_single_indicator_date_controls() -> Dict[str, Any]:
+    """
+    Render date-window controls for the planned Single Indicator time-series view.
+
+    Returns resolved request metadata only. It does not build the matrix yet.
+    """
+    st.subheader("Date Window")
+
+    trading_day_options = [10, 20, 30, 40]
+    current_trading_days = int(
+        st.session_state.get("scd_single_trading_days", 20)
+    )
+    if current_trading_days not in trading_day_options:
+        current_trading_days = 20
+
+    d1, d2 = st.columns(2)
+
+    with d1:
+        selected_trading_days = st.selectbox(
+            "# of Trading days",
+            options=trading_day_options,
+            index=trading_day_options.index(current_trading_days),
+            key="scd_single_trading_days_widget",
+            help="Number of visible trading days for the Single Indicator view.",
+        )
+        st.session_state.scd_single_trading_days = int(selected_trading_days)
+
+    anchor_mode_options = ["End date", "Start date"]
+    current_anchor_mode = st.session_state.get(
+        "scd_single_anchor_mode",
+        "End date",
+    )
+    if current_anchor_mode not in anchor_mode_options:
+        current_anchor_mode = "End date"
+
+    with d2:
+        selected_anchor_mode = st.selectbox(
+            "Anchor mode",
+            options=anchor_mode_options,
+            index=anchor_mode_options.index(current_anchor_mode),
+            key="scd_single_anchor_mode_widget",
+            help=(
+                "End date shows the selected number of trading days ending on the anchor. "
+                "Start date shows the selected number of trading days starting from the anchor."
+            ),
+        )
+        st.session_state.scd_single_anchor_mode = selected_anchor_mode
+
+    use_anchor_date = st.checkbox(
+        "Use anchor date",
+        value=bool(st.session_state.get("scd_single_use_anchor_date", False)),
+        key="scd_single_use_anchor_date_widget",
+        help="When unchecked, the view uses the latest completed trading day.",
+    )
+    st.session_state.scd_single_use_anchor_date = bool(use_anchor_date)
+
+    if use_anchor_date:
+        selected_anchor_date = st.date_input(
+            "Anchor date",
+            value=st.session_state.get(
+                "scd_single_anchor_date",
+                datetime.now().date(),
+            ),
+            key="scd_single_anchor_date_widget",
+            help="Weekend/holiday dates resolve to the nearest valid trading-day window.",
+        )
+        st.session_state.scd_single_anchor_date = selected_anchor_date
+    else:
+        selected_anchor_date = None
+
+    date_request = _resolve_scd_single_indicator_date_window(
+        trading_days=int(selected_trading_days),
+        anchor_mode=selected_anchor_mode,
+        use_anchor_date=bool(use_anchor_date),
+        anchor_date=selected_anchor_date,
+    )
+
+    st.caption(
+        "Resolved window: "
+        f"{date_request['window_start_date']} → {date_request['window_end_date']} "
+        f"({date_request['trading_days']} trading days)"
+    )
+
+    st.caption(
+        "Request mode: "
+        f"{date_request['scenario_b_anchor_mode']} | "
+        f"Anchor date: {date_request['anchor_date']}"
+    )
+
+    return date_request
+
 
 def _render_scd_ticker_controls() -> list[str]:
     """
@@ -534,7 +970,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
     SCD-specific controls and delegates row-key resolution to the existing
     Rolling Heatmap selection resolver.
     """
-    st.subheader("2) Indicator Selection")
+    st.subheader("Indicator Selection")
 
     mode_options = get_selection_modes()
     if not mode_options:
@@ -775,23 +1211,61 @@ def _resolve_scd_effective_anchor_date(
     except Exception:
         return latest_completed
 
+
+def _resolve_scd_cross_sectional_target_date_key(
+    anchor_date: Optional[Any],
+) -> Optional[str]:
+    """
+    Resolve the target extraction date for the SCD Multiple Indicators matrix.
+
+    Scenario B treats weekend/holiday anchor dates as as-of requests and moves
+    backward to the nearest valid trading day. This helper mirrors that behavior
+    for the matrix extraction layer.
+
+    This is extraction-target metadata only. It does not fetch data, mutate
+    cache state, compute indicators, score signals, persist data, or alter
+    rule semantics.
+    """
+    if anchor_date is None:
+        return None
+
+    try:
+        target_date = _coerce_scd_date_to_datetime(anchor_date)
+    except Exception:
+        return None
+
+    while not is_us_trading_day(target_date):
+        target_date -= timedelta(days=1)
+
+    return pd.Timestamp(target_date).strftime("%Y-%m-%d")
+
+
 def _get_scd_ohlcv_request(
     window_days: int = 10,
     anchor_date: Optional[Any] = None,
+    anchor_mode: str = "asof",
+    historical_buffer_days: int = 435,
 ) -> Dict[str, Any]:
     """
     Return the Scenario B-style OHLCV request used by the comparison dashboard.
 
-    The comparison view is a latest-cell cross-section, so its date control is
-    intentionally fixed to as-of semantics. A provided anchor_date asks the
-    existing Scenario B path to build the snapshot as of that date.
+    Multiple Indicators uses the default as-of semantics. Single Indicator may
+    request start-date semantics through the same existing Scenario B path.
+
+    D3-C diagnostics may pass a smaller historical_buffer_days value only for
+    equivalence testing against the 435-day reference. Production callers keep
+    the default 435-day Scenario B buffer.
     """
+    resolved_anchor_mode = str(anchor_mode).strip().lower()
+    if resolved_anchor_mode not in {"asof", "start"}:
+        resolved_anchor_mode = "asof"
+
     return {
         "mode": "rolling_heatmap_scenario_b",
         "window_days": int(window_days),
-        "anchor_mode": "asof",
+        "anchor_mode": resolved_anchor_mode,
         "anchor_date": anchor_date,
-        "historical_buffer_days": 435,
+        "historical_buffer_days": int(historical_buffer_days),
     }
 
 def _get_scd_cache_key(
@@ -800,6 +1274,8 @@ def _get_scd_cache_key(
     window_days: int,
     payload_kind: str,
     anchor_date: Optional[Any] = None,
+    anchor_mode: str = "asof",
+    historical_buffer_days: int = 435,
 ) -> tuple:
     """
     Return a deterministic comparison dashboard session-cache key.
@@ -809,12 +1285,14 @@ def _get_scd_cache_key(
     - ticker
     - the Scenario B-style OHLCV request signature
 
-    Including anchor_date in the request signature prevents cached data for one
-    snapshot date from being reused for another snapshot date.
+    Including anchor_date and anchor_mode in the request signature prevents
+    cached data for one window shape from being reused for another.
     """
     request = _get_scd_ohlcv_request(
         window_days=window_days,
         anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
     request_signature = tuple(
         sorted((str(key), repr(value)) for key, value in request.items())
@@ -829,17 +1307,192 @@ def _get_scd_cache_key(
 
 def _get_scd_cache_stats() -> Dict[str, int]:
     """Return initialized SCD cache stats."""
+    defaults = {
+        "rolling_hits": 0,
+        "rolling_misses": 0,
+        "hover_hits": 0,
+        "hover_misses": 0,
+        "force_refreshes": 0,
+        "clears": 0,
+        "coverage_writes": 0,
+        "coverage_hits": 0,
+        "today_cell_refreshes": 0,
+        "today_cell_tickers_refreshed": 0,
+        "result_cell_writes": 0,
+        "result_cell_hits": 0,
+        "result_cell_misses": 0,
+        "ticker_calculations_skipped": 0,
+        "selected_row_refreshes": 0,
+        "selected_row_refresh_tickers": 0,
+        "selected_row_refresh_fallbacks": 0,
+        "selected_row_refresh_errors": 0,
+    }
+
     if 'scd_cache_stats' not in st.session_state:
-        st.session_state.scd_cache_stats = {
-            "rolling_hits": 0,
-            "rolling_misses": 0,
-            "hover_hits": 0,
-            "hover_misses": 0,
-            "force_refreshes": 0,
-            "clears": 0,
-        }
+        st.session_state.scd_cache_stats = dict(defaults)
+    else:
+        for key, value in defaults.items():
+            st.session_state.scd_cache_stats.setdefault(key, value)
 
     return st.session_state.scd_cache_stats
+
+
+def _get_scd_cache_diagnostics_snapshot() -> Dict[str, Any]:
+    """
+    Return a UI-ready snapshot of SCD session cache diagnostics.
+
+    Diagnostic only. This does not mutate cache state, fetch data, calculate
+    indicators, score signals, persist data, or change build behavior.
+    """
+    cache_stats = dict(_get_scd_cache_stats())
+    coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
+
+    coverage_entry_count = sum(
+        len(entries)
+        for entries in coverage_cache.values()
+        if isinstance(entries, list)
+    )
+
+    return {
+        "payload_count": len(st.session_state.get("scd_payload_cache", {})),
+        "hover_context_count": len(st.session_state.get("scd_hover_ohlcv_cache", {})),
+        "coverage_entry_count": coverage_entry_count,
+        "result_cell_count": len(st.session_state.get("scd_result_cell_cache", {})),
+        "stats": cache_stats,
+    }
+
+
+def _format_scd_cache_activity_summary(snapshot: Dict[str, Any]) -> str:
+    """
+    Return a plain-English cache activity summary for the current session.
+
+    Counters are cumulative session diagnostics, not a guaranteed latest-build
+    accounting record. This helper intentionally summarizes activity without
+    changing the underlying counters.
+    """
+    stats = snapshot.get("stats", {}) if isinstance(snapshot, dict) else {}
+
+    rolling_hits = int(stats.get("rolling_hits", 0) or 0)
+    hover_hits = int(stats.get("hover_hits", 0) or 0)
+    coverage_hits = int(stats.get("coverage_hits", 0) or 0)
+    rolling_misses = int(stats.get("rolling_misses", 0) or 0)
+    hover_misses = int(stats.get("hover_misses", 0) or 0)
+    force_refreshes = int(stats.get("force_refreshes", 0) or 0)
+    today_cell_refreshes = int(stats.get("today_cell_refreshes", 0) or 0)
+    today_cell_tickers_refreshed = int(
+        stats.get("today_cell_tickers_refreshed", 0) or 0
+    )
+    result_cell_writes = int(stats.get("result_cell_writes", 0) or 0)
+    result_cell_hits = int(stats.get("result_cell_hits", 0) or 0)
+    result_cell_misses = int(stats.get("result_cell_misses", 0) or 0)
+    ticker_calculations_skipped = int(
+        stats.get("ticker_calculations_skipped", 0) or 0
+    )
+    selected_row_refreshes = int(stats.get("selected_row_refreshes", 0) or 0)
+    selected_row_refresh_tickers = int(
+        stats.get("selected_row_refresh_tickers", 0) or 0
+    )
+    selected_row_refresh_fallbacks = int(
+        stats.get("selected_row_refresh_fallbacks", 0) or 0
+    )
+    selected_row_refresh_errors = int(
+        stats.get("selected_row_refresh_errors", 0) or 0
+    )
+
+    summary_parts: list[str] = []
+
+    if coverage_hits:
+        summary_parts.append(f"coverage reuse={coverage_hits}")
+
+    if rolling_hits or hover_hits:
+        summary_parts.append(
+            f"exact cache reuse: rolling={rolling_hits}, hover={hover_hits}"
+        )
+
+    if rolling_misses or hover_misses:
+        summary_parts.append(
+            f"fresh calculations: rolling={rolling_misses}, hover={hover_misses}"
+        )
+
+    if force_refreshes:
+        summary_parts.append(f"force-refresh builds={force_refreshes}")
+
+    if today_cell_refreshes:
+        summary_parts.append(
+            "today-cell refreshes="
+            f"{today_cell_refreshes} "
+            f"({today_cell_tickers_refreshed} ticker cell(s))"
+        )
+
+    if result_cell_misses:
+        summary_parts.append(f"result-cell misses={result_cell_misses}")
+
+    if ticker_calculations_skipped:
+        summary_parts.append(
+            f"ticker calculations skipped={ticker_calculations_skipped}"
+        )
+
+    if selected_row_refreshes:
+        summary_parts.append(
+            "selected-row refreshes="
+            f"{selected_row_refreshes} "
+            f"({selected_row_refresh_tickers} ticker cell(s); "
+            f"fallbacks={selected_row_refresh_fallbacks}; "
+            f"errors={selected_row_refresh_errors})"
+        )
+
+    if not summary_parts:
+        return "Cache activity summary: no SCD cache activity recorded yet."
+
+    return "Cache activity summary: " + "; ".join(summary_parts) + "."
+
+
+def _render_scd_cache_diagnostics() -> None:
+    """
+    Render the shared SCD cache diagnostics UI.
+
+    This centralizes the repeated Single Indicator / Multiple Indicators cache
+    counter display. It is presentation-only and must not alter cache state.
+    """
+    snapshot = _get_scd_cache_diagnostics_snapshot()
+    cache_stats = snapshot["stats"]
+
+    st.caption(_format_scd_cache_activity_summary(snapshot))
+
+    st.caption(
+        "Counters are session totals and may include automatic builds, "
+        "manual rebuilds, and Streamlit reruns."
+    )
+
+    st.caption(
+        "Current session cache details: "
+        f"{snapshot['payload_count']} ticker result(s), "
+        f"{snapshot['hover_context_count']} hover-context result(s), "
+        f"{snapshot['coverage_entry_count']} coverage-aware bundle entry/entries, "
+        f"{snapshot['result_cell_count']} completed result-cell entrie(s). "
+        f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
+        f"hover={cache_stats.get('hover_hits', 0)}, "
+        f"coverage={cache_stats.get('coverage_hits', 0)}. "
+        f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
+        f"hover={cache_stats.get('hover_misses', 0)}. "
+        f"Coverage writes={cache_stats.get('coverage_writes', 0)}. "
+        f"Result-cell writes={cache_stats.get('result_cell_writes', 0)}. "
+        f"Result-cell reuse={cache_stats.get('result_cell_hits', 0)}. "
+        f"Result-cell misses={cache_stats.get('result_cell_misses', 0)}. "
+        f"Ticker calculations skipped="
+        f"{cache_stats.get('ticker_calculations_skipped', 0)}. "
+        f"Force-refresh builds={cache_stats.get('force_refreshes', 0)}. "
+        f"Today-cell refreshes={cache_stats.get('today_cell_refreshes', 0)}. "
+        f"Today refreshed ticker cells="
+        f"{cache_stats.get('today_cell_tickers_refreshed', 0)}. "
+        f"Selected-row refreshes={cache_stats.get('selected_row_refreshes', 0)}. "
+        f"Selected-row refreshed ticker cells="
+        f"{cache_stats.get('selected_row_refresh_tickers', 0)}. "
+        f"Selected-row fallbacks="
+        f"{cache_stats.get('selected_row_refresh_fallbacks', 0)}. "
+        f"Selected-row errors="
+        f"{cache_stats.get('selected_row_refresh_errors', 0)}."
+    )
 
 
 def _clear_scd_session_cache() -> None:
@@ -850,7 +1503,10 @@ def _clear_scd_session_cache() -> None:
     repopulate caches through the existing SCD fetch path.
     """
     st.session_state.scd_payload_cache = {}
+    st.session_state.scd_payload_cache_meta = {}
     st.session_state.scd_hover_ohlcv_cache = {}
+    st.session_state.scd_bundle_coverage_cache = {}
+    st.session_state.scd_result_cell_cache = {}
     st.session_state.scd_cache_stats = {
         "rolling_hits": 0,
         "rolling_misses": 0,
@@ -858,7 +1514,521 @@ def _clear_scd_session_cache() -> None:
         "hover_misses": 0,
         "force_refreshes": 0,
         "clears": st.session_state.get("scd_cache_stats", {}).get("clears", 0) + 1,
+        "coverage_writes": 0,
+        "coverage_hits": 0,
+        "today_cell_refreshes": 0,
+        "today_cell_tickers_refreshed": 0,
+        "result_cell_writes": 0,
+        "result_cell_hits": 0,
+        "result_cell_misses": 0,
+        "ticker_calculations_skipped": 0,
+        "selected_row_refreshes": 0,
+        "selected_row_refresh_tickers": 0,
+        "selected_row_refresh_fallbacks": 0,
+        "selected_row_refresh_errors": 0,
     }
+
+
+def _normalize_scd_cache_date_value(value: Any) -> Optional[str]:
+    """Normalize a date-like value to YYYY-MM-DD for SCD cache metadata."""
+    try:
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _extract_scd_dates_from_rolling_payload(
+    rolling_payload: Optional[Dict[str, Any]],
+) -> set[str]:
+    """Extract available YYYY-MM-DD dates from an SCD rolling payload."""
+    if not isinstance(rolling_payload, dict):
+        return set()
+
+    dates = rolling_payload.get("dates", [])
+    if not isinstance(dates, list):
+        return set()
+
+    return {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in dates
+        )
+        if normalized
+    }
+
+
+def _extract_scd_dates_from_context_df(
+    context_df: Optional[pd.DataFrame],
+) -> set[str]:
+    """Extract available YYYY-MM-DD dates from an SCD indicator/context dataframe."""
+    if not isinstance(context_df, pd.DataFrame) or context_df.empty:
+        return set()
+
+    try:
+        idx = pd.DatetimeIndex(context_df.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        return {
+            normalized
+            for normalized in (
+                _normalize_scd_cache_date_value(value)
+                for value in idx
+            )
+            if normalized
+        }
+    except Exception:
+        return set()
+
+
+def _classify_scd_cache_dates(date_strings: set[str]) -> Dict[str, set[str]]:
+    """
+    Classify cache dates into completed historical dates and live dates.
+
+    WS11-G conservative policy:
+    - today's date is live only if today is a US trading day
+    - all other available dates are treated as completed for session-cache reuse
+    """
+    normalized_dates = {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in date_strings
+        )
+        if normalized
+    }
+
+    today = datetime.now().date()
+    today_str = today.strftime("%Y-%m-%d")
+    today_dt = datetime.combine(today, datetime.min.time())
+
+    live_dates: set[str] = set()
+    if today_str in normalized_dates and is_us_trading_day(today_dt):
+        live_dates.add(today_str)
+
+    completed_dates = set(normalized_dates) - live_dates
+
+    return {
+        "available_dates": normalized_dates,
+        "completed_dates": completed_dates,
+        "live_dates": live_dates,
+    }
+
+
+def _get_scd_result_cell_cache() -> Dict[tuple[str, str, str], Dict[str, Any]]:
+    """
+    Return initialized SCD result-cell cache.
+
+    D3-A Commit 1 writes completed historical cells only. Later D3-A steps may
+    read this cache to avoid recalculating completed historical cells.
+    """
+    if 'scd_result_cell_cache' not in st.session_state:
+        st.session_state.scd_result_cell_cache = {}
+    return st.session_state.scd_result_cell_cache
+
+
+def _get_scd_completed_result_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: Any,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return one cached completed historical SCD cell, if available.
+
+    This helper reads final cells produced by the existing SCD build path. It
+    does not fetch data, calculate indicators, score signals, persist data,
+    rank tickers, aggregate values, or reinterpret semantics.
+    """
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+
+    if not normalized_ticker or not normalized_row_key or not normalized_date:
+        return None
+
+    if not _is_scd_completed_cache_date(normalized_date):
+        return None
+
+    cache = _get_scd_result_cell_cache()
+    entry = cache.get((normalized_ticker, normalized_row_key, normalized_date))
+    if not isinstance(entry, dict):
+        return None
+
+    cell = entry.get("cell")
+    if not isinstance(cell, dict):
+        return None
+
+    if cell.get("status") != "ok":
+        return None
+
+    return dict(cell)
+
+
+def _load_completed_result_cells_for_ticker(
+    *,
+    ticker: str,
+    row_keys: list[str],
+    date_keys: list[str],
+) -> tuple[Dict[tuple[str, str], Dict[str, Any]], list[tuple[str, str]]]:
+    """
+    Load cached completed historical cells for one ticker.
+
+    Returns:
+      - cached cells keyed by (row_key, date_key)
+      - missing (row_key, date_key) pairs
+
+    Callers decide whether the cache coverage is sufficient to skip the
+    expensive technical path. This helper only reads cache state.
+    """
+    cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+    missing_cells: list[tuple[str, str]] = []
+
+    for row_key in row_keys:
+        normalized_row_key = str(row_key).strip()
+        if not normalized_row_key:
+            continue
+
+        for date_key in date_keys:
+            normalized_date = _normalize_scd_cache_date_value(date_key)
+            if not normalized_date or not _is_scd_completed_cache_date(normalized_date):
+                missing_cells.append((normalized_row_key, str(date_key)))
+                continue
+
+            cached_cell = _get_scd_completed_result_cell(
+                ticker=ticker,
+                row_key=normalized_row_key,
+                date_key=normalized_date,
+            )
+            if cached_cell is None:
+                missing_cells.append((normalized_row_key, normalized_date))
+                continue
+
+            cached_cells[(normalized_row_key, normalized_date)] = cached_cell
+
+    return cached_cells, missing_cells
+
+
+def _is_scd_completed_cache_date(date_key: Any) -> bool:
+    """
+    Return True when date_key is a completed historical cache date.
+
+    This reuses the existing SCD completed/live date policy. Today's date is
+    treated as live only when today is a US trading day.
+    """
+    normalized = _normalize_scd_cache_date_value(date_key)
+    if not normalized:
+        return False
+
+    classified = _classify_scd_cache_dates({normalized})
+    return normalized in classified.get("completed_dates", set())
+
+
+def _store_scd_result_cell_cache_entry(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: Any,
+    cell: Dict[str, Any],
+    source: str,
+) -> bool:
+    """
+    Store one completed historical SCD result cell.
+
+    This helper does not fetch data, calculate indicators, score signals,
+    persist data, rank tickers, aggregate values, or change matrix contents.
+    It only stores already-built final SCD cells for future reuse.
+    """
+    if not isinstance(cell, dict):
+        return False
+
+    if cell.get("status") != "ok":
+        return False
+
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+    normalized_date = _normalize_scd_cache_date_value(date_key or cell.get("date"))
+
+    if not normalized_ticker or not normalized_row_key or not normalized_date:
+        return False
+
+    if not _is_scd_completed_cache_date(normalized_date):
+        return False
+
+    cache = _get_scd_result_cell_cache()
+    cache_key = (normalized_ticker, normalized_row_key, normalized_date)
+    new_cell = dict(cell)
+
+    existing_entry = cache.get(cache_key)
+    if isinstance(existing_entry, dict) and existing_entry.get("cell") == new_cell:
+        return False
+
+    cache[cache_key] = {
+        "ticker": normalized_ticker,
+        "row_key": normalized_row_key,
+        "date": normalized_date,
+        "date_status": "completed",
+        "cell": new_cell,
+        "source": str(source),
+        "created_at": datetime.now(),
+    }
+
+    _get_scd_cache_stats()["result_cell_writes"] += 1
+    return True
+
+
+def _store_scd_result_cells_from_matrix(
+    *,
+    matrix: Dict[str, Any],
+    source: str,
+) -> int:
+    """
+    Store completed historical cells from an existing SCD matrix.
+
+    Supports both current SCD matrix shapes:
+      - Single Indicator: matrix["cells"][date_key][ticker]
+      - Multiple Indicators: matrix["cells"][row_key][ticker]
+    """
+    if not isinstance(matrix, dict):
+        return 0
+
+    view = str(matrix.get("view", "")).strip()
+    stored_count = 0
+
+    if view == "single_indicator_time_series":
+        row_key = str(matrix.get("row_key", "")).strip()
+        for date_key, cells_by_ticker in dict(matrix.get("cells", {})).items():
+            if not isinstance(cells_by_ticker, dict):
+                continue
+            for ticker, cell in cells_by_ticker.items():
+                if _store_scd_result_cell_cache_entry(
+                    ticker=str(ticker),
+                    row_key=row_key,
+                    date_key=date_key,
+                    cell=cell,
+                    source=source,
+                ):
+                    stored_count += 1
+
+        return stored_count
+
+    row_keys = list(matrix.get("row_keys", []))
+    for row_key in row_keys:
+        cells_by_ticker = dict(matrix.get("cells", {}).get(row_key, {}))
+        for ticker, cell in cells_by_ticker.items():
+            if _store_scd_result_cell_cache_entry(
+                ticker=str(ticker),
+                row_key=str(row_key),
+                date_key=cell.get("date") if isinstance(cell, dict) else None,
+                cell=cell,
+                source=source,
+            ):
+                stored_count += 1
+
+    return stored_count
+
+
+def _store_scd_coverage_cache_entry(
+    *,
+    ticker: str,
+    anchor_mode: str,
+    window_days: int,
+    anchor_date: Optional[Any],
+    rolling_payload: Optional[Dict[str, Any]],
+    indicator_context_df: Optional[pd.DataFrame],
+    source: str,
+) -> None:
+    """
+    Store coverage metadata for a successful SCD bundle build.
+
+    WS11-G-A/B writes metadata only. Later WS11-G steps may read these entries
+    to reuse completed historical coverage across overlapping SCD requests.
+
+    This helper does not fetch data, compute indicators, score signals, rank
+    tickers, aggregate values, persist data, or mutate the returned bundle.
+    """
+    ticker = str(ticker).strip().upper()
+    resolved_anchor_mode = str(anchor_mode).strip().lower()
+    if resolved_anchor_mode not in {"asof", "start"}:
+        resolved_anchor_mode = "asof"
+
+    if 'scd_bundle_coverage_cache' not in st.session_state:
+        st.session_state.scd_bundle_coverage_cache = {}
+
+    rolling_dates = _extract_scd_dates_from_rolling_payload(rolling_payload)
+    context_dates = _extract_scd_dates_from_context_df(indicator_context_df)
+
+    coverage_dates = rolling_dates | context_dates
+    classified = _classify_scd_cache_dates(coverage_dates)
+
+    if not classified["available_dates"]:
+        return
+
+    anchor_date_key = _normalize_scd_cache_date_value(anchor_date)
+    source_signature = (
+        int(window_days),
+        resolved_anchor_mode,
+        anchor_date_key,
+    )
+
+    entry = {
+        "ticker": ticker,
+        "anchor_mode": resolved_anchor_mode,
+        "created_at": datetime.now(),
+        "source": str(source),
+        "source_signature": source_signature,
+        "source_request": {
+            "window_days": int(window_days),
+            "anchor_mode": resolved_anchor_mode,
+            "anchor_date": anchor_date_key,
+        },
+        "available_dates": sorted(classified["available_dates"]),
+        "completed_dates": sorted(classified["completed_dates"]),
+        "live_dates": sorted(classified["live_dates"]),
+        "contains_live_date": bool(classified["live_dates"]),
+        "rolling_payload": rolling_payload,
+        "indicator_context_df": (
+            indicator_context_df.copy()
+            if isinstance(indicator_context_df, pd.DataFrame)
+            else indicator_context_df
+        ),
+    }
+
+    cache_key = (ticker, resolved_anchor_mode)
+    existing_entries = list(
+        st.session_state.scd_bundle_coverage_cache.get(cache_key, [])
+    )
+
+    # Replace same request signature instead of growing duplicate entries.
+    existing_entries = [
+        existing
+        for existing in existing_entries
+        if existing.get("source_signature") != source_signature
+    ]
+
+    existing_entries.append(entry)
+
+    # Keep the cache bounded while preserving the most recent coverage entries.
+    st.session_state.scd_bundle_coverage_cache[cache_key] = existing_entries[-5:]
+
+    stats = _get_scd_cache_stats()
+    stats["coverage_writes"] += 1
+
+
+def _normalize_scd_requested_cache_dates(
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]],
+) -> set[str]:
+    """Normalize requested visible date strings for coverage-cache lookup."""
+    if not requested_date_strings:
+        return set()
+
+    return {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in requested_date_strings
+        )
+        if normalized
+    }
+
+
+def _can_reuse_scd_coverage_entry(
+    *,
+    entry: Dict[str, Any],
+    requested_dates: set[str],
+) -> bool:
+    """
+    Return True when a coverage cache entry can satisfy requested dates.
+
+    WS11-G-C1 policy:
+    - reuse completed historical dates only
+    - do not reuse live/current-day data in this step
+    """
+    if not isinstance(entry, dict) or not requested_dates:
+        return False
+
+    rolling_payload = entry.get("rolling_payload")
+    indicator_context_df = entry.get("indicator_context_df")
+
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        return False
+
+    if not isinstance(indicator_context_df, pd.DataFrame) or indicator_context_df.empty:
+        return False
+
+    available_dates = set(entry.get("available_dates", []) or [])
+    completed_dates = set(entry.get("completed_dates", []) or [])
+    live_dates = set(entry.get("live_dates", []) or [])
+    rolling_dates = _extract_scd_dates_from_rolling_payload(rolling_payload)
+
+    if not requested_dates.issubset(available_dates):
+        return False
+
+    # The context dataframe can cover more dates than the rolling signal payload.
+    # Reuse is valid only when the rolling payload itself contains every
+    # requested visible date.
+    if not requested_dates.issubset(rolling_dates):
+        return False
+
+    if requested_dates & live_dates:
+        return False
+
+    if not requested_dates.issubset(completed_dates):
+        return False
+
+    return True
+
+
+def _find_scd_coverage_cache_entry(
+    *,
+    ticker: str,
+    anchor_mode: str,
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Find a coverage-compatible SCD bundle entry for completed-date reuse.
+
+    This is intentionally conservative and only returns entries that fully
+    cover the requested visible Single Indicator date window.
+    """
+    ticker = str(ticker).strip().upper()
+    resolved_anchor_mode = str(anchor_mode).strip().lower()
+    if resolved_anchor_mode not in {"asof", "start"}:
+        resolved_anchor_mode = "asof"
+
+    requested_dates = _normalize_scd_requested_cache_dates(requested_date_strings)
+    if not requested_dates:
+        return None
+
+    coverage_cache = st.session_state.get("scd_bundle_coverage_cache", {})
+    entries = list(coverage_cache.get((ticker, resolved_anchor_mode), []) or [])
+
+    reusable_entries = [
+        entry
+        for entry in entries
+        if _can_reuse_scd_coverage_entry(
+            entry=entry,
+            requested_dates=requested_dates,
+        )
+    ]
+
+    if not reusable_entries:
+        return None
+
+    reusable_entries.sort(
+        key=lambda entry: (
+            len(entry.get("completed_dates", []) or []),
+            entry.get("created_at", datetime.min),
+        ),
+        reverse=True,
+    )
+
+    return reusable_entries[0]
 
 
 def _fetch_scd_rolling_payload_for_ticker(
@@ -867,6 +2037,7 @@ def _fetch_scd_rolling_payload_for_ticker(
     window_days: int = 10,
     force_refresh: bool = False,
     anchor_date: Optional[Any] = None,
+    anchor_mode: str = "asof",
 ) -> Dict[str, Any]:
     """
     Fetch the existing Rolling Heatmap / Option-C rolling payload for one ticker.
@@ -887,6 +2058,7 @@ def _fetch_scd_rolling_payload_for_ticker(
         window_days=window_days,
         payload_kind="rolling_payload",
         anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
     )
 
     if not force_refresh and cache_key in st.session_state.scd_payload_cache:
@@ -904,6 +2076,7 @@ def _fetch_scd_rolling_payload_for_ticker(
         ohlcv_request=_get_scd_ohlcv_request(
             window_days=window_days,
             anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
         ),
     )
 
@@ -919,6 +2092,7 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
     window_days: int = 10,
     force_refresh: bool = False,
     anchor_date: Optional[Any] = None,
+    anchor_mode: str = "asof",
 ) -> Optional[pd.DataFrame]:
     """
     Fetch hover-only OHLCV / indicator context for adapter hover enrichment.
@@ -940,6 +2114,7 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
         window_days=window_days,
         payload_kind="hover_ohlcv",
         anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
     )
 
     if not force_refresh and cache_key in st.session_state.scd_hover_ohlcv_cache:
@@ -956,6 +2131,7 @@ def _fetch_scd_hover_ohlcv_df_for_ticker(
             ohlcv_request=_get_scd_ohlcv_request(
                 window_days=window_days,
                 anchor_date=anchor_date,
+                anchor_mode=anchor_mode,
             ),
         )
 
@@ -974,6 +2150,9 @@ def _fetch_scd_rolling_bundle_for_ticker(
     window_days: int = 10,
     force_refresh: bool = False,
     anchor_date: Optional[Any] = None,
+    anchor_mode: str = "asof",
+    requested_date_strings: Optional[list[str] | set[str] | tuple[str, ...]] = None,
+    historical_buffer_days: int = 435,
 ) -> Dict[str, Any]:
     """
     Fetch rolling payload and hover/context dataframe through one technical pass.
@@ -990,8 +2169,13 @@ def _fetch_scd_rolling_bundle_for_ticker(
     if 'scd_payload_cache' not in st.session_state:
         st.session_state.scd_payload_cache = {}
 
+    if 'scd_payload_cache_meta' not in st.session_state:
+        st.session_state.scd_payload_cache_meta = {}
+
     if 'scd_hover_ohlcv_cache' not in st.session_state:
         st.session_state.scd_hover_ohlcv_cache = {}
+
+    stats = _get_scd_cache_stats()
 
     stats = _get_scd_cache_stats()
 
@@ -1000,12 +2184,16 @@ def _fetch_scd_rolling_bundle_for_ticker(
         window_days=window_days,
         payload_kind="rolling_payload",
         anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
     hover_cache_key = _get_scd_cache_key(
         ticker=ticker,
         window_days=window_days,
         payload_kind="hover_ohlcv",
         anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=historical_buffer_days,
     )
 
     rolling_hit = (
@@ -1023,11 +2211,41 @@ def _fetch_scd_rolling_bundle_for_ticker(
 
         rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
         cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
+        cache_meta = st.session_state.scd_payload_cache_meta.get(
+            rolling_cache_key,
+            {},
+        )
 
         return {
             "rolling_payload": rolling_payload,
             "indicator_context_df": cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df,
             "source": "cache",
+            "cache_as_of": cache_meta.get("as_of"),
+            "cache_as_of_source": cache_meta.get("source"),
+        }
+
+    coverage_entry = None
+    if not force_refresh:
+        coverage_entry = _find_scd_coverage_cache_entry(
+            ticker=ticker,
+            anchor_mode=anchor_mode,
+            requested_date_strings=requested_date_strings,
+        )
+
+    if coverage_entry is not None:
+        stats["coverage_hits"] += 1
+        indicator_context_df = coverage_entry.get("indicator_context_df")
+
+        return {
+            "rolling_payload": coverage_entry.get("rolling_payload"),
+            "indicator_context_df": (
+                indicator_context_df.copy()
+                if isinstance(indicator_context_df, pd.DataFrame)
+                else indicator_context_df
+            ),
+            "source": "coverage_cache",
+            "cache_as_of": coverage_entry.get("created_at"),
+            "cache_as_of_source": coverage_entry.get("source"),
         }
 
     if rolling_hit:
@@ -1035,17 +2253,24 @@ def _fetch_scd_rolling_bundle_for_ticker(
         # fill the missing hover/context dataframe through the legacy fallback.
         stats["rolling_hits"] += 1
         rolling_payload = st.session_state.scd_payload_cache[rolling_cache_key]
+        cache_meta = st.session_state.scd_payload_cache_meta.get(
+            rolling_cache_key,
+            {},
+        )
         hover_df = _fetch_scd_hover_ohlcv_df_for_ticker(
             ticker=ticker,
             window_days=window_days,
             force_refresh=False,
             anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
         )
 
         return {
             "rolling_payload": rolling_payload,
             "indicator_context_df": hover_df,
             "source": "partial_cache_hover_fallback",
+            "cache_as_of": cache_meta.get("as_of"),
+            "cache_as_of_source": cache_meta.get("source"),
         }
 
     stats["rolling_misses"] += 1
@@ -1063,6 +2288,8 @@ def _fetch_scd_rolling_bundle_for_ticker(
         ohlcv_request=_get_scd_ohlcv_request(
             window_days=window_days,
             anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
+            historical_buffer_days=historical_buffer_days,
         ),
     )
 
@@ -1075,9 +2302,15 @@ def _fetch_scd_rolling_bundle_for_ticker(
 
     rolling_payload = bundle.get("rolling_payload")
     indicator_context_df = bundle.get("indicator_context_df")
+    bundled_as_of = datetime.now().isoformat(timespec="seconds")
+    bundled_source = "force_refresh" if force_refresh else "bundled"
 
     if isinstance(rolling_payload, dict) and rolling_payload:
         st.session_state.scd_payload_cache[rolling_cache_key] = rolling_payload
+        st.session_state.scd_payload_cache_meta[rolling_cache_key] = {
+            "as_of": bundled_as_of,
+            "source": bundled_source,
+        }
 
     if isinstance(indicator_context_df, pd.DataFrame) and not indicator_context_df.empty:
         st.session_state.scd_hover_ohlcv_cache[hover_cache_key] = indicator_context_df.copy()
@@ -1085,10 +2318,22 @@ def _fetch_scd_rolling_bundle_for_ticker(
         cached_df = st.session_state.scd_hover_ohlcv_cache[hover_cache_key]
         indicator_context_df = cached_df.copy() if isinstance(cached_df, pd.DataFrame) else cached_df
 
+    _store_scd_coverage_cache_entry(
+        ticker=ticker,
+        anchor_mode=anchor_mode,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        rolling_payload=rolling_payload,
+        indicator_context_df=indicator_context_df,
+        source=bundled_source,
+    )
+
     return {
         "rolling_payload": rolling_payload,
         "indicator_context_df": indicator_context_df,
         "source": "bundled",
+        "cache_as_of": bundled_as_of,
+        "cache_as_of_source": bundled_source,
     }
 
 
@@ -1263,6 +2508,1872 @@ def _extract_latest_scd_cell(
     }
 
 
+def _extract_scd_cell_for_date(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: str,
+    rolling_payload: Dict[str, Any],
+    adapter_lookup: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """
+    Extract one existing Rolling Heatmap cell for a specific row_key/date.
+
+    This is used by the SCD Single Indicator time-series matrix. It preserves
+    source value / signal / score / hover / extras and adapter customdata.
+    """
+    ticker = str(ticker).strip().upper()
+    row_key = str(row_key).strip()
+    date_key = str(date_key).strip()
+    adapter_lookup = adapter_lookup or {}
+
+    short_term = rolling_payload.get("short_term")
+    data = short_term.get("data", {}) if isinstance(short_term, dict) else {}
+
+    if row_key == "__PRICE__":
+        adapter_entry = adapter_lookup.get("__PRICE__", {}).get(date_key, {})
+        adapter_cd = adapter_entry.get("customdata")
+
+        if isinstance(adapter_cd, dict) and adapter_cd:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": adapter_cd.get("raw_value"),
+                "signal": "",
+                "score": adapter_entry.get("z"),
+                "hover": None,
+                "status": "ok",
+                "display_text": adapter_entry.get("text", ""),
+                "adapter_customdata": dict(adapter_cd),
+            }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No Price row available for {ticker} at {date_key}.",
+            "status": "missing_cell",
+            "display_text": "missing_cell",
+        }
+
+    date_cells = data.get(date_key, {})
+    if not isinstance(date_cells, dict):
+        date_cells = {}
+
+    source_cell = date_cells.get(row_key)
+    if not isinstance(source_cell, dict):
+        return {
+            "ticker": ticker,
+            "row_key": row_key,
+            "date": date_key,
+            "value": None,
+            "signal": None,
+            "score": None,
+            "hover": f"No cell available for {row_key} on {ticker} at {date_key}.",
+            "status": "missing_cell",
+            "display_text": "missing_cell",
+        }
+
+    adapter_entry = adapter_lookup.get(row_key, {}).get(date_key, {})
+    adapter_cd = adapter_entry.get("customdata")
+
+    cell = {
+        "ticker": ticker,
+        "row_key": row_key,
+        "date": date_key,
+        "value": source_cell.get("value"),
+        "signal": source_cell.get("signal"),
+        "score": source_cell.get("score"),
+        "hover": source_cell.get("hover"),
+        "status": "ok",
+        "display_text": adapter_entry.get("text", ""),
+    }
+
+    if "extras" in source_cell:
+        cell["extras"] = source_cell.get("extras")
+
+    if isinstance(adapter_cd, dict) and adapter_cd:
+        cell["adapter_customdata"] = dict(adapter_cd)
+
+    return cell
+
+
+def _build_scd_price_cell_from_context_df(
+    *,
+    ticker: str,
+    date_key: str,
+    context_df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    """
+    Build a display-only Price cell for the SCD Single Indicator hover.
+
+    This uses the already-bundled indicator/OHLCV context dataframe returned
+    with the SCD rolling bundle. It does not fetch data, score data, persist
+    data, or introduce new technical semantics.
+    """
+    ticker = str(ticker).strip().upper()
+    date_key = str(date_key).strip()
+
+    if not isinstance(context_df, pd.DataFrame) or context_df.empty:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No context dataframe available for {ticker} at {date_key}.",
+            "status": "missing_context_df",
+            "display_text": "missing_context_df",
+        }
+
+    price_col = "Adj Close" if "Adj Close" in context_df.columns else "Close"
+    if price_col not in context_df.columns:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"No price column available for {ticker} at {date_key}.",
+            "status": "missing_price_column",
+            "display_text": "missing_price_column",
+        }
+
+    try:
+        df = context_df.copy()
+        df.index = pd.to_datetime(df.index)
+        df.index = df.index.tz_localize(None) if df.index.tz is not None else df.index
+        df.index = df.index.normalize()
+        df = df.sort_index()
+
+        target_date = pd.Timestamp(date_key).normalize()
+
+        matching_rows = df.loc[df.index == target_date]
+        if matching_rows.empty:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": None,
+                "signal": "",
+                "score": None,
+                "hover": f"No price row available for {ticker} at {date_key}.",
+                "status": "missing_price_date",
+                "display_text": "missing_price_date",
+            }
+
+        current_price = pd.to_numeric(
+            matching_rows[price_col],
+            errors="coerce",
+        ).dropna()
+
+        if current_price.empty:
+            return {
+                "ticker": ticker,
+                "row_key": "__PRICE__",
+                "date": date_key,
+                "value": None,
+                "signal": "",
+                "score": None,
+                "hover": f"Price value is missing for {ticker} at {date_key}.",
+                "status": "missing_price_value",
+                "display_text": "missing_price_value",
+            }
+
+        price_value = float(current_price.iloc[-1])
+
+        prior_rows = df.loc[df.index < target_date]
+        prior_price = None
+        if not prior_rows.empty:
+            prior_series = pd.to_numeric(
+                prior_rows[price_col],
+                errors="coerce",
+            ).dropna()
+            if not prior_series.empty:
+                prior_price = float(prior_series.iloc[-1])
+
+        delta_abs = None
+        delta_pct = None
+        if prior_price is not None:
+            delta_abs = price_value - prior_price
+            if prior_price != 0:
+                delta_pct = (delta_abs / prior_price) * 100.0
+
+        if delta_abs is None:
+            trend = ""
+            trend_line = ""
+            delta_abs_fmt = "—"
+            delta_pct_suffix = ""
+        else:
+            if delta_abs > 0:
+                trend = "Rising"
+            elif delta_abs < 0:
+                trend = "Falling"
+            else:
+                trend = "Flat"
+
+            trend_line = f"Trend: {trend}<br>"
+            delta_abs_fmt = f"{delta_abs:+.2f}"
+            delta_pct_suffix = (
+                f" ({delta_pct:+.1f}%)"
+                if delta_pct is not None
+                else ""
+            )
+
+        formatted_value = f"{price_value:.2f}"
+
+        adapter_customdata = {
+            "indicator_key": "__PRICE__",
+            "display_name": "Price",
+            "date": date_key,
+            "raw_value": price_value,
+            "formatted_value": formatted_value,
+            "score": None,
+            "score_label": "",
+            "delta_abs": delta_abs,
+            "delta_pct": delta_pct,
+            "trend": trend,
+            "rule_expr": "",
+            "rule_notes": "",
+            "rule_text": "",
+            "definition": "",
+            "how_to_read": "",
+            "delta_abs_fmt": delta_abs_fmt,
+            "delta_pct_suffix": delta_pct_suffix,
+            "trend_line": trend_line,
+            "signal_line": "",
+            "rule_block": "",
+            "notes_block": "",
+            "definition_block": "",
+            "how_to_read_block": "",
+            "volume_block": "",
+            "volume_vs_avg_block": "",
+            "band_context_block": "",
+            "ma_context_block": "",
+            "macd_context_block": "",
+            "adx_context_block": "",
+            "stoch_context_block": "",
+            "dpo_context_block": "",
+            "bullbear_context_block": "",
+            "meta": {},
+        }
+
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": price_value,
+            "signal": "",
+            "score": None,
+            "hover": None,
+            "status": "ok",
+            "display_text": formatted_value,
+            "adapter_customdata": adapter_customdata,
+        }
+
+    except Exception as e:
+        return {
+            "ticker": ticker,
+            "row_key": "__PRICE__",
+            "date": date_key,
+            "value": None,
+            "signal": "",
+            "score": None,
+            "hover": f"Price context error for {ticker} at {date_key}: {e}",
+            "status": "price_context_error",
+            "display_text": "price_context_error",
+        }
+
+
+# SCD-scaffolding for 'refresh "today"'
+def _build_scd_single_indicator_cell_from_bundle(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: str,
+    rolling_payload: Dict[str, Any],
+    adapter_lookup: Dict[tuple[str, str], Dict[str, Any]],
+    context_df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    """
+    Build one SCD Single Indicator date/ticker cell from an existing bundle.
+
+    This helper centralizes the same cell construction used by the normal
+    Single Indicator matrix build:
+    - extract the indicator cell from the rolling payload / adapter lookup
+    - build the attached Price cell from the context dataframe
+    - attach Price context only when available
+
+    It does not fetch data, compute indicators, score signals, rank tickers,
+    aggregate values, persist data, or reinterpret semantics.
+    """
+    cell = _extract_scd_cell_for_date(
+        ticker=ticker,
+        row_key=row_key,
+        date_key=date_key,
+        rolling_payload=rolling_payload,
+        adapter_lookup=adapter_lookup,
+    )
+
+    price_cell = _build_scd_price_cell_from_context_df(
+        ticker=ticker,
+        date_key=date_key,
+        context_df=context_df,
+    )
+    if price_cell.get("status") == "ok":
+        cell["price_cell"] = price_cell
+
+    return cell
+
+
+def _get_scd_current_live_date_key() -> Optional[str]:
+    """
+    Return today's date key only when today is a US trading day.
+
+    This helper is intentionally narrow:
+    - weekend / holiday returns None
+    - no market-hours inference is attempted
+    - no acquisition, scoring, persistence, or semantic behavior changes
+    """
+    today = datetime.now().date()
+    today_dt = datetime.combine(today, datetime.min.time())
+
+    if not is_us_trading_day(today_dt):
+        return None
+
+    return today.strftime("%Y-%m-%d")
+
+
+def _format_scd_live_as_of_label(as_of: Any) -> Optional[str]:
+    """
+    Return a compact UI label for live/current-day SCD timestamps.
+
+    Example:
+        (a/o: 6/18 @ 12:15 PM)
+
+    This is display metadata only. It does not imply market-data exchange
+    timestamp precision.
+    """
+    if as_of is None:
+        return None
+
+    try:
+        ts = pd.Timestamp(as_of)
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+
+        dt = ts.to_pydatetime()
+        time_label = dt.strftime("%I:%M %p").lstrip("0")
+        return f"(a/o: {dt.month}/{dt.day} @ {time_label})"
+    except Exception:
+        return None
+
+
+def _get_scd_live_as_of_meta(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return stored live/current-day as-of metadata for a matrix/date.
+
+    This reads matrix/session display metadata only. It does not fetch data,
+    compute indicators, score signals, persist data, or reinterpret semantics.
+    """
+    if not isinstance(matrix, dict):
+        return None
+
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+    if not normalized_date:
+        return None
+
+    live_as_of = matrix.get("live_as_of", {})
+    if not isinstance(live_as_of, dict):
+        return None
+
+    meta = live_as_of.get(normalized_date)
+    if not isinstance(meta, dict):
+        return None
+
+    return dict(meta)
+
+
+def _get_scd_live_as_of_caption(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+) -> Optional[str]:
+    """
+    Return a compact caption for live/current-day SCD matrix data.
+    """
+    meta = _get_scd_live_as_of_meta(matrix=matrix, date_key=date_key)
+    if not meta:
+        return None
+
+    label = meta.get("label") or _format_scd_live_as_of_label(meta.get("as_of"))
+    if not label:
+        return None
+
+    return f"{label}"
+
+
+def _mark_scd_live_cells_as_of(
+    *,
+    matrix: Dict[str, Any],
+    date_key: Any,
+    as_of: Any,
+    source: str,
+) -> None:
+    """
+    Mark live/current-day cells in an existing SCD matrix with as-of metadata.
+
+    This mutates only display/session metadata on already-built matrix cells.
+    It does not fetch data, compute indicators, score signals, persist data,
+    rank tickers, aggregate values, or reinterpret semantics.
+    """
+    if not isinstance(matrix, dict):
+        return
+
+    normalized_date = _normalize_scd_cache_date_value(date_key)
+    live_date_key = _get_scd_current_live_date_key()
+
+    if not normalized_date or normalized_date != live_date_key:
+        return
+
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is not None:
+        as_of_ts = as_of_ts.tz_localize(None)
+
+    as_of_iso = as_of_ts.isoformat(timespec="seconds")
+    label = _format_scd_live_as_of_label(as_of_ts)
+
+    meta = {
+        "date": normalized_date,
+        "as_of": as_of_iso,
+        "label": label,
+        "source": str(source),
+    }
+
+    matrix.setdefault("live_as_of", {})
+    matrix["live_as_of"][normalized_date] = dict(meta)
+
+    matrix.setdefault("profile", {})
+    matrix["profile"].setdefault("live_as_of", {})
+    matrix["profile"]["live_as_of"][normalized_date] = dict(meta)
+
+    view = str(matrix.get("view", "")).strip()
+
+    if view == "single_indicator_time_series":
+        cells_by_ticker = matrix.get("cells", {}).get(normalized_date, {})
+        if not isinstance(cells_by_ticker, dict):
+            return
+
+        for cell in cells_by_ticker.values():
+            if not isinstance(cell, dict):
+                continue
+            if _normalize_scd_cache_date_value(cell.get("date")) != normalized_date:
+                continue
+
+            cell["date_status"] = "live"
+            cell["live_as_of"] = as_of_iso
+            cell["live_as_of_label"] = label
+
+            price_cell = cell.get("price_cell")
+            if isinstance(price_cell, dict):
+                price_cell["date_status"] = "live"
+                price_cell["live_as_of"] = as_of_iso
+                price_cell["live_as_of_label"] = label
+
+        return
+
+    for cells_by_ticker in matrix.get("cells", {}).values():
+        if not isinstance(cells_by_ticker, dict):
+            continue
+
+        for cell in cells_by_ticker.values():
+            if not isinstance(cell, dict):
+                continue
+            if _normalize_scd_cache_date_value(cell.get("date")) != normalized_date:
+                continue
+
+            cell["date_status"] = "live"
+            cell["live_as_of"] = as_of_iso
+            cell["live_as_of_label"] = label
+
+
+def _normalize_scd_compare_value(value: Any) -> Any:
+    """
+    Normalize a cell field for D3-C tail-buffer comparison.
+
+    This is diagnostic-only. It does not change cells, scoring, rendering, or
+    persistence behavior.
+    """
+    if value is None:
+        return None
+
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(value, (int, float)):
+        return round(float(value), 8)
+
+    return value
+
+
+def _compare_scd_tail_cells(
+    *,
+    reference_cell: Dict[str, Any],
+    candidate_cell: Dict[str, Any],
+    value_tolerance: float = 1e-6,
+) -> Dict[str, Any]:
+    """
+    Compare one candidate reduced-tail cell against the 435-day reference cell.
+
+    Equivalence is intentionally strict for production gating:
+    - score must match
+    - signal must match
+    - status must match
+    - display_text must match
+    - numeric value must match within tolerance
+    """
+    reference_value = _normalize_scd_compare_value(reference_cell.get("value"))
+    candidate_value = _normalize_scd_compare_value(candidate_cell.get("value"))
+
+    if isinstance(reference_value, float) and isinstance(candidate_value, float):
+        value_delta = abs(reference_value - candidate_value)
+        value_match = value_delta <= float(value_tolerance)
+    else:
+        value_delta = None
+        value_match = reference_value == candidate_value
+
+    checks = {
+        "status_match": reference_cell.get("status") == candidate_cell.get("status"),
+        "score_match": reference_cell.get("score") == candidate_cell.get("score"),
+        "signal_match": reference_cell.get("signal") == candidate_cell.get("signal"),
+        "display_text_match": reference_cell.get("display_text") == candidate_cell.get("display_text"),
+        "value_match": value_match,
+    }
+
+    return {
+        "safe_for_candidate": all(checks.values()),
+        "reference_value": reference_value,
+        "candidate_value": candidate_value,
+        "value_delta": value_delta,
+        "reference_score": reference_cell.get("score"),
+        "candidate_score": candidate_cell.get("score"),
+        "reference_signal": reference_cell.get("signal"),
+        "candidate_signal": candidate_cell.get("signal"),
+        "reference_status": reference_cell.get("status"),
+        "candidate_status": candidate_cell.get("status"),
+        **checks,
+    }
+
+
+def _build_scd_tail_diagnostic_cell(
+    *,
+    ticker: str,
+    row_key: str,
+    date_key: str,
+    window_days: int,
+    anchor_date: Any,
+    anchor_mode: str,
+    historical_buffer_days: int,
+    scoring_indicators: Optional[list[str]] = None,
+    compute_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Build one SCD cell through the existing technical/rule-engine path using
+    a specified Scenario B historical buffer.
+
+    Diagnostic-only:
+    - no session cache writes
+    - no result-cell writes
+    - no scoring changes
+    - no formula changes
+    - no direct yfinance calls from SCD
+    - no persistence behavior
+    """
+    started_at = time.perf_counter()
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        config=compute_config,
+        indicators=scoring_indicators,
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
+            historical_buffer_days=historical_buffer_days,
+        ),
+    )
+
+    rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+    context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        raise ValueError(
+            f"No rolling payload returned for {ticker} using "
+            f"historical_buffer_days={historical_buffer_days}."
+        )
+
+    adapter_lookup = _build_scd_adapter_lookup(
+        rolling_payload=rolling_payload,
+        row_keys=[row_key],
+        ohlcv_df=context_df,
+    )
+
+    cell = _build_scd_single_indicator_cell_from_bundle(
+        ticker=ticker,
+        row_key=row_key,
+        date_key=date_key,
+        rolling_payload=rolling_payload,
+        adapter_lookup=adapter_lookup,
+        context_df=context_df,
+    )
+
+    return {
+        "cell": cell,
+        "seconds": round(time.perf_counter() - started_at, 3),
+        "scoring_indicators": list(scoring_indicators) if scoring_indicators else None,
+        "compute_config_keys": (
+            sorted(compute_config.keys())
+            if isinstance(compute_config, dict)
+            else None
+        ),
+        "context_rows": len(context_df) if isinstance(context_df, pd.DataFrame) else None,
+        "context_first_date": (
+            pd.Timestamp(context_df.index.min()).strftime("%Y-%m-%d")
+            if isinstance(context_df, pd.DataFrame) and not context_df.empty
+            else None
+        ),
+        "context_last_date": (
+            pd.Timestamp(context_df.index.max()).strftime("%Y-%m-%d")
+            if isinstance(context_df, pd.DataFrame) and not context_df.empty
+            else None
+        ),
+    }
+
+
+def _run_scd_tail_buffer_equivalence_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+    candidate_buffers: list[int],
+) -> Dict[str, Any]:
+    """
+    Compare reduced Scenario B buffers against the 435-day reference for one
+    visible Single Indicator matrix date.
+
+    This produces evidence only. It does not enable reduced-tail production
+    refresh.
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Tail-buffer diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Tail-buffer diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    candidate_buffers = [
+        int(buffer)
+        for buffer in candidate_buffers
+        if int(buffer) > 0 and int(buffer) != 435
+    ]
+
+    if not candidate_buffers:
+        raise ValueError("Select at least one candidate buffer other than 435.")
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+    )
+
+    reference_cell = reference["cell"]
+    candidates = []
+
+    for buffer_days in candidate_buffers:
+        candidate_record = {
+            "ticker": normalized_ticker,
+            "row_key": row_key,
+            "date": selected_date_key,
+            "reference_buffer_days": 435,
+            "candidate_buffer_days": int(buffer_days),
+            "candidate_seconds": None,
+            "candidate_context_rows": None,
+            "candidate_context_first_date": None,
+            "candidate_context_last_date": None,
+            "safe_for_candidate": False,
+            "error": None,
+        }
+
+        try:
+            candidate = _build_scd_tail_diagnostic_cell(
+                ticker=normalized_ticker,
+                row_key=row_key,
+                date_key=selected_date_key,
+                window_days=window_days,
+                anchor_date=anchor_date,
+                anchor_mode=anchor_mode,
+                historical_buffer_days=int(buffer_days),
+            )
+
+            comparison = _compare_scd_tail_cells(
+                reference_cell=reference_cell,
+                candidate_cell=candidate["cell"],
+            )
+
+            candidate_record.update(comparison)
+            candidate_record.update(
+                {
+                    "candidate_seconds": candidate["seconds"],
+                    "candidate_context_rows": candidate["context_rows"],
+                    "candidate_context_first_date": candidate["context_first_date"],
+                    "candidate_context_last_date": candidate["context_last_date"],
+                }
+            )
+
+        except Exception as e:
+            candidate_record["error"] = str(e)
+
+        candidates.append(candidate_record)
+
+    report = {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "date": selected_date_key,
+        "reference_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "reference_context_rows": reference["context_rows"],
+        "reference_context_first_date": reference["context_first_date"],
+        "reference_context_last_date": reference["context_last_date"],
+        "candidate_buffers": candidate_buffers,
+        "candidates": candidates,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    return report
+
+
+def _get_scd_engine_indicator_for_row_key(row_key: str) -> Optional[str]:
+    """
+    Resolve a canonical SCD / Rolling Heatmap row_key to its rule-engine family.
+
+    Diagnostic-only. This reads the existing technical calculator metadata and
+    falls back to ROW_CLASSIFICATION for display/catalog-backed family labels.
+    """
+    normalized_row_key = str(row_key).strip()
+    if not normalized_row_key:
+        return None
+
+    try:
+        optionc_meta = st.session_state.technical_calculator._get_optionc_meta()
+        for meta in optionc_meta:
+            if str(meta.get("display_key", "")).strip() == normalized_row_key:
+                engine_indicator = str(meta.get("engine_indicator", "")).strip()
+                return engine_indicator or None
+    except Exception:
+        pass
+
+    fallback_family = ROW_CLASSIFICATION.get(normalized_row_key, {}).get("family")
+    return str(fallback_family).strip() if fallback_family else None
+
+
+def _run_scd_selected_family_scoring_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+) -> Dict[str, Any]:
+    """
+    Compare the full current scoring path against selected-family scoring for
+    one visible Single Indicator matrix cell.
+
+    This diagnostic isolates scoring breadth only:
+    - same 435-day Scenario B buffer
+    - same numeric computation path
+    - same existing rule-engine / rolling payload path
+    - candidate passes indicators=[selected_engine_indicator]
+    - no production refresh behavior changes
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Selected-family scoring diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    engine_indicator = _get_scd_engine_indicator_for_row_key(row_key)
+    if not engine_indicator:
+        raise ValueError(f"Could not resolve engine indicator for row_key={row_key!r}.")
+
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=None,
+    )
+
+    candidate = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+    )
+
+    comparison = _compare_scd_tail_cells(
+        reference_cell=reference["cell"],
+        candidate_cell=candidate["cell"],
+    )
+
+    return {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "engine_indicator": engine_indicator,
+        "date": selected_date_key,
+        "reference_mode": "full_current_scoring",
+        "candidate_mode": "selected_family_scoring",
+        "reference_buffer_days": 435,
+        "candidate_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "candidate_seconds": candidate["seconds"],
+        "seconds_delta": round(reference["seconds"] - candidate["seconds"], 3),
+        "reference_context_rows": reference["context_rows"],
+        "candidate_context_rows": candidate["context_rows"],
+        "reference_scoring_indicators": reference["scoring_indicators"],
+        "candidate_scoring_indicators": candidate["scoring_indicators"],
+        **comparison,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _get_scd_optionc_meta_for_row_key(row_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Return the technical-calculator optionc_meta record for a canonical row_key.
+
+    Diagnostic-only. This keeps selected-row diagnostics anchored to the same
+    metadata source used by the existing rolling payload path.
+    """
+    normalized_row_key = str(row_key).strip()
+    if not normalized_row_key:
+        return None
+
+    try:
+        optionc_meta = st.session_state.technical_calculator._get_optionc_meta()
+        for meta in optionc_meta:
+            if str(meta.get("display_key", "")).strip() == normalized_row_key:
+                return dict(meta)
+    except Exception:
+        return None
+
+    return None
+
+
+def _parse_scd_single_int_param_key(param_key: Any) -> int:
+    """Parse a one-part numeric param_key such as '14' or 14."""
+    raw = str(param_key).strip()
+    if "_" in raw:
+        raise ValueError(f"Expected a single integer param_key, got {raw!r}.")
+    return int(raw)
+
+
+def _build_scd_moving_average_compute_config(
+    *,
+    engine_indicator: str,
+    length: int,
+) -> Dict[str, Any]:
+    """
+    Build a diagnostic selected-row compute config for moving-average families.
+
+    D3-D5 target families:
+    - SMA: parameterized slope aliases, e.g. SMA_100_slope
+    - EMA: parameterized slope aliases, e.g. EMA_20_slope
+    - HMA: rulebook uses unparameterized HMA_slope, anchored to HMA_21
+    - VWMA: rulebook uses unparameterized VWMA_slope, anchored to VWMA_20
+
+    This helper intentionally preserves the existing preprocessor slope shape.
+    It does not introduce formulas, scoring, persistence, or production behavior.
+    """
+    family = str(engine_indicator).strip().upper()
+    length = int(length)
+
+    if family not in {"SMA", "EMA", "HMA", "VWMA"}:
+        raise ValueError(f"Unsupported moving-average family: {engine_indicator!r}.")
+
+    base_lengths = [length]
+    atrp_lengths = [length]
+
+    # HMA rules use HMA_slope, which the preprocessor resolves from hma_anchor.
+    # The broad reference path anchors HMA_slope to HMA_21. Include HMA_21
+    # whenever testing a non-21 HMA row so the diagnostic candidate can match
+    # the broad path's alias behavior.
+    if family == "HMA" and 21 not in base_lengths:
+        base_lengths.append(21)
+
+    # HMA_55 rulebook neutral-zone logic references ATRP_50, not ATRP_55.
+    # Keep this explicit until a rulebook-expression dependency resolver exists.
+    if family == "HMA" and length == 55 and 50 not in atrp_lengths:
+        atrp_lengths.append(50)
+
+    # VWMA rules use VWMA_slope, which the preprocessor resolves from vwma_anchor.
+    # The broad reference path anchors VWMA_slope to VWMA_20. Include VWMA_20
+    # whenever testing a non-20 VWMA row so the diagnostic candidate can match
+    # the broad path's alias behavior.
+    if family == "VWMA" and 20 not in base_lengths:
+        base_lengths.append(20)
+
+    base_lengths = sorted(set(base_lengths))
+    atrp_lengths = sorted(set(atrp_lengths))
+
+    return {
+        family: base_lengths,
+        "ATR": atrp_lengths,
+        "ATRP": atrp_lengths,
+        "SLOPE": {
+            "window": 14,
+            "method": "linreg",
+            "emit_aliases": True,
+            "vwma_anchor": 20,
+            "hma_anchor": 21,
+            "families": [family],
+            "canonical_pattern": "{base_col}_slope__{method}_{window}",
+            "compatibility_aliases": [
+                "SMA_<len>_slope",
+                "EMA_<len>_slope",
+                "VWMA_slope",
+                "HMA_slope",
+            ],
+        },
+    }
+
+
+def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
+    """
+    Build a minimal diagnostic compute config for one selected SCD row.
+
+    D3-D2 started with RSI and SMA:
+    - RSI_<len>: compute only RSI_<len>
+    - SMA_<len>: compute SMA_<len>, ATR/ATRP_<len>, and SMA slope aliases
+
+    D3-D4 expanded Tier 1 direct-family rows:
+    - ROC_<len>
+    - WILLR_<len> / Williams_R
+    - CCI_<len>
+    - MFI_<len>
+    - CMF_<len>
+
+    D3-D5 expands moving-average rows:
+    - SMA_<len>
+    - EMA_<len>
+    - HMA_<len>
+    - VWMA_<len>
+
+    This is diagnostic-only. It does not alter production refresh behavior.
+    """
+    meta = _get_scd_optionc_meta_for_row_key(row_key)
+    if not meta:
+        raise ValueError(f"No optionc_meta record found for row_key={row_key!r}.")
+
+    engine_indicator = str(meta.get("engine_indicator", "")).strip()
+    param_key = str(meta.get("param_key", "")).strip()
+
+    if engine_indicator == "RSI":
+        length = _parse_scd_single_int_param_key(param_key)
+        return {
+            "RSI": [length],
+        }
+
+    if engine_indicator in {"SMA", "EMA", "HMA", "VWMA"}:
+        length = _parse_scd_single_int_param_key(param_key)
+        return _build_scd_moving_average_compute_config(
+            engine_indicator=engine_indicator,
+            length=length,
+        )
+
+    direct_single_length_config_keys = {
+        "ROC": "ROC",
+        "Williams_R": "WILLR",
+        "CCI": "CCI",
+        "MFI": "MFI",
+        "CMF": "CMF",
+    }
+
+    if engine_indicator in direct_single_length_config_keys:
+        length = _parse_scd_single_int_param_key(param_key)
+        config_key = direct_single_length_config_keys[engine_indicator]
+        return {
+            config_key: [length],
+        }
+
+    raise ValueError(
+        "D3-D5 selected-row numeric config diagnostic currently supports "
+        "RSI, SMA, EMA, HMA, VWMA, ROC, Williams_R, CCI, MFI, and CMF rows only. "
+        f"Got row_key={row_key!r}, engine_indicator={engine_indicator!r}."
+    )
+
+
+def _summarize_scd_compute_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a compact diagnostic summary for a compute_config dict."""
+    if not isinstance(config, dict):
+        return {}
+
+    summary: Dict[str, Any] = {}
+    for key, value in config.items():
+        if key == "SLOPE" and isinstance(value, dict):
+            summary[key] = {
+                "window": value.get("window"),
+                "method": value.get("method"),
+                "emit_aliases": value.get("emit_aliases"),
+                "families": value.get("families"),
+            }
+        else:
+            summary[key] = value
+
+    return summary
+
+
+def _fetch_scd_selected_row_refresh_bundle_for_ticker(
+    *,
+    ticker: str,
+    row_key: str,
+    window_days: int,
+    anchor_date: Any,
+    anchor_mode: str,
+    requested_date_strings: list[str],
+) -> Dict[str, Any]:
+    """
+    Fetch a selected-row SCD bundle for Single Indicator live-date refresh.
+
+    Production use is intentionally narrow:
+    - Single Indicator → Refresh today's cells only
+    - supported selected-row families only
+    - existing technical calculator / rule-engine path only
+    - no formula, scoring, persistence, chart, heatmap, export, or DB changes
+
+    Unsupported families raise and are handled by the caller's fallback path.
+    """
+    normalized_ticker = str(ticker).strip().upper()
+    normalized_row_key = str(row_key).strip()
+
+    if not normalized_ticker:
+        raise ValueError("Ticker is required for selected-row refresh.")
+
+    if not normalized_row_key:
+        raise ValueError("row_key is required for selected-row refresh.")
+
+    engine_indicator = _get_scd_engine_indicator_for_row_key(normalized_row_key)
+    if not engine_indicator:
+        raise ValueError(
+            f"Could not resolve engine indicator for row_key={normalized_row_key!r}."
+        )
+
+    compute_config = _build_scd_selected_row_compute_config(normalized_row_key)
+
+    bundle = st.session_state.technical_calculator.calculate_rule_engine_signals_optionc(
+        ticker=normalized_ticker,
+        feature_scope="heatmap",
+        save_to_db=False,
+        config=compute_config,
+        indicators=[engine_indicator],
+        use_meta_coverage=True,
+        return_type="rolling_with_context",
+        ohlcv_request=_get_scd_ohlcv_request(
+            window_days=window_days,
+            anchor_date=anchor_date,
+            anchor_mode=anchor_mode,
+            historical_buffer_days=435,
+        ),
+    )
+
+    if not isinstance(bundle, dict):
+        raise ValueError("Selected-row refresh did not return a valid bundle.")
+
+    rolling_payload = bundle.get("rolling_payload")
+    if not isinstance(rolling_payload, dict) or not rolling_payload:
+        raise ValueError("Selected-row refresh returned no rolling payload.")
+
+    available_dates = _extract_scd_dates_from_rolling_payload(rolling_payload)
+    requested_dates = {
+        normalized
+        for normalized in (
+            _normalize_scd_cache_date_value(value)
+            for value in requested_date_strings
+        )
+        if normalized
+    }
+
+    missing_dates = sorted(requested_dates - available_dates)
+    if missing_dates:
+        raise ValueError(
+            "Selected-row refresh payload is missing requested date(s): "
+            + ", ".join(missing_dates)
+        )
+
+    selected_bundle = dict(bundle)
+    selected_bundle["source"] = "selected_row_live_refresh"
+    selected_bundle["selected_row_engine_indicator"] = engine_indicator
+    selected_bundle["selected_row_compute_config"] = _summarize_scd_compute_config(
+        compute_config
+    )
+    selected_bundle["selected_row_compute_config_keys"] = sorted(compute_config.keys())
+
+    return selected_bundle
+
+
+def _run_scd_selected_row_numeric_config_diagnostic(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    diagnostic_date_key: Any,
+) -> Dict[str, Any]:
+    """
+    Compare selected-family scoring with broad numeric computation against
+    selected-family scoring with selected-row numeric computation.
+
+    This isolates D3-D2's numeric-config question:
+    - same 435-day Scenario B buffer
+    - same selected-family scoring
+    - reference uses current broad numeric config path
+    - candidate uses minimal selected-row compute_config
+    """
+    started_at = time.perf_counter()
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        raise ValueError("Selected-row numeric config diagnostic requires a Single Indicator matrix.")
+
+    selected_date_key = _normalize_scd_cache_date_value(diagnostic_date_key)
+    if not selected_date_key:
+        raise ValueError("Select a valid diagnostic date from the current matrix.")
+
+    matrix_dates = [
+        _normalize_scd_cache_date_value(date_key)
+        for date_key in matrix.get("dates", [])
+    ]
+    matrix_dates = [date_key for date_key in matrix_dates if date_key]
+
+    if selected_date_key not in matrix_dates:
+        raise ValueError(
+            f"Diagnostic date ({selected_date_key}) is not present "
+            "in the current Single Indicator matrix."
+        )
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    normalized_ticker = str(ticker).strip().upper()
+    if normalized_ticker not in tickers:
+        raise ValueError(f"{normalized_ticker} is not in the current Single Indicator matrix.")
+
+    row_key = str(matrix.get("row_key", "")).strip()
+    engine_indicator = _get_scd_engine_indicator_for_row_key(row_key)
+    if not engine_indicator:
+        raise ValueError(f"Could not resolve engine indicator for row_key={row_key!r}.")
+
+    selected_compute_config = _build_scd_selected_row_compute_config(row_key)
+
+    window_days = int(matrix.get("window_days", len(matrix_dates) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    reference = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+        compute_config=None,
+    )
+
+    candidate = _build_scd_tail_diagnostic_cell(
+        ticker=normalized_ticker,
+        row_key=row_key,
+        date_key=selected_date_key,
+        window_days=window_days,
+        anchor_date=anchor_date,
+        anchor_mode=anchor_mode,
+        historical_buffer_days=435,
+        scoring_indicators=[engine_indicator],
+        compute_config=selected_compute_config,
+    )
+
+    comparison = _compare_scd_tail_cells(
+        reference_cell=reference["cell"],
+        candidate_cell=candidate["cell"],
+    )
+
+    return {
+        "status": "ok",
+        "ticker": normalized_ticker,
+        "row_key": row_key,
+        "engine_indicator": engine_indicator,
+        "date": selected_date_key,
+        "reference_mode": "selected_family_scoring_broad_numeric",
+        "candidate_mode": "selected_row_numeric_config",
+        "reference_buffer_days": 435,
+        "candidate_buffer_days": 435,
+        "reference_seconds": reference["seconds"],
+        "candidate_seconds": candidate["seconds"],
+        "seconds_delta": round(reference["seconds"] - candidate["seconds"], 3),
+        "reference_context_rows": reference["context_rows"],
+        "candidate_context_rows": candidate["context_rows"],
+        "reference_compute_config_keys": reference["compute_config_keys"],
+        "candidate_compute_config_keys": candidate["compute_config_keys"],
+        "candidate_compute_config": _summarize_scd_compute_config(selected_compute_config),
+        "reference_scoring_indicators": reference["scoring_indicators"],
+        "candidate_scoring_indicators": candidate["scoring_indicators"],
+        **comparison,
+        "total_seconds": round(time.perf_counter() - started_at, 3),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _refresh_scd_single_indicator_live_date_cells(
+    *,
+    matrix: Dict[str, Any],
+    refresh_scope: str = "selected_indicator",
+) -> Dict[str, Any]:
+    """
+    Refresh today's visible Single Indicator cells in an existing matrix.
+
+    Supported scopes:
+    - selected_indicator:
+        use selected-row computation for allowlisted/proven-safe families and
+        fall back to the existing full bundle path for unsupported/error cases.
+    - all_indicators:
+        bypass selected-row computation and force the existing full bundle path
+        so the shared today payload is refreshed for the selected ticker set.
+
+    Preserved behavior:
+    - splice only today's rebuilt date/ticker cell back into the current matrix
+
+    Preserved:
+    - historical matrix cells
+    - selected row identity
+    - selected ticker identity
+    - chart/detail/export consumers of the matrix
+    - existing rule-engine scoring semantics
+    - existing non-persistence boundary
+    """
+    started_at = time.perf_counter()
+    refresh_scope = str(refresh_scope or "selected_indicator").strip()
+    if refresh_scope not in {"selected_indicator", "all_indicators"}:
+        refresh_scope = "selected_indicator"
+
+    if not isinstance(matrix, dict) or matrix.get("view") != "single_indicator_time_series":
+        return matrix
+
+    live_date_key = _get_scd_current_live_date_key()
+    if not live_date_key:
+        refreshed_matrix = dict(matrix)
+        refreshed_matrix["last_live_refresh"] = {
+            "status": "skipped",
+            "message": "Today is not a US trading day.",
+            "date": None,
+            "refresh_scope": refresh_scope,
+            "tickers_refreshed": [],
+            "errors": [],
+            "total_seconds": round(time.perf_counter() - started_at, 3),
+        }
+        return refreshed_matrix
+
+    date_strings = [
+        str(date_key)
+        for date_key in matrix.get("dates", [])
+        if str(date_key).strip()
+    ]
+    if live_date_key not in date_strings:
+        refreshed_matrix = dict(matrix)
+        refreshed_matrix["last_live_refresh"] = {
+            "status": "skipped",
+            "message": f"{live_date_key} is not in the current Single Indicator matrix.",
+            "date": live_date_key,
+            "refresh_scope": refresh_scope,
+            "tickers_refreshed": [],
+            "errors": [],
+            "total_seconds": round(time.perf_counter() - started_at, 3),
+        }
+        return refreshed_matrix
+
+    tickers = _dedupe_preserve_order_str(matrix.get("tickers", []))
+    row_key = str(matrix.get("row_key", "")).strip()
+    window_days = int(matrix.get("window_days", len(date_strings) or 10))
+    anchor_date = matrix.get("anchor_date")
+    anchor_mode = str(matrix.get("anchor_mode", "asof"))
+
+    refreshed_matrix = dict(matrix)
+    refreshed_matrix["cells"] = {
+        str(date_key): dict(cells_by_ticker)
+        for date_key, cells_by_ticker in dict(matrix.get("cells", {})).items()
+    }
+    refreshed_matrix["ticker_status"] = dict(matrix.get("ticker_status", {}))
+    refreshed_matrix["profile"] = dict(matrix.get("profile", {}))
+    refreshed_matrix["profile"]["tickers"] = dict(
+        refreshed_matrix["profile"].get("tickers", {})
+    )
+
+    refresh_report = {
+        "status": "ok",
+        "date": live_date_key,
+        "refresh_scope": refresh_scope,
+        "tickers_refreshed": [],
+        "selected_row_tickers": [],
+        "fallback_tickers": [],
+        "broad_refresh_tickers": [],
+        "fallback_reasons": {},
+        "errors": [],
+        "total_seconds": None,
+    }
+
+    cache_stats = _get_scd_cache_stats()
+    if refresh_scope == "selected_indicator":
+        cache_stats["selected_row_refreshes"] += 1
+
+    if live_date_key not in refreshed_matrix["cells"]:
+        refreshed_matrix["cells"][live_date_key] = {}
+
+    for ticker in tickers:
+        ticker_started_at = time.perf_counter()
+
+        try:
+            fallback_reason = None
+
+            if refresh_scope == "all_indicators":
+                refresh_path = "full_refresh"
+                refresh_report["broad_refresh_tickers"].append(ticker)
+
+                bundle = _fetch_scd_rolling_bundle_for_ticker(
+                    ticker=ticker,
+                    window_days=window_days,
+                    force_refresh=True,
+                    anchor_date=anchor_date,
+                    anchor_mode=anchor_mode,
+                    requested_date_strings=[live_date_key],
+                )
+            else:
+                refresh_path = "selected_row"
+
+                try:
+                    bundle = _fetch_scd_selected_row_refresh_bundle_for_ticker(
+                        ticker=ticker,
+                        row_key=row_key,
+                        window_days=window_days,
+                        anchor_date=anchor_date,
+                        anchor_mode=anchor_mode,
+                        requested_date_strings=[live_date_key],
+                    )
+                except Exception as selected_row_error:
+                    refresh_path = "full_fallback"
+                    fallback_reason = str(selected_row_error)
+
+                    cache_stats["selected_row_refresh_fallbacks"] += 1
+                    refresh_report["fallback_tickers"].append(ticker)
+                    refresh_report["fallback_reasons"][ticker] = fallback_reason
+
+                    bundle = _fetch_scd_rolling_bundle_for_ticker(
+                        ticker=ticker,
+                        window_days=window_days,
+                        force_refresh=True,
+                        anchor_date=anchor_date,
+                        anchor_mode=anchor_mode,
+                        requested_date_strings=[live_date_key],
+                    )
+
+            rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+            context_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+            bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+
+            if not isinstance(rolling_payload, dict) or not rolling_payload:
+                raise ValueError("No rolling payload returned during live-date refresh.")
+
+            adapter_lookup = _build_scd_adapter_lookup(
+                rolling_payload=rolling_payload,
+                row_keys=[row_key],
+                ohlcv_df=context_df,
+            )
+
+            refreshed_cell = _build_scd_single_indicator_cell_from_bundle(
+                ticker=ticker,
+                row_key=row_key,
+                date_key=live_date_key,
+                rolling_payload=rolling_payload,
+                adapter_lookup=adapter_lookup,
+                context_df=context_df,
+            )
+
+            refreshed_matrix["cells"][live_date_key][ticker] = refreshed_cell
+
+            if refresh_path == "selected_row":
+                cache_stats["selected_row_refresh_tickers"] += 1
+                refresh_report["selected_row_tickers"].append(ticker)
+
+            existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
+            existing_status.update(
+                {
+                    "live_refresh_status": refreshed_cell.get("status", "unknown"),
+                    "live_refresh_date": live_date_key,
+                    "live_refresh_bundle_source": bundle_source,
+                    "live_refresh_path": refresh_path,
+                    "live_refresh_seconds": round(
+                        time.perf_counter() - ticker_started_at,
+                        3,
+                    ),
+                }
+            )
+
+            if fallback_reason:
+                existing_status["live_refresh_fallback_reason"] = fallback_reason
+            else:
+                existing_status.pop("live_refresh_fallback_reason", None)
+
+            refreshed_matrix["ticker_status"][ticker] = existing_status
+            refresh_report["tickers_refreshed"].append(ticker)
+
+        except Exception as e:
+            message = f"{ticker}: {e}"
+            refresh_report["errors"].append(message)
+            cache_stats["selected_row_refresh_errors"] += 1
+
+            existing_status = dict(refreshed_matrix["ticker_status"].get(ticker, {}))
+            existing_status.update(
+                {
+                    "live_refresh_status": "error",
+                    "live_refresh_date": live_date_key,
+                    "live_refresh_error": message,
+                    "live_refresh_path": "error",
+                    "live_refresh_seconds": round(
+                        time.perf_counter() - ticker_started_at,
+                        3,
+                    ),
+                }
+            )
+            refreshed_matrix["ticker_status"][ticker] = existing_status
+
+    if refresh_report["errors"]:
+        refresh_report["status"] = (
+            "partial"
+            if refresh_report["tickers_refreshed"]
+            else "error"
+        )
+
+    as_of_dt = datetime.now()
+    refresh_report["total_seconds"] = round(time.perf_counter() - started_at, 3)
+    refresh_report["as_of"] = as_of_dt.isoformat(timespec="seconds")
+    refresh_report["as_of_label"] = _format_scd_live_as_of_label(as_of_dt)
+
+    _mark_scd_live_cells_as_of(
+        matrix=refreshed_matrix,
+        date_key=live_date_key,
+        as_of=as_of_dt,
+        source="single_indicator_today_refresh",
+    )
+
+    refreshed_matrix["last_live_refresh"] = refresh_report
+    refreshed_matrix["profile"]["last_live_refresh"] = refresh_report
+
+    return refreshed_matrix
+
+
+def _build_scd_single_indicator_time_series_matrix(
+    *,
+    selected_tickers: list[str],
+    selected_row_key: str,
+    date_request: Dict[str, Any],
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    """
+    Build the SCD Single Indicator time-series matrix.
+
+    Shape:
+        matrix["cells"][date_key][ticker] = existing Rolling Heatmap cell
+
+    This function reshapes existing rolling payload cells only. It does not
+    compute new scores, rank tickers, aggregate signals, or reinterpret meaning.
+    """
+    tickers = _dedupe_preserve_order_str(selected_tickers)
+    row_key = str(selected_row_key).strip()
+
+    date_strings = [
+        str(date_key)
+        for date_key in date_request.get("date_strings", [])
+        if str(date_key).strip()
+    ]
+
+    window_days = int(date_request.get("trading_days", len(date_strings) or 10))
+    anchor_date = date_request.get("anchor_date")
+    anchor_mode = str(date_request.get("scenario_b_anchor_mode", "asof"))
+
+    profile_started_at = time.perf_counter()
+    live_as_of_candidates: list[Any] = []
+
+    matrix = {
+        "status": "ok",
+        "view": "single_indicator_time_series",
+        "window_days": window_days,
+        "anchor_mode": anchor_mode,
+        "anchor_date": anchor_date,
+        "window_start_date": date_request.get("window_start_date"),
+        "window_end_date": date_request.get("window_end_date"),
+        "tickers": tickers,
+        "row_key": row_key,
+        "row_label": _format_scd_indicator_display_label(row_key),
+        "dates": date_strings,
+        "cells": {date_key: {} for date_key in date_strings},
+        "ticker_status": {},
+        "errors": [],
+        "profile": {
+            "ticker_count": len(tickers),
+            "date_count": len(date_strings),
+            "row_key": row_key,
+            "anchor_date": str(anchor_date),
+            "anchor_mode": anchor_mode,
+            "total_seconds": None,
+            "tickers": {},
+        },
+    }
+
+    if not tickers:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No SCD tickers selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
+        return matrix
+
+    if not row_key:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No Single Indicator row key selected.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
+        return matrix
+
+    if not date_strings:
+        matrix["status"] = "empty"
+        matrix["errors"].append("No Single Indicator dates resolved.")
+        matrix["profile"]["total_seconds"] = round(time.perf_counter() - profile_started_at, 3)
+        return matrix
+
+    for ticker in tickers:
+        ticker_started_at = time.perf_counter()
+        ticker_profile = {
+            "rolling_payload_seconds": None,
+            "hover_context_seconds": None,
+            "adapter_lookup_seconds": None,
+            "cell_extraction_seconds": None,
+            "total_seconds": None,
+            "status": "started",
+        }
+        matrix["profile"]["tickers"][ticker] = ticker_profile
+
+        completed_date_strings = [
+            date_key
+            for date_key in date_strings
+            if _is_scd_completed_cache_date(date_key)
+        ]
+
+        cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+        missing_cells: list[tuple[str, str]] = []
+        fetch_requested_date_strings = list(date_strings)
+
+        if not force_refresh and completed_date_strings:
+            cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
+                ticker=ticker,
+                row_keys=[row_key],
+                date_keys=completed_date_strings,
+            )
+
+            if cached_cells:
+                for (cached_row_key, cached_date_key), cached_cell in cached_cells.items():
+                    if cached_row_key != row_key:
+                        continue
+                    matrix["cells"][cached_date_key][ticker] = cached_cell
+
+                _get_scd_cache_stats()["result_cell_hits"] += len(cached_cells)
+
+            if missing_cells:
+                _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+
+            if not missing_cells and len(completed_date_strings) == len(date_strings):
+                stats = _get_scd_cache_stats()
+                stats["ticker_calculations_skipped"] += 1
+
+                matrix["ticker_status"][ticker] = {
+                    "status": "result_cell_cache",
+                    "message": "All requested completed historical cells reused.",
+                    "bundle_source": "result_cell_cache",
+                    "missing_cells": 0,
+                }
+
+                ticker_profile["rolling_payload_seconds"] = 0.0
+                ticker_profile["hover_context_seconds"] = 0.0
+                ticker_profile["adapter_lookup_seconds"] = 0.0
+                ticker_profile["cell_extraction_seconds"] = 0.0
+                ticker_profile["bundle_source"] = "result_cell_cache"
+                ticker_profile["status"] = "result_cell_cache"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
+                continue
+
+            cached_date_strings = {
+                cached_date_key
+                for (_, cached_date_key) in cached_cells.keys()
+            }
+            fetch_requested_date_strings = [
+                date_key
+                for date_key in date_strings
+                if _normalize_scd_cache_date_value(date_key) not in cached_date_strings
+            ]
+
+        try:
+            stage_started_at = time.perf_counter()
+            bundle = _fetch_scd_rolling_bundle_for_ticker(
+                ticker=ticker,
+                window_days=window_days,
+                force_refresh=force_refresh,
+                anchor_date=anchor_date,
+                anchor_mode=anchor_mode,
+                requested_date_strings=fetch_requested_date_strings,
+            )
+            ticker_profile["rolling_payload_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
+            hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
+            bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+            bundle_as_of = bundle.get("cache_as_of") if isinstance(bundle, dict) else None
+
+            if bundle_as_of is not None:
+                live_as_of_candidates.append(bundle_as_of)
+                ticker_profile["bundle_as_of"] = str(bundle_as_of)
+
+            ticker_profile["hover_context_seconds"] = 0.0
+            ticker_profile["bundle_source"] = bundle_source
+
+            if not isinstance(rolling_payload, dict) or not rolling_payload:
+                matrix["ticker_status"][ticker] = {
+                    "status": "empty",
+                    "message": "No rolling payload returned.",
+                    "bundle_source": bundle_source,
+                }
+                for date_key in date_strings:
+                    normalized_date = _normalize_scd_cache_date_value(date_key)
+                    if (row_key, normalized_date) in cached_cells:
+                        matrix["cells"][date_key][ticker] = cached_cells[
+                            (row_key, normalized_date)
+                        ]
+                        continue
+
+                    matrix["cells"][date_key][ticker] = {
+                        "ticker": ticker,
+                        "row_key": row_key,
+                        "date": date_key,
+                        "value": None,
+                        "signal": None,
+                        "score": None,
+                        "hover": f"No rolling payload returned for {ticker}.",
+                        "status": "missing_payload",
+                        "display_text": "missing_payload",
+                    }
+                ticker_profile["status"] = "missing_payload"
+                continue
+
+            stage_started_at = time.perf_counter()
+            adapter_lookup = _build_scd_adapter_lookup(
+                rolling_payload=rolling_payload,
+                row_keys=[row_key],
+                ohlcv_df=hover_ohlcv_df,
+            )
+            ticker_profile["adapter_lookup_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            stage_started_at = time.perf_counter()
+            missing_count = 0
+
+            for date_key in date_strings:
+                normalized_date = _normalize_scd_cache_date_value(date_key)
+                if (row_key, normalized_date) in cached_cells:
+                    cell = cached_cells[(row_key, normalized_date)]
+                else:
+                    cell = _build_scd_single_indicator_cell_from_bundle(
+                        ticker=ticker,
+                        row_key=row_key,
+                        date_key=date_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                        context_df=hover_ohlcv_df,
+                    )
+
+                if cell.get("status") != "ok":
+                    missing_count += 1
+                matrix["cells"][date_key][ticker] = cell
+
+            ticker_profile["cell_extraction_seconds"] = round(
+                time.perf_counter() - stage_started_at,
+                3,
+            )
+
+            matrix["ticker_status"][ticker] = {
+                "status": "ok" if missing_count == 0 else "partial",
+                "message": (
+                    "All requested dates available."
+                    if missing_count == 0
+                    else f"{missing_count} requested date(s) missing."
+                ),
+                "bundle_source": bundle_source,
+                "missing_cells": missing_count,
+            }
+            ticker_profile["status"] = matrix["ticker_status"][ticker]["status"]
+
+        except Exception as e:
+            message = f"{ticker}: {e}"
+            matrix["errors"].append(message)
+            matrix["ticker_status"][ticker] = {
+                "status": "error",
+                "message": message,
+            }
+            for date_key in date_strings:
+                matrix["cells"][date_key][ticker] = {
+                    "ticker": ticker,
+                    "row_key": row_key,
+                    "date": date_key,
+                    "value": None,
+                    "signal": None,
+                    "score": None,
+                    "hover": message,
+                    "status": "error",
+                    "display_text": "error",
+                }
+            ticker_profile["status"] = "error"
+
+        finally:
+            ticker_profile["total_seconds"] = round(
+                time.perf_counter() - ticker_started_at,
+                3,
+            )
+
+    matrix["profile"]["total_seconds"] = round(
+        time.perf_counter() - profile_started_at,
+        3,
+    )
+
+    live_date_key = _get_scd_current_live_date_key()
+    if live_date_key and live_date_key in date_strings:
+        live_as_of_values = []
+        for candidate in live_as_of_candidates:
+            try:
+                ts = pd.Timestamp(candidate)
+                if pd.isna(ts):
+                    continue
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
+                live_as_of_values.append(ts)
+            except Exception:
+                continue
+
+        live_as_of = min(live_as_of_values) if live_as_of_values else datetime.now()
+
+        _mark_scd_live_cells_as_of(
+            matrix=matrix,
+            date_key=live_date_key,
+            as_of=live_as_of,
+            source="single_indicator_build",
+        )
+
+    result_cell_writes = _store_scd_result_cells_from_matrix(
+        matrix=matrix,
+        source="single_indicator_build",
+    )
+    matrix["profile"]["result_cell_writes"] = result_cell_writes
+
+    if matrix["errors"]:
+        matrix["status"] = "partial"
+
+    return matrix
+
+
 def _build_scd_cross_sectional_matrix(
     *,
     selected_tickers: list[str],
@@ -1292,13 +4403,17 @@ def _build_scd_cross_sectional_matrix(
         if row_key != "__PRICE__"
     ]
 
+    target_date_key = _resolve_scd_cross_sectional_target_date_key(anchor_date)
+
     profile_started_at = time.perf_counter()
+    live_as_of_candidates: list[Any] = []
 
     matrix = {
         "status": "ok",
         "window_days": int(window_days),
         "anchor_mode": "asof",
         "anchor_date": anchor_date,
+        "target_date": target_date_key,
         "tickers": tickers,
         "row_keys": row_keys,
         "cells": {row_key: {} for row_key in row_keys},
@@ -1308,6 +4423,7 @@ def _build_scd_cross_sectional_matrix(
             "ticker_count": len(tickers),
             "row_count": len(row_keys),
             "anchor_date": str(anchor_date),
+            "target_date": target_date_key,
             "total_seconds": None,
             "tickers": {},
         },
@@ -1337,13 +4453,68 @@ def _build_scd_cross_sectional_matrix(
         }
         matrix["profile"]["tickers"][ticker] = ticker_profile
 
+        target_date_completed = (
+            bool(target_date_key)
+            and _is_scd_completed_cache_date(target_date_key)
+        )
+
+        cached_cells: Dict[tuple[str, str], Dict[str, Any]] = {}
+        missing_cells: list[tuple[str, str]] = []
+
+        if not force_refresh and target_date_completed:
+            cached_cells, missing_cells = _load_completed_result_cells_for_ticker(
+                ticker=ticker,
+                row_keys=row_keys,
+                date_keys=[target_date_key],
+            )
+
+            if cached_cells:
+                normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
+                for row_key in row_keys:
+                    cached_cell = cached_cells.get((row_key, normalized_target_date))
+                    if cached_cell is None:
+                        continue
+                    matrix["cells"][row_key][ticker] = cached_cell
+
+                _get_scd_cache_stats()["result_cell_hits"] += len(cached_cells)
+
+            if missing_cells:
+                _get_scd_cache_stats()["result_cell_misses"] += len(missing_cells)
+
+            if not missing_cells:
+                stats = _get_scd_cache_stats()
+                stats["ticker_calculations_skipped"] += 1
+
+                matrix["ticker_status"][ticker] = {
+                    "status": "result_cell_cache",
+                    "message": "All requested completed historical cells reused.",
+                    "target_date": target_date_key,
+                    "bundle_source": "result_cell_cache",
+                }
+
+                ticker_profile["rolling_payload_seconds"] = 0.0
+                ticker_profile["hover_context_seconds"] = 0.0
+                ticker_profile["adapter_lookup_seconds"] = 0.0
+                ticker_profile["latest_cell_extraction_seconds"] = 0.0
+                ticker_profile["bundle_source"] = "result_cell_cache"
+                ticker_profile["status"] = "result_cell_cache"
+                ticker_profile["total_seconds"] = round(
+                    time.perf_counter() - ticker_started_at,
+                    3,
+                )
+                continue
+
         try:
             stage_started_at = time.perf_counter()
+
+            requested_date_strings = [target_date_key] if target_date_key else []
+
             bundle = _fetch_scd_rolling_bundle_for_ticker(
                 ticker=ticker,
                 window_days=window_days,
                 force_refresh=force_refresh,
                 anchor_date=anchor_date,
+                requested_date_strings=requested_date_strings,
             )
             ticker_profile["rolling_payload_seconds"] = round(
                 time.perf_counter() - stage_started_at,
@@ -1353,6 +4524,11 @@ def _build_scd_cross_sectional_matrix(
             rolling_payload = bundle.get("rolling_payload") if isinstance(bundle, dict) else {}
             hover_ohlcv_df = bundle.get("indicator_context_df") if isinstance(bundle, dict) else None
             bundle_source = bundle.get("source") if isinstance(bundle, dict) else "invalid_bundle"
+            bundle_as_of = bundle.get("cache_as_of") if isinstance(bundle, dict) else None
+
+            if bundle_as_of is not None:
+                live_as_of_candidates.append(bundle_as_of)
+                ticker_profile["bundle_as_of"] = str(bundle_as_of)
 
             # Hover/context is now supplied by the same technical-layer pass as
             # the rolling payload. There is no separate hover fetch in the
@@ -1366,7 +4542,14 @@ def _build_scd_cross_sectional_matrix(
                     "message": "No rolling payload returned.",
                     "bundle_source": bundle_source,
                 }
+                normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
                 for row_key in row_keys:
+                    if (row_key, normalized_target_date) in cached_cells:
+                        matrix["cells"][row_key][ticker] = cached_cells[
+                            (row_key, normalized_target_date)
+                        ]
+                        continue
+
                     matrix["cells"][row_key][ticker] = {
                         "ticker": ticker,
                         "row_key": row_key,
@@ -1392,6 +4575,7 @@ def _build_scd_cross_sectional_matrix(
                 "status": payload_status,
                 "dates": payload_dates,
                 "latest_date": payload_dates[-1] if payload_dates else None,
+                "target_date": target_date_key,
                 "bundle_source": bundle_source,
                 "has_indicator_context": (
                     isinstance(hover_ohlcv_df, pd.DataFrame)
@@ -1411,13 +4595,28 @@ def _build_scd_cross_sectional_matrix(
             )
 
             stage_started_at = time.perf_counter()
+            normalized_target_date = _normalize_scd_cache_date_value(target_date_key)
+
             for row_key in row_keys:
-                matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
-                    ticker=ticker,
-                    row_key=row_key,
-                    rolling_payload=rolling_payload,
-                    adapter_lookup=adapter_lookup,
-                )
+                if target_date_key and (row_key, normalized_target_date) in cached_cells:
+                    matrix["cells"][row_key][ticker] = cached_cells[
+                        (row_key, normalized_target_date)
+                    ]
+                elif target_date_key:
+                    matrix["cells"][row_key][ticker] = _extract_scd_cell_for_date(
+                        ticker=ticker,
+                        row_key=row_key,
+                        date_key=target_date_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                    )
+                else:
+                    matrix["cells"][row_key][ticker] = _extract_latest_scd_cell(
+                        ticker=ticker,
+                        row_key=row_key,
+                        rolling_payload=rolling_payload,
+                        adapter_lookup=adapter_lookup,
+                    )
             ticker_profile["latest_cell_extraction_seconds"] = round(
                 time.perf_counter() - stage_started_at,
                 3,
@@ -1460,10 +4659,43 @@ def _build_scd_cross_sectional_matrix(
         3,
     )
 
+    live_date_key = _get_scd_current_live_date_key()
+    if (
+        target_date_key
+        and live_date_key
+        and _normalize_scd_cache_date_value(target_date_key) == live_date_key
+    ):
+        live_as_of_values = []
+        for candidate in live_as_of_candidates:
+            try:
+                ts = pd.Timestamp(candidate)
+                if pd.isna(ts):
+                    continue
+                if ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
+                live_as_of_values.append(ts)
+            except Exception:
+                continue
+
+        live_as_of = min(live_as_of_values) if live_as_of_values else datetime.now()
+
+        _mark_scd_live_cells_as_of(
+            matrix=matrix,
+            date_key=live_date_key,
+            as_of=live_as_of,
+            source="multiple_indicators_build",
+        )
+
+    result_cell_writes = _store_scd_result_cells_from_matrix(
+        matrix=matrix,
+        source="multiple_indicators_build",
+    )
+    matrix["profile"]["result_cell_writes"] = result_cell_writes
+
     return matrix
 
 
-def _get_scd_row_display_name(row_key: str) -> str:
+def _get_scd_row_display_name(row_key: str):
     """
     Return the adapter-owned display label for a canonical SCD row_key.
     """
@@ -1608,10 +4840,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "Date: %{customdata.date}<br>"
         "<br>"
         "Value: %{customdata.formatted_value}<br>"
-        "%{customdata.ma_context_block}"
         "Δ vs prior day: %{customdata.delta_abs_fmt}"
         "%{customdata.delta_pct_suffix}<br>"
         "%{customdata.trend_line}"
+        "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
@@ -1662,6 +4894,734 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     return fig
+
+def _derive_scd_price_trend_label(price_customdata: Dict[str, Any]) -> str:
+    """
+    Derive a simple price trend label from adapter-owned Price-row delta data.
+    """
+    delta_abs = price_customdata.get("delta_abs")
+
+    try:
+        delta_abs_f = float(delta_abs)
+    except (TypeError, ValueError):
+        return ""
+
+    if delta_abs_f > 0:
+        return "Rising"
+    if delta_abs_f < 0:
+        return "Falling"
+    return "Flat"
+
+
+def _build_scd_single_indicator_hover_customdata(
+    *,
+    ticker: str,
+    row_key: str,
+    cell: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build customdata for the Single Indicator time-series heatmap.
+
+    This reuses the existing SCD/adapter hover contract and adds Price context
+    from the attached Price-row cell when available.
+    """
+    custom = _build_scd_hover_customdata(
+        ticker=ticker,
+        row_key=row_key,
+        cell=cell,
+    )
+
+    price_cell = cell.get("price_cell")
+    price_customdata: Dict[str, Any] = {}
+
+    if isinstance(price_cell, dict):
+        maybe_cd = price_cell.get("adapter_customdata")
+        if isinstance(maybe_cd, dict):
+            price_customdata = maybe_cd
+
+    def _format_price_value_for_single_hover() -> str:
+        raw_value = price_customdata.get("raw_value")
+        if raw_value is None and isinstance(price_cell, dict):
+            raw_value = price_cell.get("value")
+
+        try:
+            return f"{float(raw_value):.2f}"
+        except (TypeError, ValueError):
+            formatted = (
+                price_customdata.get("formatted_value")
+                or (price_cell or {}).get("display_text")
+                or ""
+            )
+            formatted = str(formatted).strip()
+            if formatted.startswith("$"):
+                formatted = formatted[1:]
+            return "" if formatted == "-" else formatted
+
+    def _format_price_delta_for_single_hover() -> str:
+        delta_abs = price_customdata.get("delta_abs")
+        delta_pct = price_customdata.get("delta_pct")
+
+        delta_abs_txt = ""
+        try:
+            delta_abs_txt = f"{float(delta_abs):+.2f}"
+        except (TypeError, ValueError):
+            delta_abs_txt = str(price_customdata.get("delta_abs_fmt", "") or "").strip()
+
+        delta_pct_txt = ""
+        try:
+            delta_pct_txt = f" ({float(delta_pct):+.2f}%)"
+        except (TypeError, ValueError):
+            delta_pct_txt = str(price_customdata.get("delta_pct_suffix", "") or "").strip()
+
+        combined = f"{delta_abs_txt}{delta_pct_txt}".strip()
+        return "" if combined == "-" else combined
+
+    price_formatted = _format_price_value_for_single_hover()
+    price_delta = _format_price_delta_for_single_hover()
+    price_trend = _derive_scd_price_trend_label(price_customdata)
+
+    custom["single_price_value_suffix"] = (
+        f" | Price: {price_formatted}" if price_formatted else ""
+    )
+    custom["single_price_delta_suffix"] = (
+        f" | Price: {price_delta}" if price_delta else ""
+    )
+
+    indicator_trend = custom.get("trend") or ""
+    if indicator_trend or price_trend:
+        custom["single_combined_trend_line"] = (
+            f"Trend: {indicator_trend or 'N/A'}"
+            f"{f' | Price: {price_trend}' if price_trend else ''}<br>"
+        )
+    else:
+        custom["single_combined_trend_line"] = ""
+
+    return custom
+
+
+def _format_scd_compact_date_label(date_key: Any) -> str:
+    """Return compact M/D display text for Single Indicator heatmap row labels."""
+    try:
+        ts = pd.Timestamp(date_key)
+        return f"{ts.month}/{ts.day}"
+    except Exception:
+        return str(date_key)
+
+
+def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
+    """
+    Build the Single Indicator time-series heatmap.
+
+    Shape:
+        y-axis = dates
+        x-axis = tickers
+        z/text/customdata = one selected indicator cell per date/ticker
+    """
+    tickers = list(matrix.get("tickers", []))
+    dates = list(matrix.get("dates", []))
+    date_labels = [_format_scd_compact_date_label(date_key) for date_key in dates]
+    row_key = str(matrix.get("row_key", ""))
+    row_label = str(matrix.get("row_label", row_key))
+    cells = matrix.get("cells", {})
+
+    z = []
+    text = []
+    customdata = []
+
+    for date_key in dates:
+        z_row = []
+        text_row = []
+        custom_row = []
+
+        for ticker in tickers:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            score = cell.get("score")
+
+            try:
+                z_row.append(float(score) if score is not None else None)
+            except (TypeError, ValueError):
+                z_row.append(None)
+
+            text_row.append(_format_scd_heatmap_text(row_key, cell))
+            custom_row.append(
+                _build_scd_single_indicator_hover_customdata(
+                    ticker=ticker,
+                    row_key=row_key,
+                    cell=cell,
+                )
+            )
+
+        z.append(z_row)
+        text.append(text_row)
+        customdata.append(custom_row)
+
+    colorscale = [
+        [0.0, "#8B0000"],   # strong sell
+        [0.25, "#CD5C5C"],  # sell
+        [0.5, "#D3D3D3"],   # neutral
+        [0.75, "#90EE90"],  # buy
+        [1.0, "#006400"],   # strong buy
+    ]
+
+    hovertemplate = (
+        "<b>%{customdata.display_name}</b><br>"
+        "Ticker: %{customdata.ticker}<br>"
+        "Date: %{customdata.date}<br>"
+        "<br>"
+        "Value: %{customdata.formatted_value}"
+        "%{customdata.single_price_value_suffix}<br>"
+        "Δ vs prior day: %{customdata.delta_abs_fmt}"
+        "%{customdata.delta_pct_suffix}"
+        "%{customdata.single_price_delta_suffix}<br>"
+        "%{customdata.single_combined_trend_line}"
+        "%{customdata.ma_context_block}"
+        "%{customdata.adx_context_block}"
+        "%{customdata.signal_line}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.stoch_context_block}"
+        "%{customdata.dpo_context_block}"
+        "%{customdata.bullbear_context_block}"
+        "%{customdata.rule_block}"
+        "%{customdata.notes_block}"
+        "%{customdata.definition_block}"
+        "%{customdata.how_to_read_block}"
+        "%{customdata.band_context_block}"
+        "%{customdata.volume_block}"
+        "%{customdata.volume_vs_avg_block}"
+        "%{customdata.scd_payload_hover_block}"
+        "<extra></extra>"
+    )
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=tickers,
+            y=date_labels,
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=colorscale,
+            zmin=-2,
+            zmax=2,
+            hovertemplate=hovertemplate,
+            colorbar=dict(title="Score"),
+        )
+    )
+
+    dynamic_height = max(450, 24 * max(len(dates), 1) + 180)
+
+    fig.update_layout(
+        title=f"{row_label}",
+        margin=dict(l=110, r=20, t=80, b=80),
+        height=dynamic_height,
+    )
+
+    fig.update_xaxes(side="top", type="category")
+    fig.update_yaxes(
+        autorange="reversed",
+        automargin=True,
+        tickmode="array",
+        tickvals=date_labels,
+        ticktext=date_labels,
+        tickfont=dict(size=11),
+    )
+
+    return fig
+
+
+def _build_scd_single_indicator_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Build a dates × tickers detail table for the Single Indicator matrix.
+
+    The table uses the same display text shown in the heatmap cells.
+    """
+    tickers = list(matrix.get("tickers", []))
+    dates = list(matrix.get("dates", []))
+    row_key = str(matrix.get("row_key", ""))
+    cells = matrix.get("cells", {})
+
+    records = []
+    for date_key in dates:
+        row = {"Date": date_key}
+        for ticker in tickers:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            row[ticker] = _format_scd_heatmap_text(row_key, cell)
+        records.append(row)
+
+    return pd.DataFrame(records)
+
+
+def _get_scd_single_chart_value_modes() -> list[str]:
+    """Return supported Single Indicator chart value modes."""
+    return [
+        "Auto",
+        "Indicator value",
+        "Indexed to 100",
+        "Change from first date",
+        "% change from first date",
+        "Score",
+    ]
+
+
+def _get_scd_single_chart_auto_mode(row_key: str) -> str:
+    """
+    Resolve Auto chart mode for one Single Indicator row_key.
+
+    Auto intentionally avoids Score mode. It chooses a display transform only.
+    """
+    row_key = str(row_key).strip()
+    family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
+
+    if row_key == "OBV":
+        return "Change from first date"
+
+    if family in {
+        "RSI",
+        "Stochastic",
+        "Williams_R",
+        "MFI",
+        "Ultimate_Oscillator",
+        "ADX",
+        "CMF",
+        "CCI",
+        "ROC",
+        "DPO",
+    }:
+        return "Indicator value"
+
+    if row_key.startswith("BB_PCT_B") or row_key.startswith("BB_BW"):
+        return "Indicator value"
+
+    if family in {"SMA", "EMA", "HMA", "VWMA", "ATR"}:
+        return "Indexed to 100"
+
+    if family in {"MACD", "BullBearPower"}:
+        return "Change from first date"
+
+    return "Indicator value"
+
+
+def _resolve_scd_single_chart_value_mode(
+    *,
+    row_key: str,
+    selected_mode: str,
+) -> str:
+    """Resolve chart mode, expanding Auto to the indicator-specific default."""
+    mode = str(selected_mode).strip()
+    if mode == "Auto":
+        return _get_scd_single_chart_auto_mode(row_key)
+    if mode in _get_scd_single_chart_value_modes():
+        return mode
+    return _get_scd_single_chart_auto_mode(row_key)
+
+
+def _coerce_scd_chart_numeric_value(value: Any) -> Optional[float]:
+    """Coerce chart values to float while preserving missing values as None."""
+    try:
+        value_f = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if pd.isna(value_f):
+        return None
+
+    return value_f
+
+
+def _get_scd_chart_yaxis_title(mode: str, row_label: str) -> str:
+    """Return a compact y-axis title for the selected chart transform."""
+    if mode == "Indexed to 100":
+        return "Indexed value"
+    if mode == "Change from first date":
+        return "Change from first date"
+    if mode == "% change from first date":
+        return "% change from first date"
+    if mode == "Score":
+        return "Score"
+    return row_label
+
+
+def _build_scd_single_indicator_chart_series(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    value_mode: str,
+) -> tuple[dict[str, list[Optional[float]]], list[str]]:
+    """
+    Build chart series from the already-built Single Indicator matrix.
+
+    This is display-only. It does not alter matrix cells, scores, rules,
+    cache entries, acquisition, or persistence.
+    """
+    dates = list(matrix.get("dates", []))
+    cells = matrix.get("cells", {})
+
+    raw_series: dict[str, list[Optional[float]]] = {}
+
+    for ticker in visible_tickers:
+        values: list[Optional[float]] = []
+
+        for date_key in dates:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            if value_mode == "Score":
+                values.append(_coerce_scd_chart_numeric_value(cell.get("score")))
+            else:
+                values.append(_coerce_scd_chart_numeric_value(cell.get("value")))
+
+        raw_series[ticker] = values
+
+    warnings: list[str] = []
+
+    if value_mode in {"Indicator value", "Score"}:
+        return raw_series, warnings
+
+    transformed: dict[str, list[Optional[float]]] = {}
+
+    for ticker, values in raw_series.items():
+        first_valid = next((v for v in values if v is not None), None)
+
+        if first_valid is None:
+            transformed[ticker] = [None for _ in values]
+            warnings.append(f"{ticker}: no valid starting value.")
+            continue
+
+        if value_mode == "Change from first date":
+            transformed[ticker] = [
+                (v - first_valid) if v is not None else None
+                for v in values
+            ]
+            continue
+
+        if value_mode == "% change from first date":
+            if abs(first_valid) <= 1e-9:
+                transformed[ticker] = [None for _ in values]
+                warnings.append(
+                    f"{ticker}: % change unavailable because first value is near zero."
+                )
+                continue
+
+            transformed[ticker] = [
+                ((v - first_valid) / abs(first_valid) * 100.0)
+                if v is not None
+                else None
+                for v in values
+            ]
+            continue
+
+        if value_mode == "Indexed to 100":
+            if first_valid <= 0 or abs(first_valid) <= 1e-9:
+                transformed[ticker] = [None for _ in values]
+                warnings.append(
+                    f"{ticker}: Indexed to 100 unavailable because first value "
+                    "is not positive or is near zero."
+                )
+                continue
+
+            transformed[ticker] = [
+                (v / first_valid * 100.0) if v is not None else None
+                for v in values
+            ]
+            continue
+
+        transformed[ticker] = values
+
+    return transformed, warnings
+
+
+def _get_scd_single_chart_hover_fields(
+    *,
+    matrix: Dict[str, Any],
+    ticker: str,
+    date_key: str,
+    chart_value: Optional[float],
+    value_mode: str,
+) -> list[Any]:
+    """Return compact hover customdata for one Single Indicator chart point."""
+    row_key = str(matrix.get("row_key", ""))
+    cells = matrix.get("cells", {})
+    cell = cells.get(date_key, {}).get(ticker, {})
+
+    price_cell = cell.get("price_cell") if isinstance(cell, dict) else None
+    price_cd = {}
+    if isinstance(price_cell, dict):
+        maybe_cd = price_cell.get("adapter_customdata")
+        if isinstance(maybe_cd, dict):
+            price_cd = maybe_cd
+
+    price_value = price_cd.get("formatted_value", "")
+    price_delta = ""
+    if price_cd.get("delta_abs_fmt"):
+        price_delta = (
+            f"{price_cd.get('delta_abs_fmt', '')}"
+            f"{price_cd.get('delta_pct_suffix', '')}"
+        )
+
+    return [
+        str(date_key),
+        _format_scd_heatmap_text(row_key, cell),
+        cell.get("signal") if isinstance(cell, dict) else None,
+        chart_value,
+        price_value,
+        price_delta,
+    ]
+
+
+def _add_scd_single_chart_reference_lines(
+    *,
+    fig: go.Figure,
+    row_key: str,
+    value_mode: str,
+) -> None:
+    """Add native indicator reference lines where they are meaningful."""
+    if value_mode == "Score":
+        for level in [-2, -1, 0, 1, 2]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.35)
+        fig.update_yaxes(range=[-2.25, 2.25])
+        return
+
+    if value_mode != "Indicator value":
+        return
+
+    family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
+
+    if family == "CCI":
+        for level in [100, 0, -100]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family == "RSI":
+        for level in [70, 50, 30]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family in {"MFI", "Ultimate_Oscillator", "Stochastic"}:
+        for level in [80, 50, 20]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+    elif family == "Williams_R":
+        for level in [-20, -50, -80]:
+            fig.add_hline(y=level, line_dash="dot", opacity=0.45)
+
+
+def _build_scd_single_indicator_chart_figure(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    selected_value_mode: str,
+) -> tuple[go.Figure, str, list[str]]:
+    """
+    Build the Single Indicator line chart.
+
+    The chart is derived only from existing Single Indicator matrix cells.
+    """
+    row_key = str(matrix.get("row_key", ""))
+    row_label = str(matrix.get("row_label", row_key))
+    dates = list(matrix.get("dates", []))
+    date_labels = [_format_scd_compact_date_label(date_key) for date_key in dates]
+
+    resolved_mode = _resolve_scd_single_chart_value_mode(
+        row_key=row_key,
+        selected_mode=selected_value_mode,
+    )
+
+    series_by_ticker, warnings = _build_scd_single_indicator_chart_series(
+        matrix=matrix,
+        visible_tickers=visible_tickers,
+        value_mode=resolved_mode,
+    )
+
+    fig = go.Figure()
+
+    for ticker in visible_tickers:
+        y_values = series_by_ticker.get(ticker, [])
+        customdata = [
+            _get_scd_single_chart_hover_fields(
+                matrix=matrix,
+                ticker=ticker,
+                date_key=date_key,
+                chart_value=y_values[i] if i < len(y_values) else None,
+                value_mode=resolved_mode,
+            )
+            for i, date_key in enumerate(dates)
+        ]
+
+        fig.add_trace(
+            go.Scatter(
+                x=date_labels,
+                y=y_values,
+                mode="lines+markers",
+                name=ticker,
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>"
+                    "Date: %{customdata[0]}<br>"
+                    f"{row_label}: %{{customdata[1]}}<br>"
+                    f"Chart value ({resolved_mode}): %{{customdata[3]:.2f}}<br>"
+                    "Signal: %{customdata[2]}<br>"
+                    "Price: %{customdata[4]}<br>"
+                    "Price Δ vs prior day: %{customdata[5]}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    _add_scd_single_chart_reference_lines(
+        fig=fig,
+        row_key=row_key,
+        value_mode=resolved_mode,
+    )
+
+    y_axis_title = _get_scd_chart_yaxis_title(resolved_mode, row_label)
+    dynamic_height = max(420, 35 * max(len(visible_tickers), 1) + 260)
+
+    fig.update_layout(
+        title=dict(
+            text=f"{row_label}",
+            y=0.98,
+            yanchor="top",
+        ),
+        height=dynamic_height,
+        margin=dict(l=70, r=30, t=150, b=70),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.08,
+            xanchor="left",
+            x=0,
+        ),
+    )
+
+    fig.update_xaxes(
+        title="Date",
+        type="category",
+        tickmode="array",
+        tickvals=date_labels,
+        ticktext=date_labels,
+    )
+    fig.update_yaxes(title=y_axis_title)
+
+    return fig, resolved_mode, warnings
+
+
+def _render_scd_single_indicator_chart_view(matrix: Dict[str, Any]) -> None:
+    """
+    Render chart-only controls and line chart for the Single Indicator matrix.
+
+    Ticker visibility is handled by the native Plotly legend. This affects only
+    chart display and must not mutate the matrix, heatmap, table, export, cache,
+    or payload.
+    """
+    if not isinstance(matrix, dict) or not matrix:
+        return
+
+    tickers = list(matrix.get("tickers", []))
+    if not tickers:
+        st.info("No tickers available for the Single Indicator chart.")
+        return
+
+    st.subheader("Single Indicator Trend Chart")
+
+    value_modes = _get_scd_single_chart_value_modes()
+    current_mode = st.session_state.get("scd_single_chart_value_mode", "Auto")
+    if current_mode not in value_modes:
+        current_mode = "Auto"
+        st.session_state.scd_single_chart_value_mode = current_mode
+
+    selected_mode = st.selectbox(
+        "Chart value",
+        options=value_modes,
+        index=value_modes.index(current_mode),
+        key="scd_single_chart_value_mode",
+        help=(
+            "Auto chooses a display transform based on the selected indicator. "
+            "Score plots the existing heatmap score from -2 to +2."
+        ),
+    )
+
+    fig, resolved_mode, warnings = _build_scd_single_indicator_chart_figure(
+        matrix=matrix,
+        visible_tickers=tickers,
+        selected_value_mode=selected_mode,
+    )
+
+    if selected_mode == "Auto":
+        st.markdown(
+            f"<small style='color: #6c757d;'>"
+            f"Auto chart mode resolved to: {resolved_mode}"
+            f"</small>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        "<small style='color: #6c757d;'>"
+        "Tip: Click a ticker in the legend to hide/show it. "
+        "Double-click to isolate one ticker."
+        "</small>",
+        unsafe_allow_html=True,
+    )
+
+    if warnings:
+        with st.expander("Chart transform notes", expanded=False):
+            for warning in warnings:
+                st.markdown(
+                    f"<small style='color: #6c757d;'>- {warning}</small>",
+                    unsafe_allow_html=True,
+                )
+
+    #st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="scd_single_indicator_trend_chart",
+        config={
+            "doubleClickDelay": 800,
+            "responsive": True,
+        },
+    )    
+
+
+def _render_scd_single_indicator_matrix_view(matrix: Dict[str, Any]) -> None:
+    """
+    Render the Single Indicator time-series matrix.
+
+    This renders display-only views of already-built cells:
+    - heatmap
+    - detail/export table
+    - existing ticker-status diagnostics
+    """
+    if not isinstance(matrix, dict) or not matrix:
+        st.info("Build the Single Indicator time-series matrix first.")
+        return
+
+    if matrix.get("status") == "empty":
+        st.warning("Single Indicator matrix is empty.")
+        if matrix.get("errors"):
+            st.write(matrix.get("errors"))
+        return
+
+    st.subheader("Single Indicator Time-Series Heatmap")
+
+    fig = _build_scd_single_indicator_heatmap_figure(matrix)
+    st.plotly_chart(fig, use_container_width=True)
+
+    _render_scd_single_indicator_chart_view(matrix)
+
+    detail_df = _build_scd_single_indicator_detail_table(matrix)
+
+    with st.expander("Show Details / Export", expanded=False):
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        csv_bytes = detail_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download Single Indicator CSV",
+            data=csv_bytes,
+            file_name=(
+                "scd_single_indicator_"
+                f"{matrix.get('row_key', 'indicator')}_"
+                f"{matrix.get('window_start_date', 'start')}_"
+                f"{matrix.get('window_end_date', 'end')}.csv"
+            ),
+            mime="text/csv",
+            key="scd_single_indicator_download_csv",
+        )
 
 
 def _build_scd_detail_table(matrix: Dict[str, Any]) -> pd.DataFrame:
@@ -4146,10 +8106,37 @@ def show_stock_comparison_dashboard():
 
     st.markdown(
         """
-        This dashboard will compare selected technical indicator rows across
+        This dashboard compares selected technical indicator rows across
         selected tickers using the existing Rolling Heatmap value / signal / score path.
         """
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Analysis Mode")
+
+    analysis_mode_options = ["Single Indicator", "Multiple Indicators"]
+    current_analysis_mode = st.session_state.get(
+        "scd_analysis_mode",
+        "Single Indicator",
+    )
+    if current_analysis_mode not in analysis_mode_options:
+        current_analysis_mode = "Single Indicator"
+
+    analysis_mode = st.sidebar.radio(
+        "Analysis Mode",
+        options=analysis_mode_options,
+        index=analysis_mode_options.index(current_analysis_mode),
+        key="scd_analysis_mode_widget",
+        help=(            
+            "Single Indicator will show one selected indicator across tickers and dates."
+            "Multiple Indicators shows the current cross-sectional comparison matrix. "
+        ),
+    )
+
+    # Keep canonical SCD analysis-mode state separate from widget state.
+    # This mirrors the existing SCD ticker-source pattern and prevents stale
+    # routing behavior when switching between analysis modes.
+    st.session_state.scd_analysis_mode = analysis_mode
 
     selected_tickers = _render_scd_ticker_controls()
 
@@ -4160,6 +8147,581 @@ def show_stock_comparison_dashboard():
         )
     else:
         st.info("Choose at least one ticker in the sidebar.")
+
+    if analysis_mode == "Single Indicator":
+        selected_single_indicator = _render_scd_single_indicator_controls()
+        single_indicator_date_request = _render_scd_single_indicator_date_controls()
+
+        st.subheader("Time-Series Matrix")
+        st.caption(
+            "The default Single Indicator matrix builds automatically on first load. "
+            "Use Rebuild Time-Series Matrix when you want to rebuild the current "
+            "date × ticker view."
+        )
+
+        force_refresh_single = st.checkbox(
+            "Recalculate selected tickers for this build",
+            value=False,
+            key="scd_single_force_refresh",
+            help=(
+                "Bypass the SCD session cache once for this Single Indicator build. "
+                "This does not change DB persistence behavior."
+            ),
+        )
+
+        build_single_clicked = st.button(
+            "Rebuild Time-Series Matrix",
+            key="scd_single_build_matrix",
+            type="primary",
+            disabled=not selected_tickers or not selected_single_indicator,
+        )
+
+        should_auto_build_single = (
+            selected_tickers
+            and selected_single_indicator
+            and st.session_state.get("scd_single_indicator_matrix") is None
+        )
+
+        if build_single_clicked or should_auto_build_single:
+            spinner_text = (
+                "Building Single Indicator time-series matrix."
+                if build_single_clicked
+                else "Building default Single Indicator time-series matrix."
+            )
+
+            if build_single_clicked and force_refresh_single:
+                _get_scd_cache_stats()["force_refreshes"] += 1
+
+            with st.spinner(spinner_text):
+                st.session_state.scd_single_indicator_matrix = (
+                    _build_scd_single_indicator_time_series_matrix(
+                        selected_tickers=selected_tickers,
+                        selected_row_key=selected_single_indicator,
+                        date_request=single_indicator_date_request,
+                        force_refresh=force_refresh_single if build_single_clicked else False,
+                    )
+                )
+                st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
+
+        single_matrix = st.session_state.get("scd_single_indicator_matrix")
+
+        if single_matrix:
+            st.success("Time-Series Matrix ready.")
+            st.caption(
+                f"Indicator: {single_matrix.get('row_key')} · "
+                f"Window: {single_matrix.get('window_start_date')} → "
+                f"{single_matrix.get('window_end_date')} · "
+                f"Dates: {len(single_matrix.get('dates', []))} · "
+                f"Tickers: {len(single_matrix.get('tickers', []))}"
+            )
+
+            live_date_key = _get_scd_current_live_date_key()
+            live_date_in_matrix = (
+                bool(live_date_key)
+                and live_date_key in [str(date_key) for date_key in single_matrix.get("dates", [])]
+            )
+
+            col_refresh_selected, col_refresh_all = st.columns([0.5, 0.5])
+
+            with col_refresh_selected:
+                refresh_selected_today_clicked = st.button(
+                    "Refresh this indicator only",
+                    key="scd_single_refresh_selected_today_cells",
+                    disabled=not live_date_in_matrix,
+                    use_container_width=True,
+                    help=(
+                        "Refresh today's visible cells for the currently selected "
+                        "Single Indicator row. Supported rows use the faster "
+                        "selected-row path; unsupported rows fall back to the full path."
+                    ),
+                )
+
+            with col_refresh_all:
+                refresh_all_today_clicked = st.button(
+                    "Refresh all indicators for today",
+                    key="scd_single_refresh_all_today_values",
+                    disabled=not live_date_in_matrix,
+                    use_container_width=True,
+                    help=(
+                        "Refresh today's broad payload for the selected ticker set. "
+                        "This is slower, but it lets other Single Indicator rows reuse "
+                        "the refreshed today data when rebuilt."
+                    ),
+                )
+
+            refresh_today_clicked = (
+                refresh_selected_today_clicked or refresh_all_today_clicked
+            )
+            refresh_scope = (
+                "all_indicators"
+                if refresh_all_today_clicked
+                else "selected_indicator"
+            )
+
+            if refresh_today_clicked:
+                spinner_text = (
+                    "Refreshing all Single Indicator today values."
+                    if refresh_scope == "all_indicators"
+                    else "Refreshing this Single Indicator row."
+                )
+
+                if refresh_scope == "all_indicators":
+                    _get_scd_cache_stats()["force_refreshes"] += 1
+
+                with st.spinner(spinner_text):
+                    st.session_state.scd_single_indicator_matrix = (
+                        _refresh_scd_single_indicator_live_date_cells(
+                            matrix=single_matrix,
+                            refresh_scope=refresh_scope,
+                        )
+                    )
+                    st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
+                    single_matrix = st.session_state.get("scd_single_indicator_matrix")
+
+                refresh_report = (
+                    single_matrix.get("last_live_refresh", {})
+                    if isinstance(single_matrix, dict)
+                    else {}
+                )
+
+                if refresh_report.get("status") in {"ok", "partial"}:
+                    cache_stats = _get_scd_cache_stats()
+                    cache_stats["today_cell_refreshes"] += 1
+                    cache_stats["today_cell_tickers_refreshed"] += len(
+                        refresh_report.get("tickers_refreshed", [])
+                    )
+
+                    cache_stats["selected_row_refreshes"] += int(
+                        refresh_report.get("selected_row_refreshes", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_tickers"] += int(
+                        refresh_report.get("selected_row_refresh_tickers", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_fallbacks"] += int(
+                        refresh_report.get("selected_row_refresh_fallbacks", 0) or 0
+                    )
+                    cache_stats["selected_row_refresh_errors"] += int(
+                        refresh_report.get("selected_row_refresh_errors", 0) or 0
+                    )
+
+                selected_row_tickers = int(
+                    refresh_report.get("selected_row_refresh_tickers", 0) or 0
+                )
+                fallback_tickers = int(
+                    refresh_report.get("selected_row_refresh_fallbacks", 0) or 0
+                )
+                broad_refresh_tickers = len(
+                    refresh_report.get("broad_refresh_tickers", []) or []
+                )
+
+                refresh_path_caption = None
+                if broad_refresh_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: full today refresh used for "
+                        f"{broad_refresh_tickers} ticker cell(s). Other Single "
+                        "Indicator rows can reuse the refreshed today payload when rebuilt."
+                    )
+                elif selected_row_tickers and fallback_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: selected-row calculation used for "
+                        f"{selected_row_tickers} ticker cell(s); full calculation "
+                        f"full fallback used for {fallback_tickers} ticker cell(s)."
+                    )
+                elif selected_row_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: selected-row calculation used for "
+                        f"{selected_row_tickers} ticker cell(s)."
+                    )
+                elif fallback_tickers:
+                    refresh_path_caption = (
+                        "Refresh path: full calculation fallback used for "
+                        f"{fallback_tickers} ticker cell(s)."
+                    )
+
+                if refresh_report.get("status") == "ok":
+                    if refresh_report.get("refresh_scope") == "all_indicators":
+                        st.success(
+                            "Today's indicator payload refreshed for "
+                            f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
+                            f"in {refresh_report.get('total_seconds')}s."
+                        )
+                    else:
+                        st.success(
+                            "This indicator's today cells refreshed for "
+                            f"{len(refresh_report.get('tickers_refreshed', []))} ticker(s) "
+                            f"in {refresh_report.get('total_seconds')}s."
+                        )
+
+                    if refresh_path_caption:
+                        st.caption(refresh_path_caption)
+                elif refresh_report.get("status") == "partial":
+                    st.warning(
+                        "Today's cells partially refreshed. "
+                        f"Refreshed {len(refresh_report.get('tickers_refreshed', []))} ticker(s); "
+                        f"errors: {len(refresh_report.get('errors', []))}."
+                    )
+                    if refresh_path_caption:
+                        st.caption(refresh_path_caption)
+                else:
+                    st.warning(
+                        refresh_report.get(
+                            "message",
+                            "Today-refresh did not complete.",
+                        )
+                    )
+
+            if live_date_in_matrix:
+                live_caption = _get_scd_live_as_of_caption(
+                    matrix=single_matrix,
+                    date_key=live_date_key,
+                )
+                st.caption(
+                    live_caption
+                    if live_caption
+                    else "Today's data: no current-session timestamp available yet."
+                )
+
+            if st.session_state.scd_single_indicator_matrix_last_run:
+                st.caption(
+                    "Last Single Indicator matrix render/build: "
+                    f"{st.session_state.scd_single_indicator_matrix_last_run.isoformat(timespec='seconds')}"
+                )
+
+            if SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC:
+                with st.expander("Tail-buffer equivalence diagnostic", expanded=False):
+                    st.caption(
+                        "Diagnostic only. Compares reduced Scenario B buffers against "
+                        "the 435-day reference for one ticker, one visible matrix date, "
+                        "and the selected Single Indicator row. This does not change "
+                        "refresh behavior."
+                    )
+
+                    diagnostic_tickers = _dedupe_preserve_order_str(
+                        single_matrix.get("tickers", [])
+                    )
+                    diagnostic_dates = [
+                        _normalize_scd_cache_date_value(date_key)
+                        for date_key in single_matrix.get("dates", [])
+                    ]
+                    diagnostic_dates = [
+                        date_key for date_key in diagnostic_dates if date_key
+                    ]
+
+                    if not diagnostic_tickers or not diagnostic_dates:
+                        st.info(
+                            "Build a populated Single Indicator matrix before running "
+                            "the tail-buffer diagnostic."
+                        )
+                    else:
+                        selected_diag_ticker = st.selectbox(
+                            "Diagnostic ticker",
+                            options=diagnostic_tickers,
+                            index=0,
+                            key="scd_tail_diag_ticker",
+                        )
+
+                        selected_diag_date = st.selectbox(
+                            "Diagnostic date",
+                            options=diagnostic_dates,
+                            index=len(diagnostic_dates) - 1,
+                            key="scd_tail_diag_date",
+                            help=(
+                                "The diagnostic can run on any visible matrix date. "
+                                "This is separate from production today-refresh."
+                            ),
+                        )
+
+                        selected_candidate_buffers = st.multiselect(
+                            "Candidate buffer(s)",
+                            options=[80, 120, 180, 250, 320, 365, 400],
+                            default=[365],
+                            key="scd_tail_diag_buffers",
+                            help=(
+                                "Each candidate is compared against the 435-day Scenario B "
+                                "reference. Start with one buffer to keep runtime manageable. "
+                                "Larger buffers are slower but may be necessary for the full "
+                                "rule-engine path to produce comparable results."
+                            ),
+                        )
+                        if st.button(
+                            "Run tail-buffer diagnostic",
+                            key="scd_run_tail_buffer_diagnostic",
+                        ):
+                            with st.spinner("Running tail-buffer equivalence diagnostic."):
+                                try:
+                                    diagnostic_report = (
+                                        _run_scd_tail_buffer_equivalence_diagnostic(
+                                            matrix=single_matrix,
+                                            ticker=selected_diag_ticker,
+                                            diagnostic_date_key=selected_diag_date,
+                                            candidate_buffers=list(selected_candidate_buffers),
+                                        )
+                                    )
+                                    st.session_state.scd_tail_buffer_diagnostic_last = (
+                                        diagnostic_report
+                                    )
+                                except Exception as e:
+                                    st.session_state.scd_tail_buffer_diagnostic_last = {
+                                        "status": "error",
+                                        "error": str(e),
+                                        "created_at": datetime.now().isoformat(
+                                            timespec="seconds"
+                                        ),
+                                    }
+
+                    st.markdown("---")
+                    st.caption(
+                        "Selected-family scoring diagnostic. Compares the full current "
+                        "scoring path against scoring only the selected row's rule-engine "
+                        "family, using the same 435-day buffer and same numeric path."
+                    )
+
+                    if st.button(
+                        "Run selected-family scoring diagnostic",
+                        key="scd_run_selected_family_scoring_diagnostic",
+                    ):
+                        with st.spinner("Running selected-family scoring diagnostic."):
+                            try:
+                                scoring_report = (
+                                    _run_scd_selected_family_scoring_diagnostic(
+                                        matrix=single_matrix,
+                                        ticker=selected_diag_ticker,
+                                        diagnostic_date_key=selected_diag_date,
+                                    )
+                                )
+                                st.session_state.scd_selected_family_scoring_diagnostic_last = (
+                                    scoring_report
+                                )
+                            except Exception as e:
+                                st.session_state.scd_selected_family_scoring_diagnostic_last = {
+                                    "status": "error",
+                                    "error": str(e),
+                                    "created_at": datetime.now().isoformat(
+                                        timespec="seconds"
+                                    ),
+                                }
+
+                    scoring_report = st.session_state.get(
+                        "scd_selected_family_scoring_diagnostic_last"
+                    )
+                    if isinstance(scoring_report, dict):
+                        if scoring_report.get("status") == "ok":
+                            st.caption(
+                                "Selected-family scoring run: "
+                                f"reference={scoring_report.get('reference_seconds')}s · "
+                                f"candidate={scoring_report.get('candidate_seconds')}s · "
+                                f"delta={scoring_report.get('seconds_delta')}s · "
+                                f"family={scoring_report.get('engine_indicator')}"
+                            )
+
+                            scoring_df = pd.DataFrame([scoring_report])
+                            display_cols = [
+                                col
+                                for col in [
+                                    "engine_indicator",
+                                    "safe_for_candidate",
+                                    "reference_seconds",
+                                    "candidate_seconds",
+                                    "seconds_delta",
+                                    "value_match",
+                                    "score_match",
+                                    "signal_match",
+                                    "display_text_match",
+                                    "status_match",
+                                    "value_delta",
+                                    "reference_score",
+                                    "candidate_score",
+                                    "reference_signal",
+                                    "candidate_signal",
+                                ]
+                                if col in scoring_df.columns
+                            ]
+                            st.dataframe(
+                                scoring_df[display_cols],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            with st.expander(
+                                "Raw selected-family scoring diagnostic report",
+                                expanded=False,
+                            ):
+                                st.json(scoring_report)
+                        else:
+                            st.warning(
+                                scoring_report.get(
+                                    "error",
+                                    "Selected-family scoring diagnostic did not complete.",
+                                )
+                            )
+
+                    st.markdown("---")
+                    st.caption(
+                        "Selected-row numeric config diagnostic. Compares selected-family "
+                        "scoring with the broad numeric path against selected-family "
+                        "scoring with a minimal selected-row compute config. D3-D5 "
+                        "currently supports RSI, SMA, EMA, HMA, VWMA, ROC, "
+                        "Williams %R, CCI, MFI, and CMF rows."
+                    )
+
+                    if st.button(
+                        "Run selected-row numeric config diagnostic",
+                        key="scd_run_selected_row_numeric_config_diagnostic",
+                    ):
+                        with st.spinner("Running selected-row numeric config diagnostic."):
+                            try:
+                                numeric_config_report = (
+                                    _run_scd_selected_row_numeric_config_diagnostic(
+                                        matrix=single_matrix,
+                                        ticker=selected_diag_ticker,
+                                        diagnostic_date_key=selected_diag_date,
+                                    )
+                                )
+                                st.session_state.scd_selected_row_numeric_config_diagnostic_last = (
+                                    numeric_config_report
+                                )
+                            except Exception as e:
+                                st.session_state.scd_selected_row_numeric_config_diagnostic_last = {
+                                    "status": "error",
+                                    "error": str(e),
+                                    "created_at": datetime.now().isoformat(
+                                        timespec="seconds"
+                                    ),
+                                }
+
+                    numeric_config_report = st.session_state.get(
+                        "scd_selected_row_numeric_config_diagnostic_last"
+                    )
+                    if isinstance(numeric_config_report, dict):
+                        if numeric_config_report.get("status") == "ok":
+                            st.caption(
+                                "Selected-row numeric config run: "
+                                f"reference={numeric_config_report.get('reference_seconds')}s · "
+                                f"candidate={numeric_config_report.get('candidate_seconds')}s · "
+                                f"delta={numeric_config_report.get('seconds_delta')}s · "
+                                f"family={numeric_config_report.get('engine_indicator')}"
+                            )
+
+                            numeric_config_df = pd.DataFrame([numeric_config_report])
+                            display_cols = [
+                                col
+                                for col in [
+                                    "engine_indicator",
+                                    "safe_for_candidate",
+                                    "reference_seconds",
+                                    "candidate_seconds",
+                                    "seconds_delta",
+                                    "value_match",
+                                    "score_match",
+                                    "signal_match",
+                                    "display_text_match",
+                                    "status_match",
+                                    "value_delta",
+                                    "reference_compute_config_keys",
+                                    "candidate_compute_config_keys",
+                                    "reference_score",
+                                    "candidate_score",
+                                    "reference_signal",
+                                    "candidate_signal",
+                                ]
+                                if col in numeric_config_df.columns
+                            ]
+                            st.dataframe(
+                                numeric_config_df[display_cols],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            with st.expander(
+                                "Raw selected-row numeric config diagnostic report",
+                                expanded=False,
+                            ):
+                                st.json(numeric_config_report)
+                        else:
+                            st.warning(
+                                numeric_config_report.get(
+                                    "error",
+                                    "Selected-row numeric config diagnostic did not complete.",
+                                )
+                            )
+
+                    diagnostic_report = st.session_state.get(
+                        "scd_tail_buffer_diagnostic_last"
+                    )
+                    if isinstance(diagnostic_report, dict):
+                        if diagnostic_report.get("status") == "ok":
+                            st.caption(
+                                "Reference run: "
+                                f"{diagnostic_report.get('reference_seconds')}s · "
+                                f"Rows: {diagnostic_report.get('reference_context_rows')} · "
+                                f"Window: {diagnostic_report.get('reference_context_first_date')} → "
+                                f"{diagnostic_report.get('reference_context_last_date')}"
+                            )
+
+                            candidates_df = pd.DataFrame(
+                                diagnostic_report.get("candidates", [])
+                            )
+                            if not candidates_df.empty:
+                                display_cols = [
+                                    col
+                                    for col in [
+                                        "candidate_buffer_days",
+                                        "safe_for_candidate",
+                                        "candidate_seconds",
+                                        "candidate_context_rows",
+                                        "value_match",
+                                        "score_match",
+                                        "signal_match",
+                                        "display_text_match",
+                                        "status_match",
+                                        "value_delta",
+                                        "error",
+                                    ]
+                                    if col in candidates_df.columns
+                                ]
+                                st.dataframe(
+                                    candidates_df[display_cols],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                            with st.expander("Raw tail-buffer diagnostic report", expanded=False):
+                                st.json(diagnostic_report)
+                        else:
+                            st.warning(
+                                diagnostic_report.get(
+                                    "error",
+                                    "Tail-buffer diagnostic did not complete.",
+                                )
+                            )
+
+            _render_scd_single_indicator_matrix_view(single_matrix)
+
+            if single_matrix.get("errors"):
+                st.warning("Some ticker payloads produced errors.")
+                with st.expander("View Single Indicator ticker errors", expanded=False):
+                    st.write(single_matrix.get("errors"))
+
+            with st.expander("Ticker build diagnostics", expanded=False):
+                st.json(single_matrix.get("ticker_status", {}))
+
+            profile = single_matrix.get("profile", {})
+            if isinstance(profile, dict) and profile:
+                st.caption(
+                    f"Built in {profile.get('total_seconds')}s · "
+                    f"Request mode: {single_matrix.get('anchor_mode')} · "
+                    f"Anchor: {single_matrix.get('anchor_date')}"
+                )
+
+            with st.expander("Cache diagnostics", expanded=False):
+                _render_scd_cache_diagnostics()
+        else:
+            st.info(
+                "Build the Single Indicator time-series matrix to prepare the "
+                "dates × tickers payload for the next rendering step."
+            )
+
+        return
 
     selected_row_keys = _render_scd_indicator_selection_controls()
 
@@ -4201,19 +8763,53 @@ def show_stock_comparison_dashboard():
     else:
         st.caption(f"Snapshot date: Latest available completed snapshot ({effective_anchor_date})")
 
+    target_date_key_for_build = _resolve_scd_cross_sectional_target_date_key(
+        effective_anchor_date
+    )
+    live_date_key_for_build = _get_scd_current_live_date_key()
+    is_live_snapshot = (
+        bool(target_date_key_for_build)
+        and bool(live_date_key_for_build)
+        and _normalize_scd_cache_date_value(target_date_key_for_build)
+        == live_date_key_for_build
+    )
+
+    if is_live_snapshot:
+        st.caption(
+            "Today/live snapshot: Build uses available session cache by default "
+            "for speed. Use Refresh today's values when you want current values."
+        )
+
     can_build_matrix = bool(selected_tickers) and bool(selected_row_keys)
     if not can_build_matrix:
         st.info("Select at least one ticker and one indicator row to build the SCD matrix.")
 
-    col_build, col_clear_matrix = st.columns([0.45, 0.55])
+    col_build, col_refresh_live, col_clear_matrix = st.columns([0.34, 0.33, 0.33])
 
     with col_build:
         build_clicked = st.button(
-            "Build/Refresh Matrix",
+            "Rebuild Comparison Matrix",
             key="scd_build_matrix",
             type="primary",
             disabled=not can_build_matrix,
             use_container_width=True,
+            help=(
+                "Builds the comparison matrix using available session cache when possible. "
+                "This is the speed-first default."
+            ),
+        )
+
+    with col_refresh_live:
+        refresh_live_clicked = st.button(
+            "Refresh today's values",
+            key="scd_refresh_live_matrix",
+            disabled=not can_build_matrix or not is_live_snapshot,
+            use_container_width=True,
+            help=(
+                "Available only when the Multiple Indicators as-of date resolves to "
+                "today's live trading date. Bypasses the SCD session cache for the "
+                "currently selected tickers and rebuilds the matrix with current values."
+            ),
         )
 
     with col_clear_matrix:
@@ -4231,17 +8827,25 @@ def show_stock_comparison_dashboard():
             st.session_state.scd_matrix_last_run = None
             st.rerun()
 
-    if build_clicked:
-        # Read from Session State at build time so the recalculation value used
-        # by the matrix builder matches the active widget state for this run.
+    if build_clicked or refresh_live_clicked:
+        # Build remains cache-first by default. The explicit live-refresh action
+        # bypasses the session cache for today's Multiple Indicators values only.
         force_refresh_for_build = bool(
             st.session_state.get("scd_force_refresh_cache", False)
         )
+        if refresh_live_clicked:
+            force_refresh_for_build = True
 
         if force_refresh_for_build:
             _get_scd_cache_stats()["force_refreshes"] += 1
 
-        with st.spinner("Building comparison matrix from existing rolling signal data..."):
+        spinner_text = (
+            "Refreshing today's Multiple Indicators values..."
+            if refresh_live_clicked
+            else "Building comparison matrix from existing rolling signal data..."
+        )
+
+        with st.spinner(spinner_text):
             st.session_state.scd_signal_matrix = _build_scd_cross_sectional_matrix(
                 selected_tickers=selected_tickers,
                 selected_row_keys=selected_row_keys,
@@ -4250,9 +8854,45 @@ def show_stock_comparison_dashboard():
                 anchor_date=effective_anchor_date,
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
+
+        refreshed_matrix = st.session_state.get("scd_signal_matrix")
+        refreshed_profile = (
+            refreshed_matrix.get("profile", {})
+            if isinstance(refreshed_matrix, dict)
+            else {}
+        )
+
+        if refresh_live_clicked:
+            st.success(
+                "Today's Multiple Indicators values refreshed for "
+                f"{len(selected_tickers)} ticker(s)"
+                + (
+                    f" in {refreshed_profile.get('total_seconds')}s."
+                    if isinstance(refreshed_profile, dict)
+                    and refreshed_profile.get("total_seconds") is not None
+                    else "."
+                )
+            )
      
     if st.session_state.scd_matrix_last_run:
-        st.caption(f"Last SCD matrix build: {st.session_state.scd_matrix_last_run}")
+        st.caption(f"Last SCD matrix render/build: {st.session_state.scd_matrix_last_run}")
+
+    live_date_key = _get_scd_current_live_date_key()
+    current_matrix = st.session_state.get("scd_signal_matrix")
+    if (
+        isinstance(current_matrix, dict)
+        and live_date_key
+        and _normalize_scd_cache_date_value(current_matrix.get("target_date")) == live_date_key
+    ):
+        live_caption = _get_scd_live_as_of_caption(
+            matrix=current_matrix,
+            date_key=live_date_key,
+        )
+        st.caption(
+            live_caption
+            if live_caption
+            else "Today's data: no current-session timestamp available yet."
+        )
 
     _render_scd_matrix_view(st.session_state.scd_signal_matrix)
 
@@ -4287,18 +8927,8 @@ def show_stock_comparison_dashboard():
             _clear_scd_session_cache()
             st.rerun()
 
-    with st.expander("Cache status", expanded=False):
-        cache_stats = _get_scd_cache_stats()
-        st.caption(
-            "Cache status after latest build: "
-            f"{len(st.session_state.get('scd_payload_cache', {}))} ticker result(s), "
-            f"{len(st.session_state.get('scd_hover_ohlcv_cache', {}))} hover-context result(s). "
-            f"Reused: rolling={cache_stats.get('rolling_hits', 0)}, "
-            f"hover={cache_stats.get('hover_hits', 0)}. "
-            f"Calculated: rolling={cache_stats.get('rolling_misses', 0)}, "
-            f"hover={cache_stats.get('hover_misses', 0)}. "
-            f"Manual refreshes={cache_stats.get('force_refreshes', 0)}."
-        )
+    with st.expander("Cache diagnostics", expanded=False):
+        _render_scd_cache_diagnostics()
 
 def main():
     """Main application function with page navigation"""
