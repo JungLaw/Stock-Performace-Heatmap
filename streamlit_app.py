@@ -8231,8 +8231,13 @@ def show_stock_comparison_dashboard():
                     use_container_width=True,
                     help=(
                         "Refresh today's visible cells for the currently selected "
-                        "Single Indicator row. Supported rows use the faster "
-                        "selected-row path; unsupported rows fall back to the full path."
+                        "Single Indicator row only. Supported rows use the faster "
+                        "selected-row path; unsupported rows fall back to the full path. "
+                        "This updates the currently displayed matrix cells, but it does "
+                        "not replace the broader reusable payload used by later "
+                        "'Rebuild Time-Series Matrix' actions. Use 'Refresh all indicators "
+                        "for today' when you want refreshed today data to persist across "
+                        "later rebuilds or indicator switching."
                     ),
                 )
 
@@ -8243,9 +8248,11 @@ def show_stock_comparison_dashboard():
                     disabled=not live_date_in_matrix,
                     use_container_width=True,
                     help=(
-                        "Refresh today's broad payload for the selected ticker set. "
-                        "This is slower, but it lets other Single Indicator rows reuse "
-                        "the refreshed today data when rebuilt."
+                        "Refresh today's broader reusable payload for the selected "
+                        "ticker set. This is slower than refreshing one indicator, "
+                        "but later 'Rebuild Time-Series Matrix' actions and other "
+                        "Single Indicator rows can reuse the refreshed today data "
+                        "and freshness timestamp."
                     ),
                 )
 
