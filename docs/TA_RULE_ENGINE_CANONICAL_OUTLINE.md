@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.3.0
+- Version: 3.3.1
 - Created: 1/12/26
-- Last update: 5/26/2026
+- Last update: 6/30/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -468,19 +468,27 @@ This completed workstream added a row-selection / grouping architecture and rela
 ---
 #### Phase III Extension — Stock Comparison Dashboard v1
 
-**Status:** Implementation-prep active workstream
+**Status:** Feature-branch implementation and focused regression validation complete; D3-D9 cleanup / promotion decision active.
 
 **Current objective:**  
-Implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells.
+Finalize D3-D9 cleanup, update planning assets, and decide whether to merge `feature/scd-v1-exploration` into `main` for SCD v1 stabilization.
+
+**Current checkpoint:** `0727ee6` — `(feat) Split Single Indicator today refresh controls`
 
 **Primary architecture label:**  
 SCD Signal Matrix Architecture
 
 **Primary interaction / navigation model**
-- `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
+- `Ticker Source → Ticker Set → Analysis Mode → Indicator Selection → SCD Matrix View`
 
-**Active v1 display mode**
-- **SCD Cross-Sectional Matrix View**
+**Implemented analysis modes**
+- `Multiple Indicators`
+  - cross-sectional ticker × indicator matrix
+- `Single Indicator`
+  - date × ticker time-series matrix for one selected row
+
+**Active v1 display modes**
+- **SCD Multiple Indicators Cross-Sectional Matrix View**
   - rows = selected indicators
   - columns = selected tickers
   - cells = existing Rolling Heatmap value / signal / score
@@ -490,14 +498,21 @@ SCD Signal Matrix Architecture
     - copy/export/audit companion to the heatmap
     - uses the same underlying matrix cells
     - must not introduce ranking, aggregation, new scoring, or semantic reinterpretation
+  - supports completed historical cache reuse
+  - supports today/live refresh
 
-**Recognized but deferred display mode**
-- **SCD Single-Indicator Time-Series Matrix View**
+- **SCD Single Indicator Time-Series Matrix View**
   - rows = dates
   - columns = selected tickers
-  - indicator = one selected technical indicator
-  - window = 25 trading days
-  - status = recognized but deferred from v1 implementation unless explicitly promoted
+  - indicator = one selected technical indicator row
+  - cells = existing Rolling Heatmap value / signal / score
+  - supports completed historical cache reuse
+  - supports selected-row refresh through `Refresh this indicator only`
+  - supports broad today payload refresh through `Refresh all indicators for today`
+  - displays data freshness timestamp separately from matrix render/build time
+
+**Formerly deferred display mode now promoted**
+- SCD Single-Indicator Time-Series Matrix View was recognized as deferred in v3.3.0 and has now been explicitly promoted and implemented in SCD v1 D3.
 
 **Scope boundary**
 This workstream is a Phase III UI / display workstream. It must reuse existing Rolling Heatmap row-selection, rule-engine payload, Scenario B acquisition behavior, and value / signal / score cells. It must not redefine numeric truth, semantic meaning, score meaning, data acquisition policy, or persistence behavior.
@@ -512,8 +527,24 @@ This workstream is a Phase III UI / display workstream. It must reuse existing R
 - reuse of the existing Rolling Heatmap row-selection resolver
 - multi-ticker execution through the existing Rolling Heatmap / Option-C rule-engine path
 - latest-cell extraction per selected ticker and row_key
+- Single Indicator date × ticker matrix assembly
 - SCD Plotly Heatmap View
 - SCD Detail Table View
+- Single Indicator chart layer
+- Single Indicator freshness timestamp display
+- Multiple Indicators live/today refresh
+- Single Indicator refresh controls:
+  - `Refresh this indicator only`
+  - `Refresh all indicators for today`
+- session-only SCD cache controls
+- coverage-aware bundle cache
+- completed historical result-cell cache
+
+**Refresh / cache guardrails**
+- selected-row / current-indicator refresh is not equivalent to broad today refresh
+- broad today refresh must be labeled separately from selected-indicator refresh
+- SCD cache layers remain session-only unless a future persistence change is explicitly approved
+- completed historical result-cell cache remains separate from live/today refresh behavior
 
 **Active v1 excludes**
 - new semantic scoring
@@ -530,6 +561,29 @@ This workstream is a Phase III UI / display workstream. It must reuse existing R
 - persistent SCD ticker-set management
 - AgGrid / pivot-table implementation
 
+**Rejected / removed D3 experimental path**
+- D3-F row-specific live result-cell cache:
+  - status = tested, rejected, and removed
+  - reason:
+    - older row-specific live cells could override newer broad payload freshness
+    - created confusing cross-indicator timestamp behavior
+  - retained outcome:
+    - Single Indicator freshness timestamp display remains
+    - row-specific live-cell cache and diagnostics were removed
+
+**Deferred / later cleanup items**
+- Hidden D3-C / D3-D diagnostic scaffolding remains available but hidden:
+  - `SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC = False`
+- Cleanup decision:
+  - keep hidden diagnostics for now
+  - document future cleanup / maintenance pass
+- Deferred UX idea:
+  - in-window Single Indicator display-date selector
+  - useful but not required for D3 promotion
+- Deferred optimization:
+  - further broad-refresh runtime optimization
+  - current broad refresh is coherent and validated, but runtime can remain broad-path-like
+
 **Deferred numeric backlog remains unchanged**
 - SMA slope / SMA semantic reopen
 
@@ -537,6 +591,27 @@ This workstream is a Phase III UI / display workstream. It must reuse existing R
 - composites
 - cross-confirmation
 - regime logic
+
+**D3-D9 validation checkpoint**
+- Validated checkpoint:
+  - `0727ee6` — `(feat) Split Single Indicator today refresh controls`
+- Focused validation completed:
+  - Single Indicator initial build
+  - `Refresh this indicator only`
+  - `Refresh all indicators for today`
+  - cross-indicator timestamp reuse after broad refresh
+  - unsupported-row fallback behavior
+  - Multiple Indicators historical build
+  - Multiple Indicators today refresh
+  - no live-cell cache diagnostics after D3-F removal
+  - compile/static checks passed for:
+    - `streamlit_app.py`
+    - `src/calculations/indicator_preprocessor.py`
+    - `src/calculations/signal_classifier.py`
+    - `src/calculations/signals_loader.py`
+    - `src/calculations/technical.py`
+- Promotion status:
+  - ready for merge-to-main consideration after planning assets are updated
 
 ---
 ## Phase Transition — Option E Wave 1 Complete → Option F Activation
@@ -660,7 +735,7 @@ No structural DB changes should occur until these decisions are finalized.
   * Rolling heatmap acquisition (Scenario B): ✅ complete
   * Layout & semantics: ✅ complete
   * Rolling Heatmap Selection & Catalog Architecture (v1): ✅ complete
-  * Stock Comparison Dashboard v1: ▶ implementation-prep active workstream
+  * Stock Comparison Dashboard v1: ✅ feature-branch implementation / focused regression validation complete; D3-D9 promotion decision active
 
 * Phase IV: 🔒 future
 
@@ -668,24 +743,40 @@ No structural DB changes should occur until these decisions are finalized.
 
 ## What Comes Next (Immediately)
 
-## What Comes Next (Immediately)
-
 **Next active workstream:**
-1) **Phase III Extension — Stock Comparison Dashboard v1** — implementation-prep active workstream
-   - implement a cross-sectional multi-ticker technical comparison view using existing Rolling Heatmap value / signal / score cells
-   - use the **SCD Signal Matrix Architecture**
-   - primary interaction / navigation model:
-     - `Ticker Source → Ticker Set → Indicator Selection → Cross-Sectional Signal Matrix`
-   - active v1 display mode:
-     - **SCD Cross-Sectional Matrix View**
-   - recognized but deferred display mode:
-     - **SCD Single-Indicator Time-Series Matrix View**
-   - color rule for first implementation:
-     - use existing semantic score color
-   - do not introduce new semantic scoring, ticker ranking, aggregate technical strength, relative color mode, composites, cross-confirmation, regime logic, new numeric formulas, new rulebook thresholds, new persistence behavior, or DB schema changes
+1) **Phase III Extension — Stock Comparison Dashboard v1 — D3-D9 cleanup / promotion decision**
+   - update planning assets to reflect completed SCD v1 D3 implementation
+   - decide whether to merge `feature/scd-v1-exploration` into `main`
+   - after merge, run post-merge validation on `main`
+   - if validation passes, tag a stable checkpoint:
+     - candidate tag: `v0.3.3-scd-single-indicator-refresh-controls`
 
-**Recently completed workstream:**
-2) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)** — ✅ COMPLETE
+**Recently completed workstreams:**
+2) **Phase III Extension — Stock Comparison Dashboard v1 / D3** — feature-branch implementation and focused regression validation complete
+   - Multiple Indicators cross-sectional matrix implemented
+   - Single Indicator time-series matrix promoted and implemented
+   - Single Indicator chart layer implemented
+   - SCD session cache controls implemented
+   - coverage-aware bundle cache implemented
+   - completed historical result-cell cache implemented
+   - Multiple Indicators live/today refresh implemented
+   - Single Indicator selected-row refresh implemented
+   - Single Indicator freshness timestamp display implemented
+   - split Single Indicator refresh controls:
+     - `Refresh this indicator only`
+     - `Refresh all indicators for today`
+   - D3-F row-specific live result-cell cache tested, rejected, and removed
+   - focused SCD regression checks passed at checkpoint `0727ee6`
+
+3) **Recent indicator reference / rule-preprocessor updates**
+   - `dfd0c29` — MACD & ATR reference / definition updates
+   - `06d48a5` — DPO, MACD, STOCH markdown reference updates
+   - `06d48a5` — `master_rules_normalized.json` fine-tuning:
+     - window-aligned slope for HMA
+     - standardized ATRP handling for BBP
+   - `06d48a5` — `indicator_preprocessor.py` parameterized VWMA compatibility aliases
+
+4) **Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1)** — ✅ COMPLETE
    - authoritative row classification mapping
    - curated preset / Custom membership
    - selection-resolution logic
@@ -707,3 +798,6 @@ No structural DB changes should occur until these decisions are finalized.
 - SMA slope / SMA semantic reopen
 
 **Important boundary**
+- SCD D3 did not introduce new formulas, new scoring, ranking, aggregate technical strength, DB tables, persistence behavior, composites, cross-confirmation, or regime logic.
+- Single Indicator selected-row refresh and broad today refresh must remain explicitly labeled as separate actions.
+- Hidden diagnostics remain hidden and deferred for later cleanup.
