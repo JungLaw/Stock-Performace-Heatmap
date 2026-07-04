@@ -1,12 +1,28 @@
 # Master Checklist (Authoritative) — Phase 3  
 **TA Rule Engine (GPT)**  
 **Created**: 12/23/25
-**last update**: 6/30/26   
-**Version**: 2.2  
+**last update**: 7/4/26   
+**Version**: 2.3  
 
 ---
 ## Change Log
 
+### v2.3 — 7/4/26
+- Added `docs/minor_backlog.md` as the intake / triage ledger for minor one-off tasks, audits, cleanup items, and UX polish candidates.
+- Promoted `MINOR-002 — Crossover Event Signals Feasibility Audit` to upcoming major-scoped workstream candidate:
+  - `Crossover Event Signal Rows v1`
+- Locked first-wave crossover event rows:
+  - `EMA_9_X_EMA_21`
+  - `SMA_20_X_SMA_50`
+  - `SMA_50_X_SMA_200`
+- Locked v1 implementation posture:
+  - event-only scoring
+  - broad-payload support first
+  - no selected-row refresh optimization in v1
+  - no event + state scoring
+  - no regime interpretation
+  - no UI-local scoring
+- Deferred RSI threshold event rows pending row identity, threshold configurability, hover metadata, and scoring-semantics lock.
 ### v2.2 — 6/30/26
 - Phase III Extension — Stock Comparison Dashboard v1 advanced from implementation-prep to feature-branch implementation / validation complete.
 - SCD v1 implemented and validated on `feature/scd-v1-exploration` through:
@@ -170,10 +186,89 @@
 - Scenario B data plumbing implementation documented
 - DB-first missing-range acquisition rules finalized
 
+---
+
 **Current Active Workstream:** Phase III Extension — Stock Comparison Dashboard v1 — D3-D9 cleanup / promotion decision
 
 **Current checkpoint:** `0727ee6` on `feature/scd-v1-exploration`  
 **Current branch status:** feature-branch implementation and focused regression validation complete; merge-to-main decision pending planning-asset updates and final promotion approval.
+
+### Minor backlog tracking
+
+Minor one-off tasks, audits, cleanup items, and UX polish candidates are tracked separately in:
+
+- `docs/minor_backlog.md`
+
+Items from the Minor Backlog Ledger should be promoted into this Master Checklist only when they are:
+- completed,
+- rejected,
+- formally deferred as project-significant,
+- promoted into a major workstream,
+- or found to change authoritative project scope/status.
+
+### Upcoming major-scoped workstream candidate — Crossover Event Signal Rows v1
+
+**Status:** Planning approved / implementation not started.
+
+**Source:** Promoted from `MINOR-002 — Crossover Event Signals Feasibility Audit`.
+
+**Purpose:**
+- add explicit crossover event rows to the shared Rolling Heatmap / SCD row architecture
+- support event-only scoring:
+  - `+2` = bullish crossover event
+  - `-2` = bearish crossover event
+  - `0` = no crossover event
+- preserve existing indicator state rows without reinterpretation
+
+**Recommended first-wave rows:**
+- `EMA_9_X_EMA_21`
+- `SMA_20_X_SMA_50`
+- `SMA_50_X_SMA_200`
+
+**Default / selection behavior:**
+- SCD Multiple Indicators:
+  - include all three first-wave crossover rows in the SCD Multiple Indicators Custom default set
+- SCD Single Indicator:
+  - add `SMA_20_X_SMA_50` to Main Indicators for daily visibility
+  - expose the full first-wave crossover set through Available Indicators → Family: `Crossover`
+- Technical Analysis → Rolling Heatmap:
+  - do not add crossover rows to the global Rolling Heatmap Custom default in v1
+  - make crossover rows available for manual selection through the row catalog / preset path
+  - optional preset: `Crossover Events`
+
+**Deferred from first wave:**
+- `EMA_5_X_EMA_13`
+- RSI threshold event rows until row identity, threshold configurability, hover metadata, and scoring semantics are locked
+- selected-row refresh optimization for crossover rows
+- event + state scoring
+- regime / state lifecycle interpretation
+
+**RSI threshold-event policy, deferred from first wave:**
+- preferred future row identity:
+  - `RSI_14_THRESHOLD_EVENT`
+- preferred configurable threshold metadata:
+  - lower threshold: default `30`, optionally custom `29.9`
+  - upper threshold: default `80`, optionally custom `82.2`
+- intended interpretation:
+  - RSI(14) crossing below the lower threshold = oversold / enter-watch event
+  - RSI(14) crossing above the upper threshold = overbought / exit-watch event
+- do not encode custom threshold values such as `29_9` or `82_2` into permanent dataframe column names unless explicitly approved later.
+
+**Routing:**
+- Numeric/event detection belongs to an Option E-style derived-event layer.
+- Signal interpretation belongs to an Option F-style semantic layer.
+- UI exposure belongs to the existing Rolling Heatmap / SCD row catalog and adapter path.
+- SCD must consume shared row keys / payload cells and must not compute or score crossover events locally.
+
+**Boundary:**
+- no DB schema changes
+- no persistence changes
+- no ticker ranking
+- no aggregate score
+- no composites
+- no cross-confirmation
+- no regime logic
+- no UI-local semantic scoring
 
 ---
 
@@ -546,6 +641,86 @@ Focused validation completed:
 
 Promotion status:
 - ready for merge-to-main consideration after planning assets are updated
+
+---
+## Crossover Event Signal Rows v1 — Upcoming Major-Scoped Workstream Candidate
+
+**Status:** Planning approved / implementation not started.
+
+**Source:** Promoted from `MINOR-002 — Crossover Event Signals Feasibility Audit`.
+
+**Classification:** Compact major-scoped workstream.
+
+### Objective
+
+Add explicit crossover event rows to the TA Rule Engine so Rolling Heatmap, SCD Multiple Indicators, and SCD Single Indicator can display selected moving-average crossover events using shared row keys and shared payload cells.
+
+### First-wave rows
+
+- `EMA_9_X_EMA_21`
+- `SMA_20_X_SMA_50`
+- `SMA_50_X_SMA_200`
+
+### Event-only scoring
+
+- `+2` = bullish crossover event
+- `-2` = bearish crossover event
+- `0` = no crossover event
+
+### Default / selection behavior
+
+**SCD Multiple Indicators**
+- include all three first-wave crossover rows in the SCD Multiple Indicators Custom default set
+
+**SCD Single Indicator**
+- add `SMA_20_X_SMA_50` to Main Indicators for daily visibility
+- expose the full first-wave crossover set through Available Indicators → Family: `Crossover`
+
+**Technical Analysis → Rolling Heatmap**
+- do not add crossover rows to the global Rolling Heatmap Custom default in v1
+- make crossover rows available for manual selection through the row catalog / preset path
+- optional preset: `Crossover Events`
+
+### Deferred from first wave
+
+- `EMA_5_X_EMA_13`
+- RSI threshold event rows until row identity, threshold configurability, hover metadata, and scoring semantics are locked
+- selected-row refresh optimization for crossover rows
+- event + state scoring
+- regime / state lifecycle interpretation
+
+### RSI threshold-event policy, deferred from first wave
+
+Preferred future row identity:
+- `RSI_14_THRESHOLD_EVENT`
+
+Preferred configurable threshold metadata:
+- lower threshold: default `30`, optionally custom `29.9`
+- upper threshold: default `80`, optionally custom `82.2`
+
+Intended interpretation:
+- RSI(14) crossing below the lower threshold = oversold / enter-watch event
+- RSI(14) crossing above the upper threshold = overbought / exit-watch event
+
+Threshold values should not be encoded into permanent dataframe column names unless explicitly approved later.
+
+### Routing
+
+- Numeric/event detection belongs to an Option E-style derived-event layer.
+- Signal interpretation belongs to an Option F-style semantic layer.
+- UI exposure belongs to the existing Rolling Heatmap / SCD row catalog and adapter path.
+- SCD must consume shared row keys / payload cells and must not compute or score crossover events locally.
+
+### Boundaries
+
+- no DB schema changes
+- no persistence changes
+- no ticker ranking
+- no aggregate score
+- no composites
+- no cross-confirmation
+- no regime logic
+- no UI-local semantic scoring
 
 ---
 ## Scenario B — Data Acquisition Stabilization
@@ -936,3 +1111,18 @@ rather than being constructed inside the UI.
 
 ## 8) Documentation / consolidation (Defer until after B + Derived)
 - [ ] Consolidate configs/docs after Options B and Derived are complete (avoid churn)
+
+
+---
+## Minor backlog tracking
+
+Minor one-off tasks, audits, cleanup items, and UX polish candidates are tracked separately in:
+
+- `docs/minor_backlog.md`
+
+Items from the Minor Backlog Ledger should be promoted into this Master Checklist only when they are:
+- completed,
+- rejected,
+- formally deferred as project-significant,
+- promoted into a major workstream,
+- or found to change authoritative project scope/status.

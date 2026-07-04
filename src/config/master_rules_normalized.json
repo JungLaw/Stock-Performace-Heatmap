@@ -1,5 +1,5 @@
 {
-  "version": "0.2.6",
+  "version": "0.2.7",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -178,6 +178,9 @@
           ],
           [
             8
+          ],
+          [
+            9
           ],
           [
             10

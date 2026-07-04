@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.3.1
+- Version: 3.3.2
 - Created: 1/12/26
-- Last update: 6/30/2026
+- Last update: 7/4/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -751,6 +751,40 @@ No structural DB changes should occur until these decisions are finalized.
    - if validation passes, tag a stable checkpoint:
      - candidate tag: `v0.3.3-scd-single-indicator-refresh-controls`
 
+**Next proposed major-scoped workstream after SCD closeout:**
+2) **Crossover Event Signal Rows v1** — planning approved / implementation not started
+   - promoted from `MINOR-002 — Crossover Event Signals Feasibility Audit`
+   - intended as an Option E/F bridge workstream:
+     - Option E-style derived event primitives:
+       - moving-average spread
+       - prior spread
+       - cross-above / cross-below event detection
+     - Option F-style semantic event scoring:
+       - `+2` = bullish crossover event
+       - `-2` = bearish crossover event
+       - `0` = no crossover event
+   - first-wave rows:
+     - `EMA_9_X_EMA_21`
+     - `SMA_20_X_SMA_50`
+     - `SMA_50_X_SMA_200`
+   - first-wave exposure:
+     - SCD Multiple Indicators Custom default includes all three first-wave rows
+     - SCD Single Indicator Main Indicators includes `SMA_20_X_SMA_50`
+     - Rolling Heatmap allows manual selection through catalog / preset path
+   - deferred from first wave:
+     - `EMA_5_X_EMA_13`
+     - RSI threshold event rows until row identity, threshold configurability, hover metadata, and scoring semantics are locked
+     - selected-row refresh optimization
+     - event + state scoring
+     - regime / state lifecycle interpretation
+   - RSI threshold-event policy, deferred from first wave:
+     - preferred future row identity: `RSI_14_THRESHOLD_EVENT`
+     - lower threshold: default `30`, optionally custom `29.9`
+     - upper threshold: default `80`, optionally custom `82.2`
+     - RSI(14) crossing below the lower threshold = oversold / enter-watch event
+     - RSI(14) crossing above the upper threshold = overbought / exit-watch event
+     - threshold values should not be encoded into permanent dataframe column names unless explicitly approved later
+
 **Recently completed workstreams:**
 2) **Phase III Extension — Stock Comparison Dashboard v1 / D3** — feature-branch implementation and focused regression validation complete
    - Multiple Indicators cross-sectional matrix implemented
@@ -801,3 +835,5 @@ No structural DB changes should occur until these decisions are finalized.
 - SCD D3 did not introduce new formulas, new scoring, ranking, aggregate technical strength, DB tables, persistence behavior, composites, cross-confirmation, or regime logic.
 - Single Indicator selected-row refresh and broad today refresh must remain explicitly labeled as separate actions.
 - Hidden diagnostics remain hidden and deferred for later cleanup.
+- Crossover Event Signal Rows v1 is not Option F Wave 2 cross-confirmation and not Option F Wave 3 regime logic.
+- Crossover Event Signal Rows v1 must not introduce composite scoring, ticker ranking, aggregate technical strength, DB schema changes, persistence changes, or UI-local scoring.
