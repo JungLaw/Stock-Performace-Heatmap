@@ -1,4 +1,4 @@
-# Stamp: Tue, June 2, 2026 7:11PM
+# Stamp: Tue, July 7, 2026 1:16 PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -104,6 +104,24 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "display_name": "SMA(250)",
         "definition": "Rough proxy for one trading year.",
         "how_to_read": "Gives a slightly smoother 'annual trend' view than 200 days.",
+    },
+    # Event-only moving-average crossover rows.
+    # Display metadata only: event truth is computed upstream and score truth
+    # comes from the rulebook / signal-classifier path.
+    "EMA_9_X_EMA_21": {
+        "display_name": "EMA 9/21 Cross",
+        "definition": "Event-only row for EMA(9) crossing EMA(21). It marks the crossover event date only.",
+        "how_to_read": "+2 = EMA(9) crossed above EMA(21) on this date. -2 = EMA(9) crossed below EMA(21) on this date. 0 = no crossover event. Blank = insufficient data.",
+    },
+    "SMA_20_X_SMA_50": {
+        "display_name": "SMA 20/50 Cross",
+        "definition": "Event-only row for SMA(20) crossing SMA(50). It marks the crossover event date only.",
+        "how_to_read": "+2 = SMA(20) crossed above SMA(50) on this date. -2 = SMA(20) crossed below SMA(50) on this date. 0 = no crossover event. Blank = insufficient data.",
+    },
+    "SMA_50_X_SMA_200": {
+        "display_name": "SMA 50/200 Cross",
+        "definition": "Event-only row for SMA(50) crossing SMA(200). It marks the crossover event date only.",
+        "how_to_read": "+2 = SMA(50) crossed above SMA(200) on this date. -2 = SMA(50) crossed below SMA(200) on this date. 0 = no crossover event. Blank = insufficient data.",
     },
     "HMA_9": {
         "display_name": "HMA (9)",
@@ -795,6 +813,16 @@ def get_indicator_family(row_key: str) -> str:
     if not row_key:
         return ""
 
+    # Crossover rows must be resolved before generic EMA_/SMA_ prefix checks.
+    # Otherwise EMA_9_X_EMA_21 would be treated as EMA and SMA crossover rows
+    # would be treated as SMA.
+    if row_key in {
+        "EMA_9_X_EMA_21",
+        "SMA_20_X_SMA_50",
+        "SMA_50_X_SMA_200",
+    }:
+        return "Crossover"
+
     if row_key.startswith("EMA_"):
         return "EMA"
     if row_key.startswith("SMA_"):
@@ -931,6 +959,127 @@ def build_plotly_heatmap_inputs(
     # -------------------------------------------------
     _rulebook_cache: Optional[dict] = None
 
+    crossover_specs = {
+        "EMA_9_X_EMA_21": {
+            "fast_col": "EMA_9",
+            "slow_col": "EMA_21",
+            "fast_label": "EMA(9)",
+            "slow_label": "EMA(21)",
+        },
+        "SMA_20_X_SMA_50": {
+            "fast_col": "SMA_20",
+            "slow_col": "SMA_50",
+            "fast_label": "SMA(20)",
+            "slow_label": "SMA(50)",
+        },
+        "SMA_50_X_SMA_200": {
+            "fast_col": "SMA_50",
+            "slow_col": "SMA_200",
+            "fast_label": "SMA(50)",
+            "slow_label": "SMA(200)",
+        },
+    }
+
+    def _is_crossover_key(indicator_key: str) -> bool:
+        return indicator_key in crossover_specs
+
+    def _to_float_or_none(value: Any) -> Optional[float]:
+        if _is_missing(value):
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _format_value_with_delta(
+        *,
+        label: str,
+        curr_value: Any,
+        prev_value: Any,
+        decimals: int = 2,
+        prefix: str = "",
+    ) -> str:
+        curr_float = _to_float_or_none(curr_value)
+        if curr_float is None:
+            return ""
+
+        prev_float = _to_float_or_none(prev_value)
+        delta_abs = None
+        if prev_float is not None:
+            delta_abs = curr_float - prev_float
+
+        delta_pct = safe_pct_delta(curr_float, prev_float)
+
+        suffix = ""
+        if delta_abs is not None or delta_pct is not None:
+            suffix = (
+                f" ({format_signed_number(delta_abs, decimals=decimals)}"
+                f"{f', {format_signed_percent(delta_pct, decimals=1)}' if delta_pct is not None else ''})"
+            )
+
+        return f"{label}: {prefix}{curr_float:,.{decimals}f}{suffix}"
+
+    def _days_between(date_a: Any, date_b: Any) -> Optional[int]:
+        try:
+            d0 = datetime.fromisoformat(str(date_a)[:10])
+            d1 = datetime.fromisoformat(str(date_b)[:10])
+            return abs((d0 - d1).days)
+        except Exception:
+            return None
+
+    def _event_direction(value: Any) -> str:
+        event_value = _to_float_or_none(value)
+        if event_value is None:
+            return "Insufficient data"
+        if event_value > 0.5:
+            return "Bullish crossover"
+        if event_value < -0.5:
+            return "Bearish crossover"
+        return "No crossover event"
+
+    def _days_since_last_crossover(values: List[Any], dates: List[Any], idx: int) -> Optional[int]:
+        if idx < 0 or idx >= len(values) or idx >= len(dates):
+            return None
+
+        current_date = dates[idx]
+        for prior_idx in range(idx, -1, -1):
+            prior_value = _to_float_or_none(values[prior_idx])
+            if prior_value is None:
+                continue
+            if abs(prior_value) > 0.5:
+                return _days_between(current_date, dates[prior_idx])
+
+        return None
+
+    def _resolve_crossover_cross_type(
+        *,
+        event_value: Any,
+        spread_value: Any,
+    ) -> str:
+        """
+        Return the active/next crossover direction for hover display only.
+
+        Event days use the event value directly. Non-event days infer the next
+        possible cross direction from current spread:
+          spread < 0 -> fast MA is below slow MA -> next cross is Bullish
+          spread > 0 -> fast MA is above slow MA -> next cross is Bearish
+        """
+        event_float = _to_float_or_none(event_value)
+        if event_float is not None:
+            if event_float > 0.5:
+                return "Bullish"
+            if event_float < -0.5:
+                return "Bearish"
+
+        spread_float = _to_float_or_none(spread_value)
+        if spread_float is None:
+            return "N/A"
+        if spread_float < 0:
+            return "Bullish"
+        if spread_float > 0:
+            return "Bearish"
+        return "At crossover boundary"
+
     def _load_rulebook() -> dict:
         nonlocal _rulebook_cache
         if _rulebook_cache is not None:
@@ -977,6 +1126,8 @@ def build_plotly_heatmap_inputs(
             return "CMF"
         if indicator_key == "OBV" or indicator_key.startswith("OBV"):
             return "OBV"
+        if _is_crossover_key(indicator_key):
+            return "Crossover"
         if indicator_key.startswith("EMA_"):
             return "EMA"
         if indicator_key.startswith("SMA_"):
@@ -1009,6 +1160,8 @@ def build_plotly_heatmap_inputs(
         """
         if indicator_key == "OBV":
             return "0"
+        if _is_crossover_key(indicator_key):
+            return indicator_key
         # Explicit Bollinger display-row mappings
         if indicator_key == "BB_PCT_B_ST" or indicator_key == "BB_BW_ST":
             return "10_1.5"
@@ -1255,6 +1408,8 @@ def build_plotly_heatmap_inputs(
                         "dpo_context_block": "",
                         "band_context_block": "",
                         "ma_context_block": "",
+                        "crossover_context_block": "",
+                        "crossover_summary_block": "",
 
                         # no rule semantics
                         "rule_expr": "",
@@ -1268,6 +1423,7 @@ def build_plotly_heatmap_inputs(
                         # preformatted hover fields
                         "delta_abs_fmt": delta_abs_fmt,
                         "delta_pct_suffix": delta_pct_suffix,
+                        "delta_line": f"Δ vs prior day: {delta_abs_fmt}{delta_pct_suffix}<br>",
                         "trend_line": trend_line,
                         "signal_line": signal_line,
                         "rule_block": rule_block,
@@ -1345,6 +1501,9 @@ def build_plotly_heatmap_inputs(
             band_context_block = ""
             ma_context_block = ""
             adx_context_block = ""
+            crossover_context_block = ""
+            crossover_summary_block = ""
+            crossover_cell_text = ""
 
             # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
@@ -1588,7 +1747,10 @@ def build_plotly_heatmap_inputs(
             # ----------------------------
             delta_abs_fmt = format_signed_number(delta_abs, decimals=2)
             delta_pct_suffix = f" ({format_signed_percent(delta_pct, decimals=2)})" if delta_pct is not None else ""
-            trend_line = f"Trend: {trend}<br>" if trend else ""
+            delta_line = "" if _is_crossover_key(key) else (
+                f"Δ vs prior day: {delta_abs_fmt}{delta_pct_suffix}<br>"
+            )
+            trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
             signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
             rule_block = f"<br>Rule:<br>{rule_text}<br>" if rule_text else ""
             notes_block = f"<br>Notes:<br>{rule_notes}<br>" if rule_notes else ""
@@ -1598,6 +1760,125 @@ def build_plotly_heatmap_inputs(
             # indicator rows do not use volume hover fields
             volume_block = ""
             volume_vs_avg_block = ""
+
+            # CROSSOVER: Custom hover content using already-computed MA context.
+            # This avoids treating the event value itself as an EMA/SMA value.
+            if _is_crossover_key(key):
+                spec = crossover_specs.get(key, {})
+                current_row = ohlcv_by_date.get(str(d_raw), {})
+                prev_date = raw_dates[idx - 1] if idx > 0 else None
+                prev_row = ohlcv_by_date.get(str(prev_date), {}) if prev_date is not None else {}
+
+                fast_col = spec.get("fast_col")
+                slow_col = spec.get("slow_col")
+                fast_label = spec.get("fast_label", "Fast MA")
+                slow_label = spec.get("slow_label", "Slow MA")
+
+                fast_val = current_row.get(fast_col) if isinstance(current_row, dict) else None
+                slow_val = current_row.get(slow_col) if isinstance(current_row, dict) else None
+                prev_fast_val = prev_row.get(fast_col) if isinstance(prev_row, dict) else None
+                prev_slow_val = prev_row.get(slow_col) if isinstance(prev_row, dict) else None
+
+                price_val = price_by_date.get(d_raw)
+                prev_price_val = price_by_date.get(prev_date) if prev_date is not None else None
+
+                spread_val = None
+                prev_spread_val = None
+
+                fast_float = _to_float_or_none(fast_val)
+                slow_float = _to_float_or_none(slow_val)
+                prev_fast_float = _to_float_or_none(prev_fast_val)
+                prev_slow_float = _to_float_or_none(prev_slow_val)
+
+                if fast_float is not None and slow_float is not None:
+                    spread_val = fast_float - slow_float
+
+                if prev_fast_float is not None and prev_slow_float is not None:
+                    prev_spread_val = prev_fast_float - prev_slow_float
+
+                event_direction = _event_direction(v)
+                event_value = _to_float_or_none(v)
+                days_since = _days_since_last_crossover(values, raw_dates, idx)
+
+                cross_type = _resolve_crossover_cross_type(
+                    event_value=v,
+                    spread_value=spread_val,
+                )
+
+                price_line = _format_value_with_delta(
+                    label="Price",
+                    curr_value=price_val,
+                    prev_value=prev_price_val,
+                    decimals=2,
+                    prefix="$",
+                )
+
+                spread_line = _format_value_with_delta(
+                    label="Spread",
+                    curr_value=spread_val,
+                    prev_value=prev_spread_val,
+                    decimals=2,
+                )
+
+                if spread_line and price_line:
+                    crossover_summary_line = f"{spread_line} | {price_line}"
+                elif spread_line:
+                    crossover_summary_line = spread_line
+                elif price_line:
+                    crossover_summary_line = price_line
+                else:
+                    crossover_summary_line = ""
+
+                crossover_summary_block = (
+                    f"{crossover_summary_line}<br>"
+                    if crossover_summary_line
+                    else ""
+                )
+
+                parts = []
+
+                if prev_spread_val is not None:
+                    parts.append(f"Prior spread: {format_signed_number(prev_spread_val, decimals=2)}")
+                    parts.append("")
+
+                fast_line = _format_value_with_delta(
+                    label=f"Fast MA ({fast_label})",
+                    curr_value=fast_val,
+                    prev_value=prev_fast_val,
+                    decimals=2,
+                )
+                if fast_line:
+                    parts.append(fast_line)
+
+                slow_line = _format_value_with_delta(
+                    label=f"Slow MA ({slow_label})",
+                    curr_value=slow_val,
+                    prev_value=prev_slow_val,
+                    decimals=2,
+                )
+                if slow_line:
+                    parts.append(slow_line)
+
+                parts.append(f"Cross type: {cross_type}")
+
+                parts.append(f"Event: {event_direction}")
+
+                if event_value is not None:
+                    parts.append(f"Event value: {event_value:.0f}")
+
+                if days_since is not None:
+                    parts.append(f"Days since last crossover: {days_since}")
+                else:
+                    parts.append("Days since last crossover: N/A - no prior event in window")
+
+                parts.append("Condition:")
+                parts.append("Bullish = prior spread <= 0 and current spread > 0")
+                parts.append("Bearish = prior spread >= 0 and current spread < 0")
+
+                crossover_context_block = "<br>".join(parts) + "<br>"
+
+                if spread_val is not None:
+                    crossover_cell_text = format_signed_number(spread_val, decimals=2)
 
             # BOLLINGERS: Custom hover content (deltas)
             #if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
@@ -1632,10 +1913,13 @@ def build_plotly_heatmap_inputs(
 
             # MVA: Custom hover content (deltas)
             if (
-                key.startswith("SMA_")
-                or key.startswith("EMA_")
-                or key.startswith("VWMA_")
-                or key.startswith("HMA_")
+                not _is_crossover_key(key)
+                and (
+                    key.startswith("SMA_")
+                    or key.startswith("EMA_")
+                    or key.startswith("VWMA_")
+                    or key.startswith("HMA_")
+                )
             ):
                 current_price = price_by_date.get(d_raw)
 
@@ -1669,9 +1953,16 @@ def build_plotly_heatmap_inputs(
                         f"<br>Price vs. MA: {diff_abs:+.2f}{pct_suffix}<br>"
                     )
 
-            # z must be numeric; use NaN for missing
+            # z must be numeric; use NaN for missing.
+            # For crossover event rows, keep z score-driven but show spread
+            # as the cell text because the event code is lower information-value
+            # and remains available in hover as Event value.
             z_row.append(float(s) if s is not None else float("nan"))
-            text_row.append(format_cell_value(key, v))
+            text_row.append(
+                crossover_cell_text
+                if _is_crossover_key(key) and crossover_cell_text
+                else format_cell_value(key, v)
+            )
             cd_row.append(
                 {
                     "indicator_key": key,
@@ -1693,6 +1984,7 @@ def build_plotly_heatmap_inputs(
                     # preformatted hover fields
                     "delta_abs_fmt": delta_abs_fmt,
                     "delta_pct_suffix": delta_pct_suffix,
+                    "delta_line": delta_line,
                     "trend_line": trend_line,
                     "signal_line": signal_line,
                     "rule_block": rule_block,
@@ -1703,6 +1995,8 @@ def build_plotly_heatmap_inputs(
                     "volume_vs_avg_block": volume_vs_avg_block,
                     "band_context_block": band_context_block,
                     "ma_context_block": ma_context_block,
+                    "crossover_context_block": crossover_context_block,
+                    "crossover_summary_block": crossover_summary_block,
 					"macd_context_block": macd_context_block,
                     "adx_context_block": adx_context_block,
                     "stoch_context_block": stoch_context_block, 
@@ -1749,8 +2043,9 @@ def make_rolling_heatmap_figure(
         "<br>"
         "Value: %{customdata.formatted_value}<br>"
         "%{customdata.ma_context_block}"
-        "Δ vs prior day: %{customdata.delta_abs_fmt}"
-        "%{customdata.delta_pct_suffix}<br>"
+        "%{customdata.crossover_summary_block}"
+        "%{customdata.crossover_context_block}"
+        "%{customdata.delta_line}"
         "%{customdata.trend_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"

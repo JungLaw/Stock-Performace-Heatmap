@@ -209,6 +209,40 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "tags": [],
     },
 
+    # -----------------------------------------------------------------
+    # Signals / crossover event rows
+    # -----------------------------------------------------------------
+    # Event-only rows:
+    #   1.0  = bullish crossover event
+    #  -1.0  = bearish crossover event
+    #   0.0  = valid no-event state
+    #   NaN  = missing / warmup / insufficient base or prior data
+    #
+    # This is classification metadata only. Numeric/event truth remains in
+    # the indicator dataframe; semantic score truth remains in the rulebook
+    # and signal-classifier path.
+    "EMA_9_X_EMA_21": {
+        "family": "Crossover",
+        "category": "Signals",
+        "scope": "Crossover Events",
+        "window": "ST",
+        "tags": ["MVA", "EMA", "Event"],
+    },
+    "SMA_20_X_SMA_50": {
+        "family": "Crossover",
+        "category": "Signals",
+        "scope": "Crossover Events",
+        "window": "MT",
+        "tags": ["MVA", "SMA", "Event"],
+    },
+    "SMA_50_X_SMA_200": {
+        "family": "Crossover",
+        "category": "Signals",
+        "scope": "Crossover Events",
+        "window": "LT",
+        "tags": ["MVA", "SMA", "Event"],
+    },
+
     "VWMA_10": {
         "family": "VWMA",
         "category": "Trend",

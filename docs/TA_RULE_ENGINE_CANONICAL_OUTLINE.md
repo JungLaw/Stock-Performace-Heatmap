@@ -774,7 +774,7 @@ No structural DB changes should occur until these decisions are finalized.
    - deferred from first wave:
      - `EMA_5_X_EMA_13`
      - RSI threshold event rows until row identity, threshold configurability, hover metadata, and scoring semantics are locked
-     - selected-row refresh optimization
+     - selected-row refresh optimization for crossover rows
      - event + state scoring
      - regime / state lifecycle interpretation
    - RSI threshold-event policy, deferred from first wave:

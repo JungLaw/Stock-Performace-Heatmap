@@ -450,6 +450,50 @@
           "description": "Hull Moving Average",
           "source": "internal_spec"
         }
+      },
+      "Crossover": {
+          "params": [
+              ["EMA_9_X_EMA_21"],
+              ["SMA_20_X_SMA_50"],
+              ["SMA_50_X_SMA_200"]
+          ],
+          "feature_scopes": {
+              "heatmap": {
+                  "EMA_9_X_EMA_21": {
+                      "strong_buy": "EMA_9_X_EMA_21 > 0.5",
+                      "neutral": "abs(EMA_9_X_EMA_21) <= 0.5",
+                      "strong_sell": "EMA_9_X_EMA_21 < -0.5",
+                      "type": "crossover_event",
+                      "notes": "Event-only EMA 9/21 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                  },
+                  "SMA_20_X_SMA_50": {
+                      "strong_buy": "SMA_20_X_SMA_50 > 0.5",
+                      "neutral": "abs(SMA_20_X_SMA_50) <= 0.5",
+                      "strong_sell": "SMA_20_X_SMA_50 < -0.5",
+                      "type": "crossover_event",
+                      "notes": "Event-only SMA 20/50 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                  },
+                  "SMA_50_X_SMA_200": {
+                      "strong_buy": "SMA_50_X_SMA_200 > 0.5",
+                      "neutral": "abs(SMA_50_X_SMA_200) <= 0.5",
+                      "strong_sell": "SMA_50_X_SMA_200 < -0.5",
+                      "type": "crossover_event",
+                      "notes": "Event-only SMA 50/200 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                  }
+              },
+              "overlay": {},
+              "alerts": {},
+              "custom": {},
+              "tiles": {},
+              "MVA": {},
+              "basic_signals": {}
+          },
+          "metadata": {
+              "type": "event",
+              "description": "Moving-average crossover event rows",
+              "source": "internal_spec",
+              "default_timeframes": []
+          }
       }
     },
     "Momentum": {
