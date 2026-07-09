@@ -1,5 +1,5 @@
 {
-  "version": "0.2.7",
+  "version": "0.2.8",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -381,6 +381,9 @@
             9
           ],
           [
+            16
+          ],
+          [
             21
           ],
           [
@@ -424,6 +427,14 @@
               "sell": "Close < HMA_55 and HMA_55_slope < 0",
               "strong_sell": "Close < HMA_55 and HMA_55_slope < -0.001 and falling_2bar(HMA_55)",
               "notes": "Particularly effective as a dynamic support/resistance level in trending markets."
+            },
+            "16": {
+              "strong_buy": "Close > HMA_16 and HMA_16_slope > 0.001 and rising_2bar(HMA_16)",
+              "buy": "Close > HMA_16 and HMA_16_slope > 0 and HMA_16_slope <= 0.001",
+              "neutral": "abs(Close/HMA_16 - 1) * 100 <= 1.0 * ATRP_16",
+              "sell": "Close < HMA_16 and HMA_16_slope < 0 and HMA_16_slope >= -0.001",
+              "strong_sell": "Close < HMA_16 and HMA_16_slope < -0.001 and falling_2bar(HMA_16)",
+              "notes": "Strong Buy: Price is above, slope is aggressively up (> 0.001), and accelerating over last 2 bars.<br>Buy: Price is above, slope is positive but moderate (avoids overlapping strong_buy)<br>Neutral: Price is tightly bound to the moving average within a 1x ATR percentage band.<br>Sell: Price is below, slope is negative but moderate.<br>Strong Sell: Price is below, slope is aggressively down (< -0.001), and decelerating over last 2 bars."
             }
           },
           "overlay": {
@@ -464,21 +475,21 @@
                       "neutral": "abs(EMA_9_X_EMA_21) <= 0.5",
                       "strong_sell": "EMA_9_X_EMA_21 < -0.5",
                       "type": "crossover_event",
-                      "notes": "Event-only EMA 9/21 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                      "notes": "Raw crossover event value:<br>1 = bullish cross | -1 = bearish cross | 0 = valid no-event<br>The rule engine maps 'bullish' to +2, bearish to -2, and no-event to 0."
                   },
                   "SMA_20_X_SMA_50": {
                       "strong_buy": "SMA_20_X_SMA_50 > 0.5",
                       "neutral": "abs(SMA_20_X_SMA_50) <= 0.5",
                       "strong_sell": "SMA_20_X_SMA_50 < -0.5",
                       "type": "crossover_event",
-                      "notes": "Event-only SMA 20/50 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                      "notes": "Raw crossover event value:<br>1 = bullish cross | -1 = bearish cross | 0 = valid no-event<br>The rule engine maps 'bullish' to +2, bearish to -2, and no-event to 0."
                   },
                   "SMA_50_X_SMA_200": {
                       "strong_buy": "SMA_50_X_SMA_200 > 0.5",
                       "neutral": "abs(SMA_50_X_SMA_200) <= 0.5",
                       "strong_sell": "SMA_50_X_SMA_200 < -0.5",
                       "type": "crossover_event",
-                      "notes": "Event-only SMA 50/200 crossover row. 1 = bullish cross, -1 = bearish cross, 0 = valid no-event. Missing values remain unscored by the Crossover-aware signal classifier."
+                      "notes": "Raw crossover event value:<br>1 = bullish cross | -1 = bearish cross | 0 = valid no-event<br>The rule engine maps 'bullish' to +2, bearish to -2, and no-event to 0."
                   }
               },
               "overlay": {},
@@ -1077,6 +1088,7 @@
           [10],
           [13],
           [14],
+          [16],
           [20],
           [21],
           [50],

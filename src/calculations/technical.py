@@ -1458,6 +1458,12 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "HMA",
+                "param_key": "16",
+                "display_key": "HMA_16",
+                "value_col": "HMA_16",
+            }, 
+            {
+                "engine_indicator": "HMA",
                 "param_key": "21",
                 "display_key": "HMA_21",
                 "value_col": "HMA_21",
