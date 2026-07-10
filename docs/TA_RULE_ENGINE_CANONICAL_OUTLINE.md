@@ -1,7 +1,7 @@
 # TA Rule Engine Project — Canonical End-to-End Outline
-- Version: 3.3.2
+- Version: 3.3.3
 - Created: 1/12/26
-- Last update: 7/4/2026
+- Last update: 7/10/2026
 
 **(Authoritative, Corrected, Chronological, Single Source)**
 
@@ -736,6 +736,7 @@ No structural DB changes should occur until these decisions are finalized.
   * Layout & semantics: ✅ complete
   * Rolling Heatmap Selection & Catalog Architecture (v1): ✅ complete
   * Stock Comparison Dashboard v1: ✅ feature-branch implementation / focused regression validation complete; D3-D9 promotion decision active
+  * Crossover Event Signal Rows v1: ✅ complete, committed, pushed, and tagged on `feature/crossover-event-signals-v1`
 
 * Phase IV: 🔒 future
 
@@ -751,10 +752,14 @@ No structural DB changes should occur until these decisions are finalized.
    - if validation passes, tag a stable checkpoint:
      - candidate tag: `v0.3.3-scd-single-indicator-refresh-controls`
 
-**Next proposed major-scoped workstream after SCD closeout:**
-2) **Crossover Event Signal Rows v1** — planning approved / implementation not started
+**Recently completed major-scoped workstream:**
+2) **Crossover Event Signal Rows v1** — ✅ COMPLETE
+   - completed on `feature/crossover-event-signals-v1`
+   - committed / pushed / tagged:
+     - commit: `1e16253` — `feat: add crossover event rows and HMA16 heatmap support`
+     - tag: `v0.3.2-crossover-event-signals-v1`
    - promoted from `MINOR-002 — Crossover Event Signals Feasibility Audit`
-   - intended as an Option E/F bridge workstream:
+   - implemented as an Option E/F bridge workstream:
      - Option E-style derived event primitives:
        - moving-average spread
        - prior spread
@@ -763,14 +768,23 @@ No structural DB changes should occur until these decisions are finalized.
        - `+2` = bullish crossover event
        - `-2` = bearish crossover event
        - `0` = no crossover event
-   - first-wave rows:
+   - first-wave rows completed:
      - `EMA_9_X_EMA_21`
      - `SMA_20_X_SMA_50`
      - `SMA_50_X_SMA_200`
-   - first-wave exposure:
+   - completed exposure:
      - SCD Multiple Indicators Custom default includes all three first-wave rows
      - SCD Single Indicator Main Indicators includes `SMA_20_X_SMA_50`
-     - Rolling Heatmap allows manual selection through catalog / preset path
+     - full first-wave set is exposed through Available Indicators → Family: `Crossover`
+     - Rolling Heatmap row catalog / preset path supports crossover row selection
+   - completed display / hover support:
+     - SCD Single Indicator chart uses moving-average spread rather than event score for crossover rows
+     - hover context includes signed spread, price, spread % of price, bps change vs prior day, fast / slow MA context, projected bars to cross, projected cross level, one-day force-cross price, required move, estimated days to cross, event value, signal value, and days since last crossover
+     - SCD Single Indicator crossover hover uses compact template for reliable Plotly hover placement
+     - `docs/indicators/Crossover.md` added for educational / reference content, including raw event value vs signal score distinction
+   - bundled adjunct completion:
+     - HMA(16) heatmap support added in the same commit
+
    - deferred from first wave:
      - `EMA_5_X_EMA_13`
      - RSI threshold event rows until row identity, threshold configurability, hover metadata, and scoring semantics are locked
