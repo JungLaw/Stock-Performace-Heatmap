@@ -155,6 +155,10 @@ _RULEBOOK_TO_PREPROCESSOR_KEYS = {
     "OBV": "OBV",
     # BullBearPower is a derived family computed off EMA + High/Low
     "BullBearPower": None,
+    # Crossover rows are derived event primitives computed from existing
+    # dataframe-backed EMA/SMA columns. They are rule-evaluated, but they
+    # must not be treated as a standalone preprocessor indicator family.
+    "Crossover": None,
 }
 
 

@@ -64,7 +64,9 @@ CUSTOM_DEFAULT: List[str] = [
     "SMA_100",
     "SMA_200",
     "VWMA_20",
-    "HMA_55",
+    "HMA_16",
+    #"HMA_21",
+
 
     # Trend / conviction
     "ADX_14",
@@ -110,6 +112,9 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "VWMA_10",
         "HMA_9",
 
+        # Short-term trend / crossover events
+        "EMA_9_X_EMA_21",
+
         # Short-term trend / conviction
         "ADX_9",
         "BullBearPower_10",
@@ -141,7 +146,11 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "SMA_50",
         "EMA_50",
         "VWMA_20",
+        "HMA_16",
         "HMA_21",
+
+        # Medium-term trend / crossover events
+        "SMA_20_X_SMA_50",
 
         # Medium-term trend / conviction
         "ADX_14",
@@ -178,6 +187,9 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "EMA_200",
         "VWMA_50",
         "HMA_55",
+
+        # Long-term trend / crossover events
+        "SMA_50_X_SMA_200",
 
         # Long-term trend / conviction
         "ADX_20",

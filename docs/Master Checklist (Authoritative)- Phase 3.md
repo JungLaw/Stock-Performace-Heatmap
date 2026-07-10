@@ -1,11 +1,57 @@
 # Master Checklist (Authoritative) — Phase 3  
 **TA Rule Engine (GPT)**  
 **Created**: 12/23/25
-**last update**: 7/4/26   
-**Version**: 2.3  
+**last update**: 7/10/26   
+**Version**: 2.4  
 
 ---
 ## Change Log
+
+### v2.4 — 7/10/26
+- Crossover Event Signal Rows v1 marked COMPLETE.
+- Completed / pushed / tagged on `feature/crossover-event-signals-v1`:
+  - commit: `1e16253` — `feat: add crossover event rows and HMA16 heatmap support`
+  - tag: `v0.3.2-crossover-event-signals-v1`
+- Completed first-wave crossover event rows:
+  - `EMA_9_X_EMA_21`
+  - `SMA_20_X_SMA_50`
+  - `SMA_50_X_SMA_200`
+- Completed v1 implementation posture:
+  - event-only scoring
+  - raw crossover event values mapped through rule-engine signal scores:
+    - raw `+1` event → bullish crossover signal score `+2`
+    - raw `-1` event → bearish crossover signal score `-2`
+    - raw `0` event → no-event signal score `0`
+  - broad-payload support
+  - shared Rolling Heatmap / SCD row-key exposure
+  - no selected-row refresh optimization for crossover rows
+  - no event + state scoring
+  - no regime interpretation
+  - no UI-local scoring
+- Completed SCD exposure:
+  - SCD Multiple Indicators Custom default includes all three first-wave crossover rows
+  - SCD Single Indicator Main Indicators includes `SMA_20_X_SMA_50`
+  - full first-wave set exposed through Available Indicators → Family: `Crossover`
+  - SCD Single Indicator chart uses crossover spread rather than event score
+  - compact SCD Single Indicator crossover hover implemented for reliable Plotly placement
+- Completed Rolling Heatmap / catalog exposure:
+  - crossover rows added to row classification / selection paths
+  - crossover rows added to relevant Overview / generated Trend preset paths
+- Completed educational/reference support:
+  - `docs/indicators/Crossover.md` added
+  - raw event value vs rule-engine signal score distinction documented
+- Bundled adjunct completion:
+  - HMA(16) heatmap support added in the same commit
+- Deferred routing preserved unchanged:
+  - `EMA_5_X_EMA_13`
+  - RSI threshold event rows pending row identity, threshold configurability, hover metadata, and scoring-semantics lock
+  - selected-row refresh optimization for crossover rows
+  - event + state scoring
+  - regime / state lifecycle interpretation
+  - composites
+  - cross-confirmation
+  - aggregate technical strength / ranking
+  - DB schema or persistence changes
 
 ### v2.3 — 7/4/26
 - Added `docs/minor_backlog.md` as the intake / triage ledger for minor one-off tasks, audits, cleanup items, and UX polish candidates.
@@ -188,10 +234,11 @@
 
 ---
 
-**Current Active Workstream:** Phase III Extension — Stock Comparison Dashboard v1 — D3-D9 cleanup / promotion decision
+**Most recently completed workstream:** Crossover Event Signal Rows v1
 
-**Current checkpoint:** `0727ee6` on `feature/scd-v1-exploration`  
-**Current branch status:** feature-branch implementation and focused regression validation complete; merge-to-main decision pending planning-asset updates and final promotion approval.
+**Completion checkpoint:** `1e16253` on `feature/crossover-event-signals-v1`  
+**Completion tag:** `v0.3.2-crossover-event-signals-v1`  
+**Current completed-status pass:** Crossover Event Signal Rows v1 complete; no next active workstream is assigned in this completed-items-only update pass.
 
 ### Minor backlog tracking
 
@@ -206,35 +253,62 @@ Items from the Minor Backlog Ledger should be promoted into this Master Checklis
 - promoted into a major workstream,
 - or found to change authoritative project scope/status.
 
-### Upcoming major-scoped workstream candidate — Crossover Event Signal Rows v1
+### Completed major-scoped workstream — Crossover Event Signal Rows v1
 
-**Status:** Planning approved / implementation not started.
+**Status:** ✅ COMPLETE.
 
 **Source:** Promoted from `MINOR-002 — Crossover Event Signals Feasibility Audit`.
 
-**Purpose:**
-- add explicit crossover event rows to the shared Rolling Heatmap / SCD row architecture
-- support event-only scoring:
-  - `+2` = bullish crossover event
-  - `-2` = bearish crossover event
-  - `0` = no crossover event
-- preserve existing indicator state rows without reinterpretation
+**Completion checkpoint:**
+- commit: `1e16253` — `feat: add crossover event rows and HMA16 heatmap support`
+- branch: `feature/crossover-event-signals-v1`
+- tag: `v0.3.2-crossover-event-signals-v1`
 
-**Recommended first-wave rows:**
+**Purpose completed:**
+- added explicit crossover event rows to the shared Rolling Heatmap / SCD row architecture
+- supported event-only scoring:
+  - `+2` = bullish crossover event signal score
+  - `-2` = bearish crossover event signal score
+  - `0` = no crossover event signal score
+- preserved existing indicator state rows without reinterpretation
+
+**Completed first-wave rows:**
 - `EMA_9_X_EMA_21`
 - `SMA_20_X_SMA_50`
 - `SMA_50_X_SMA_200`
 
-**Default / selection behavior:**
+**Completed default / selection behavior:**
 - SCD Multiple Indicators:
-  - include all three first-wave crossover rows in the SCD Multiple Indicators Custom default set
+  - includes all three first-wave crossover rows in the SCD Multiple Indicators Custom default set
 - SCD Single Indicator:
-  - add `SMA_20_X_SMA_50` to Main Indicators for daily visibility
-  - expose the full first-wave crossover set through Available Indicators → Family: `Crossover`
+  - adds `SMA_20_X_SMA_50` to Main Indicators for daily visibility
+  - exposes the full first-wave crossover set through Available Indicators → Family: `Crossover`
 - Technical Analysis → Rolling Heatmap:
-  - do not add crossover rows to the global Rolling Heatmap Custom default in v1
-  - make crossover rows available for manual selection through the row catalog / preset path
-  - optional preset: `Crossover Events`
+  - global Rolling Heatmap Custom default remains unchanged in v1
+  - crossover rows are available through the row catalog / preset path
+
+**Completed display / hover behavior:**
+- SCD Single Indicator chart uses moving-average spread rather than event score for crossover rows
+- crossover hover context includes:
+  - signed spread
+  - price
+  - spread % of price
+  - basis-point change vs prior day
+  - fast MA / slow MA context
+  - cross type
+  - projected bars to cross
+  - projected cross level
+  - price needed to force cross
+  - required move
+  - estimated days to cross
+  - event value
+  - signal score
+  - days since last crossover
+- compact SCD Single Indicator crossover hover implemented to avoid Plotly hover clipping / suppression
+- `docs/indicators/Crossover.md` added for educational reference and raw-event vs signal-score distinction
+
+**Bundled adjunct completion:**
+- HMA(16) heatmap support added in the same completed commit
 
 **Deferred from first wave:**
 - `EMA_5_X_EMA_13`
@@ -254,13 +328,13 @@ Items from the Minor Backlog Ledger should be promoted into this Master Checklis
   - RSI(14) crossing above the upper threshold = overbought / exit-watch event
 - do not encode custom threshold values such as `29_9` or `82_2` into permanent dataframe column names unless explicitly approved later.
 
-**Routing:**
+**Routing preserved:**
 - Numeric/event detection belongs to an Option E-style derived-event layer.
 - Signal interpretation belongs to an Option F-style semantic layer.
 - UI exposure belongs to the existing Rolling Heatmap / SCD row catalog and adapter path.
-- SCD must consume shared row keys / payload cells and must not compute or score crossover events locally.
+- SCD consumes shared row keys / payload cells and does not compute or score crossover events locally.
 
-**Boundary:**
+**Boundary preserved:**
 - no DB schema changes
 - no persistence changes
 - no ticker ranking
@@ -283,8 +357,9 @@ Items from the Minor Backlog Ledger should be promoted into this Master Checklis
 | Option F                         | **Wave 1 Complete**             |
 | Phase III UI Selection Architecture | **Complete**                    |
 | Phase III Extension — Stock Comparison Dashboard v1 | **Feature-branch implementation / validation complete; promotion decision active** |
+| Crossover Event Signal Rows v1 | **Complete; committed, pushed, and tagged on feature branch** |
 
-**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) complete; Phase III Extension — Stock Comparison Dashboard v1 has completed feature-branch implementation and focused regression validation. Current activity is D3-D9 cleanup / promotion decision before merge-to-main.
+**Status**: Scenario B complete and validated; Phase III UX complete and closed; Option E Wave 1 complete; Option F Wave 1 complete; Phase III UI Selection Architecture — Rolling Heatmap Selection & Catalog (v1) complete; Phase III Extension — Stock Comparison Dashboard v1 has completed feature-branch implementation and focused regression validation; Crossover Event Signal Rows v1 is complete, committed, pushed, and tagged on `feature/crossover-event-signals-v1`. No next active workstream is assigned in this completed-items-only update pass.
 
 **Recently completed**:
 - Option B — Core indicator families
@@ -328,12 +403,32 @@ Items from the Minor Backlog Ledger should be promoted into this Master Checklis
     - `Refresh all indicators for today`
   - D3-F row-specific live result-cell cache tested, rejected, and removed
   - focused SCD regression checks passed at checkpoint `0727ee6`
+- Crossover Event Signal Rows v1:
+  - completed first-wave rows:
+    - `EMA_9_X_EMA_21`
+    - `SMA_20_X_SMA_50`
+    - `SMA_50_X_SMA_200`
+  - event-only rule-engine signal scoring validated:
+    - `+2` bullish crossover event
+    - `-2` bearish crossover event
+    - `0` no crossover event
+  - SCD Multiple Indicators exposure completed
+  - SCD Single Indicator exposure completed
+  - SCD Single Indicator chart uses crossover spread instead of event score
+  - crossover hover projection/context implemented and validated
+  - compact SCD Single Indicator crossover hover implemented after Plotly hover-size diagnostics
+  - `docs/indicators/Crossover.md` added
+  - committed / pushed / tagged:
+    - `1e16253` — `feat: add crossover event rows and HMA16 heatmap support`
+    - `v0.3.2-crossover-event-signals-v1`
+  - bundled adjunct completion:
+    - HMA(16) heatmap support added
 
 **Next active workstream:**
-- Phase III Extension — Stock Comparison Dashboard v1 — D3-D9 cleanup / promotion decision
+- Not assigned in this completed-items-only update pass.
 
 **Current objective:**
-- Complete D3-D9 cleanup / promotion decision for SCD v1 after feature-branch implementation and focused regression validation.
+- Record completed workstream status for Crossover Event Signal Rows v1 and preserve existing deferred-item routing. No next-stage planning is assigned in this pass.
 
 **Primary architecture label:**
 - SCD Signal Matrix Architecture

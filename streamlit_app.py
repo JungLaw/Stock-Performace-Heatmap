@@ -1,4 +1,4 @@
-# Stamp: Fri, June 26, 2026 5:16 PM
+# Stamp: Thu, July 9, 2026 2:25 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -66,6 +66,36 @@ from ui.rolling_heatmap_adapter import (
 # tail-buffer equivalence checks.
 SCD_SHOW_TAIL_BUFFER_DIAGNOSTIC = False
 
+# Stock Comparison Dashboard — Crossover Event Signal Rows v1 exposure.
+#
+# These are SCD-specific consumer defaults only. They do not mutate the global
+# Rolling Heatmap Custom default, do not add computation, and do not alter
+# rule-engine semantics.
+SCD_CROSSOVER_EVENT_ROWS = [
+    "EMA_9_X_EMA_21",
+    "SMA_20_X_SMA_50",
+    "SMA_50_X_SMA_200",
+]
+
+SCD_SINGLE_INDICATOR_MAIN_EXTRA_ROWS = [
+    "SMA_20_X_SMA_50",
+]
+
+SCD_MULTIPLE_INDICATOR_CUSTOM_DEFAULT = [
+    *RH_CUSTOM_DEFAULT,
+    *[
+        row_key
+        for row_key in SCD_CROSSOVER_EVENT_ROWS
+        if row_key not in RH_CUSTOM_DEFAULT
+    ],
+]
+
+
+def _is_scd_crossover_event_row(row_key: str) -> bool:
+    """Return True for first-wave SCD crossover event rows."""
+    return str(row_key).strip() in SCD_CROSSOVER_EVENT_ROWS
+
+
 def load_indicator_markdown(doc_slug: str) -> Optional[str]:
     """
     Load family-level educational markdown for an indicator, if available.
@@ -88,6 +118,28 @@ def load_indicator_markdown(doc_slug: str) -> Optional[str]:
         return doc_path.read_text(encoding="utf-8")
     except Exception:
         return None
+
+
+def _strip_indicator_definition_markup(value: Any) -> str:
+    """
+    Return indicator definition text suitable for Streamlit text display.
+
+    Some short definition strings use Plotly hover line-break markup so dense
+    hover labels stay readable. The educational expander should show clean
+    prose rather than literal hover markup.
+    """
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    for marker in ("<br />", "<br/>", "<br>"):
+        text = text.replace(marker, " ")
+
+    return " ".join(text.split())
+
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -221,7 +273,7 @@ def initialize_session_state():
         st.session_state.scd_selection_mode = 'Custom'
 
     if 'scd_custom_rows' not in st.session_state:
-        st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+        st.session_state.scd_custom_rows = list(SCD_MULTIPLE_INDICATOR_CUSTOM_DEFAULT)
 
     if 'scd_selected_category' not in st.session_state:
         st.session_state.scd_selected_category = None
@@ -498,12 +550,23 @@ def _get_scd_single_indicator_main_rows() -> list[str]:
     """
     Return quick-access Single Indicator candidates.
 
-    Main Indicators are derived from the existing Rolling Heatmap Custom
-    default membership so they stay aligned with curated Custom changes.
+    Main Indicators start from the existing Rolling Heatmap Custom default
+    membership, then add SCD-specific Single Indicator extras. This keeps the
+    global Rolling Heatmap Custom default unchanged while exposing the selected
+    first-wave crossover row in SCD Single Indicator.
     """
+    rows = [
+        *RH_CUSTOM_DEFAULT,
+        *[
+            row_key
+            for row_key in SCD_SINGLE_INDICATOR_MAIN_EXTRA_ROWS
+            if row_key not in RH_CUSTOM_DEFAULT
+        ],
+    ]
+
     return [
         row_key
-        for row_key in RH_CUSTOM_DEFAULT
+        for row_key in rows
         if row_key in ROW_CLASSIFICATION
     ]
 
@@ -995,7 +1058,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
         with cc1:
             st.caption(
                 "Custom mode uses the SCD session row set. Restore-default "
-                "resets to the catalog-owned Rolling Heatmap Custom default."
+                "resets to the SCD Multiple Indicators Custom default."
             )
         with cc2:
             if st.button(
@@ -1003,7 +1066,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
                 key="scd_restore_default_custom_rows",
                 use_container_width=True,
             ):
-                st.session_state.scd_custom_rows = list(RH_CUSTOM_DEFAULT)
+                st.session_state.scd_custom_rows = list(SCD_MULTIPLE_INDICATOR_CUSTOM_DEFAULT)
                 st.session_state.pop("scd_custom_selected_row_keys", None)
                 st.rerun()
 
@@ -1011,7 +1074,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
             selection_mode="Custom",
             custom_rows=st.session_state.get(
                 "scd_custom_rows",
-                list(RH_CUSTOM_DEFAULT),
+                list(SCD_MULTIPLE_INDICATOR_CUSTOM_DEFAULT),
             ),
         )
 
@@ -1073,6 +1136,17 @@ def _render_scd_indicator_selection_controls() -> list[str]:
                     index=category_options.index(stored_category),
                     key="scd_selected_category",
                 )
+
+            # Defensive local normalization for Streamlit rerun edges:
+            # when switching categories, the widget/session-state handoff
+            # can briefly yield a non-resolvable category value. The resolver
+            # requires a concrete category, so fall back locally without
+            # mutating the widget key after instantiation.
+            if selected_category not in category_options:
+                selected_category = stored_category
+
+            if selected_category not in category_options:
+                selected_category = category_options[0]
 
             scope_options = ["All"] + get_scope_names(category=selected_category)
             stored_scope = st.session_state.get("scd_selected_scope", "All")
@@ -4752,11 +4826,15 @@ def _build_scd_hover_customdata(
     custom.setdefault("formatted_value", cell.get("display_text") or "")
     custom.setdefault("score", cell.get("score"))
     custom.setdefault("score_label", cell.get("signal"))
+    custom.setdefault("value_label", "Value")
 
     for key in [
         "ma_context_block",
+        "crossover_context_block",
+        "crossover_summary_block",
         "delta_abs_fmt",
         "delta_pct_suffix",
+        "delta_line",
         "trend_line",
         "adx_context_block",
         "signal_line",
@@ -4774,6 +4852,21 @@ def _build_scd_hover_customdata(
     ]:
         custom.setdefault(key, "")
 
+    if not custom.get("delta_line") and not _is_scd_crossover_event_row(row_key):
+        custom["delta_line"] = (
+            f"Δ vs prior day: {custom.get('delta_abs_fmt', '')}"
+            f"{custom.get('delta_pct_suffix', '')}<br>"
+        )
+
+    if _is_scd_crossover_event_row(row_key) and custom.get("crossover_summary_block"):
+        custom["scd_value_line"] = ""
+    else:
+        custom["scd_value_line"] = (
+            f"{custom.get('value_label', 'Value')}: "
+            f"{custom.get('formatted_value', '')}<br>"
+        )
+
+    custom.setdefault("scd_single_value_line", custom["scd_value_line"])
     custom["ticker"] = ticker
     custom["row_key"] = row_key
     custom["status"] = cell.get("status")
@@ -4839,9 +4932,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "Ticker: %{customdata.ticker}<br>"
         "Date: %{customdata.date}<br>"
         "<br>"
-        "Value: %{customdata.formatted_value}<br>"
-        "Δ vs prior day: %{customdata.delta_abs_fmt}"
-        "%{customdata.delta_pct_suffix}<br>"
+        "%{customdata.scd_value_line}"
+        "%{customdata.crossover_summary_block}"
+        "%{customdata.crossover_context_block}"
+        "%{customdata.delta_line}"
         "%{customdata.trend_line}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
@@ -4884,6 +4978,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         title="",
         margin=dict(l=170, r=20, t=30, b=40),
         height=dynamic_height,
+        hoverlabel=dict(align="left"),
     )
 
     fig.update_xaxes(side="top", type="category")
@@ -4987,8 +5082,21 @@ def _build_scd_single_indicator_hover_customdata(
         f" | Price: {price_delta}" if price_delta else ""
     )
 
+    if _is_scd_crossover_event_row(row_key) and custom.get("crossover_summary_block"):
+        custom["single_price_value_suffix"] = ""
+        custom["single_price_delta_suffix"] = ""
+        custom["scd_single_value_line"] = ""
+    else:
+        custom["scd_single_value_line"] = (
+            f"{custom.get('value_label', 'Value')}: "
+            f"{custom.get('formatted_value', '')}"
+            f"{custom.get('single_price_value_suffix', '')}<br>"
+        )
+
     indicator_trend = custom.get("trend") or ""
-    if indicator_trend or price_trend:
+    if _is_scd_crossover_event_row(row_key):
+        custom["single_combined_trend_line"] = ""
+    elif indicator_trend or price_trend:
         custom["single_combined_trend_line"] = (
             f"Trend: {indicator_trend or 'N/A'}"
             f"{f' | Price: {price_trend}' if price_trend else ''}<br>"
@@ -5037,10 +5145,30 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             cell = cells.get(date_key, {}).get(ticker, {})
             score = cell.get("score")
 
+            z_value = None
             try:
-                z_row.append(float(score) if score is not None else None)
+                z_value = float(score) if score is not None else None
             except (TypeError, ValueError):
-                z_row.append(None)
+                z_value = None
+
+            if z_value is None and _is_scd_crossover_event_row(row_key):
+                adapter_cd = cell.get("adapter_customdata")
+                has_crossover_hover = (
+                    isinstance(adapter_cd, dict)
+                    and (
+                        adapter_cd.get("crossover_summary_block")
+                        or adapter_cd.get("crossover_context_block")
+                        or adapter_cd.get("crossover_spread") is not None
+                    )
+                )
+
+                # Plotly heatmap cells with missing z may not expose hover.
+                # For crossover rows only, use a neutral carrier when adapter
+                # customdata exists so valid hover text remains reachable.
+                if has_crossover_hover:
+                    z_value = 0.0
+
+            z_row.append(z_value)
 
             text_row.append(_format_scd_heatmap_text(row_key, cell))
             custom_row.append(
@@ -5063,34 +5191,54 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         [1.0, "#006400"],   # strong buy
     ]
 
-    hovertemplate = (
-        "<b>%{customdata.display_name}</b><br>"
-        "Ticker: %{customdata.ticker}<br>"
-        "Date: %{customdata.date}<br>"
-        "<br>"
-        "Value: %{customdata.formatted_value}"
-        "%{customdata.single_price_value_suffix}<br>"
-        "Δ vs prior day: %{customdata.delta_abs_fmt}"
-        "%{customdata.delta_pct_suffix}"
-        "%{customdata.single_price_delta_suffix}<br>"
-        "%{customdata.single_combined_trend_line}"
-        "%{customdata.ma_context_block}"
-        "%{customdata.adx_context_block}"
-        "%{customdata.signal_line}"
-        "%{customdata.macd_context_block}"
-        "%{customdata.stoch_context_block}"
-        "%{customdata.dpo_context_block}"
-        "%{customdata.bullbear_context_block}"
-        "%{customdata.rule_block}"
-        "%{customdata.notes_block}"
-        "%{customdata.definition_block}"
-        "%{customdata.how_to_read_block}"
-        "%{customdata.band_context_block}"
-        "%{customdata.volume_block}"
-        "%{customdata.volume_vs_avg_block}"
-        "%{customdata.scd_payload_hover_block}"
-        "<extra></extra>"
-    )
+    if _is_scd_crossover_event_row(row_key):
+        # Crossover rows have intentionally dense projection/context hover.
+        # Keep SCD Single Indicator crossover hover compact so Plotly can place
+        # the hover label reliably across all date rows.
+        #
+        # Educational/reference text remains available in Indicator Definitions
+        # and the family markdown path; it is omitted here only for hover
+        # geometry reliability.
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.crossover_summary_block}"
+            "%{customdata.crossover_context_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.scd_payload_hover_block}"
+            "<extra></extra>"
+        )
+    else:
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.crossover_summary_block}"
+            "%{customdata.crossover_context_block}"
+            "%{customdata.delta_line}"
+            "%{customdata.single_price_delta_suffix}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.ma_context_block}"
+            "%{customdata.adx_context_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.macd_context_block}"
+            "%{customdata.stoch_context_block}"
+            "%{customdata.dpo_context_block}"
+            "%{customdata.bullbear_context_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "%{customdata.band_context_block}"
+            "%{customdata.volume_block}"
+            "%{customdata.volume_vs_avg_block}"
+            "%{customdata.scd_payload_hover_block}"
+            "<extra></extra>"
+        )
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -5108,12 +5256,13 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         )
     )
 
-    dynamic_height = max(450, 24 * max(len(dates), 1) + 180)
+    dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)
 
     fig.update_layout(
         title=f"{row_label}",
         margin=dict(l=110, r=20, t=80, b=80),
         height=dynamic_height,
+        hoverlabel=dict(align="left"),
     )
 
     fig.update_xaxes(side="top", type="category")
@@ -5172,6 +5321,9 @@ def _get_scd_single_chart_auto_mode(row_key: str) -> str:
     row_key = str(row_key).strip()
     family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
 
+    if _is_scd_crossover_event_row(row_key):
+        return "Indicator value"
+
     if row_key == "OBV":
         return "Change from first date"
 
@@ -5228,6 +5380,33 @@ def _coerce_scd_chart_numeric_value(value: Any) -> Optional[float]:
     return value_f
 
 
+def _get_scd_single_chart_source_value(
+    *,
+    row_key: str,
+    cell: Dict[str, Any],
+    value_mode: str,
+) -> Optional[float]:
+    """
+    Return the numeric source value for the SCD Single Indicator chart.
+
+    Crossover event rows are score-colored in the heatmap, but their chart
+    visualizes MA spread rather than event score/value, regardless of the
+    currently selected chart transform.
+    """
+    if _is_scd_crossover_event_row(row_key):
+        adapter_cd = cell.get("adapter_customdata")
+        if isinstance(adapter_cd, dict):
+            return _coerce_scd_chart_numeric_value(
+                adapter_cd.get("crossover_spread")
+            )
+        return None
+
+    if value_mode == "Score":
+        return _coerce_scd_chart_numeric_value(cell.get("score"))
+
+    return _coerce_scd_chart_numeric_value(cell.get("value"))
+
+
 def _get_scd_chart_yaxis_title(mode: str, row_label: str) -> str:
     """Return a compact y-axis title for the selected chart transform."""
     if mode == "Indexed to 100":
@@ -5253,6 +5432,7 @@ def _build_scd_single_indicator_chart_series(
     This is display-only. It does not alter matrix cells, scores, rules,
     cache entries, acquisition, or persistence.
     """
+    row_key = str(matrix.get("row_key", "")).strip()
     dates = list(matrix.get("dates", []))
     cells = matrix.get("cells", {})
 
@@ -5263,10 +5443,13 @@ def _build_scd_single_indicator_chart_series(
 
         for date_key in dates:
             cell = cells.get(date_key, {}).get(ticker, {})
-            if value_mode == "Score":
-                values.append(_coerce_scd_chart_numeric_value(cell.get("score")))
-            else:
-                values.append(_coerce_scd_chart_numeric_value(cell.get("value")))
+            values.append(
+                _get_scd_single_chart_source_value(
+                    row_key=row_key,
+                    cell=cell,
+                    value_mode=value_mode,
+                )
+            )
 
         raw_series[ticker] = values
 
@@ -5487,6 +5670,7 @@ def _build_scd_single_indicator_chart_figure(
             xanchor="left",
             x=0,
         ),
+        hoverlabel=dict(align="left"),
     )
 
     fig.update_xaxes(
@@ -7601,6 +7785,7 @@ def show_technical_analysis_dashboard():
                     #"ADX_20",
                     #"OBV",
                     "HMA_9",
+                    "HMA_16",
                     "HMA_21",  
                     "HMA_50",
                     "HMA_55",
@@ -7729,6 +7914,18 @@ def show_technical_analysis_dashboard():
                                 index=category_options.index(stored_category),
                                 key="rh_selected_category",
                             )
+
+                        # Defensive local normalization for Streamlit rerun edges:
+                        # when switching categories, the widget/session-state
+                        # handoff can briefly yield a non-resolvable category
+                        # value. The resolver requires a concrete category, so
+                        # fall back locally without mutating the widget key after
+                        # instantiation.
+                        if selected_category not in category_options:
+                            selected_category = stored_category
+
+                        if selected_category not in category_options:
+                            selected_category = category_options[0]
 
                         scope_values = get_scope_names(selected_category)
                         scope_options = ["All"] + [s for s in scope_values if s != "All"]
@@ -7950,9 +8147,15 @@ def show_technical_analysis_dashboard():
 
                         st.markdown(f"**{display_name}**")
                         if definition:
-                            st.write(f"Definition: {definition}")
+                            st.write(
+                                "Definition: "
+                                f"{_strip_indicator_definition_markup(definition)}"
+                            )
                         if how_to_read:
-                            st.write(f"How to Read: {how_to_read}")
+                            st.write(
+                                "How to Read: "
+                                f"{_strip_indicator_definition_markup(how_to_read)}"
+                            )
 
                         # Optional family-level long-form overview
                         doc_slug = get_indicator_doc_slug(key)

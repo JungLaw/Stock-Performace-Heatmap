@@ -352,6 +352,53 @@ def compute_all_indicators(
 
 
     # ====================================================
+    # Crossover Event Signal Rows v1
+    # ====================================================
+    # Combined event rows only. Values are intentionally event-only:
+    #   1.0  = bullish crossover event
+    #  -1.0  = bearish crossover event
+    #   0.0  = valid no-event state
+    #   NaN  = missing / warmup / insufficient base or prior data
+    #
+    # These rows are derived from dataframe-backed EMA/SMA columns and are
+    # consumed later by the rulebook / signal-classifier score path. They do
+    # not change existing EMA/SMA formulas or existing EMA/SMA row semantics.
+    crossover_pairs = (
+        ("EMA_9_X_EMA_21", "EMA_9", "EMA_21"),
+        ("SMA_20_X_SMA_50", "SMA_20", "SMA_50"),
+        ("SMA_50_X_SMA_200", "SMA_50", "SMA_200"),
+    )
+
+    crossover_columns: Dict[str, Any] = {}
+    for event_col, fast_col, slow_col in crossover_pairs:
+        if fast_col not in df.columns or slow_col not in df.columns:
+            crossover_columns[event_col] = pd.Series(np.nan, index=df.index, dtype="float64")
+            continue
+
+        fast = pd.to_numeric(df[fast_col], errors="coerce").astype("float64")
+        slow = pd.to_numeric(df[slow_col], errors="coerce").astype("float64")
+        spread = fast - slow
+        prior_spread = spread.shift(1)
+
+        valid = fast.notna() & slow.notna() & prior_spread.notna()
+        bullish = valid & (prior_spread <= 0.0) & (spread > 0.0)
+        bearish = valid & (prior_spread >= 0.0) & (spread < 0.0)
+
+        event = pd.Series(np.nan, index=df.index, dtype="float64")
+        event.loc[valid] = 0.0
+        event.loc[bullish] = 1.0
+        event.loc[bearish] = -1.0
+
+        crossover_columns[event_col] = event
+
+    if crossover_columns:
+        df = pd.concat(
+            [df, pd.DataFrame(crossover_columns, index=df.index)],
+            axis=1,
+        )
+
+
+    # ====================================================
     # VWMA (Volume Weighted Moving Average)
     # ====================================================
     vwma_periods = [int(x) for x in cfg.get("VWMA", [])]

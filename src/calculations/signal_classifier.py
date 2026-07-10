@@ -304,8 +304,21 @@ class SignalEngine:
         Evaluate one rule block (strong_buy / buy / neutral / sell / strong_sell)
         and return a Series of signal labels for each row.
         """
-        # Initialize all rows as 'neutral' by default
-        signal_series = pd.Series("neutral", index=df.index, dtype="object")
+        # Initialize all rows as 'neutral' by default for established
+        # continuous-state indicator families.
+        #
+        # Crossover rows are event-only primitives:
+        #   1.0  = bullish event
+        #  -1.0  = bearish event
+        #   0.0  = valid no-event
+        #   NaN  = missing / warmup / insufficient base or prior data
+        #
+        # For Crossover, missing rows must remain missing rather than being
+        # silently converted to neutral scores.
+        if indicator_name == "Crossover":
+            signal_series = pd.Series(pd.NA, index=df.index, dtype="object")
+        else:
+            signal_series = pd.Series("neutral", index=df.index, dtype="object")
 
         # Build context from df columns
         context = {col: df[col] for col in df.columns}

@@ -1,4 +1,4 @@
-# Stamp: Wed, June 10, 2026 2:27PM
+# Stamp: Tue, July 7, 2026 11:18 AM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -1112,6 +1112,38 @@ class DatabaseIntegratedTechnicalCalculator:
                 },
             },
             # -------------------------
+            # Signals — Crossover Event Signal Rows v1
+            # -------------------------
+            # Event-only rows:
+            #   1.0  = bullish crossover event
+            #  -1.0  = bearish crossover event
+            #   0.0  = valid no-event state
+            #   NaN  = missing / warmup / insufficient base or prior data
+            #
+            # These rows require rule-engine score coverage. They must not use
+            # the display-only neutral fallback path.
+            {
+                "engine_indicator": "Crossover",
+                "param_key": "EMA_9_X_EMA_21",
+                "display_key": "EMA_9_X_EMA_21",
+                "value_col": "EMA_9_X_EMA_21",
+                "requires_score": True,
+            },
+            {
+                "engine_indicator": "Crossover",
+                "param_key": "SMA_20_X_SMA_50",
+                "display_key": "SMA_20_X_SMA_50",
+                "value_col": "SMA_20_X_SMA_50",
+                "requires_score": True,
+            },
+            {
+                "engine_indicator": "Crossover",
+                "param_key": "SMA_50_X_SMA_200",
+                "display_key": "SMA_50_X_SMA_200",
+                "value_col": "SMA_50_X_SMA_200",
+                "requires_score": True,
+            },
+            # -------------------------
             # Volatility — ATR display rows
             # -------------------------
             # ATR is emitted as a raw numeric/display row here. If semantic
@@ -1426,6 +1458,12 @@ class DatabaseIntegratedTechnicalCalculator:
             },
             {
                 "engine_indicator": "HMA",
+                "param_key": "16",
+                "display_key": "HMA_16",
+                "value_col": "HMA_16",
+            }, 
+            {
+                "engine_indicator": "HMA",
                 "param_key": "21",
                 "display_key": "HMA_21",
                 "value_col": "HMA_21",
@@ -1734,7 +1772,12 @@ class DatabaseIntegratedTechnicalCalculator:
 
                 # Display-only fallback: allow rows with raw numeric values
                 # even when semantic score coverage does not exist yet.
-                elif value is not None:
+                #
+                # Crossover rows opt out via requires_score=True because they
+                # are event-score rows, not display-only rows. If their score
+                # coverage is missing, they must remain absent rather than
+                # appearing as false neutral cells.
+                elif value is not None and not meta.get("requires_score"):
                     score_int = 0
                     label = "neutral"
 
