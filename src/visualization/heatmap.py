@@ -189,30 +189,195 @@ Change: {abs_change_format} ({pct_format})<br>
             pct_change = performance_item['volume_change']
             current_volume = performance_item['current_volume']
             benchmark_average = performance_item['benchmark_average']
-            benchmark_label = performance_item.get('benchmark_label', performance_item.get('benchmark_period', 'N/A'))
-            
-            # Use display name if provided, otherwise use ticker
+            benchmark_label = performance_item.get(
+                'benchmark_label',
+                performance_item.get(
+                    'benchmark_period',
+                    'N/A',
+                ),
+            )
+
+            volume_context = (
+                performance_item.get('volume_context')
+                or {}
+            )
+            comparisons = (
+                volume_context.get('volume_comparisons')
+                or {}
+            )
+
+            # Use display name if provided, otherwise use ticker.
             title = display_name if display_name else ticker
-            
-            # Format volume and changes
-            volume_format = f"{current_volume:,}" if current_volume else "N/A"
-            benchmark_format = f"{benchmark_average:,.0f}" if benchmark_average else "N/A"
-            pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
-            
-            # Create volume hover text
-            if display_name and display_name != ticker:
-                hover_text = f"""<b>{title}</b><br>
-<i>Ticker: {ticker}</i><br>
-Current Volume: {volume_format}<br>
-{benchmark_label} Avg: {benchmark_format}<br>
-Volume Change: {pct_format}<br>
-<extra></extra>"""
+
+            def _format_compact_volume(value):
+                """Format a benchmark volume for compact hover display."""
+                if value is None:
+                    return "N/A"
+
+                numeric_value = float(value)
+
+                if abs(numeric_value) >= 1_000_000_000:
+                    return (
+                        f"{numeric_value / 1_000_000_000:.1f}B"
+                    )
+
+                if abs(numeric_value) >= 1_000_000:
+                    return (
+                        f"{numeric_value / 1_000_000:.1f}M"
+                    )
+
+                if abs(numeric_value) >= 1_000:
+                    return (
+                        f"{numeric_value / 1_000:.1f}K"
+                    )
+
+                return f"{numeric_value:,.0f}"
+
+            def _format_signed_pct(value):
+                """Format a percentage with an explicit sign."""
+                if value is None:
+                    return "N/A"
+
+                return f"{float(value):+.1f}%"
+
+            # Preserve the prior selected-benchmark fallback if an old or
+            # incomplete payload reaches the renderer.
+            volume_format = (
+                f"{current_volume:,}"
+                if current_volume
+                else "N/A"
+            )
+            benchmark_format = (
+                f"{benchmark_average:,.0f}"
+                if benchmark_average
+                else "N/A"
+            )
+            pct_format = (
+                f"{pct_change:+.2f}%"
+                if pct_change is not None
+                else "N/A"
+            )
+
+            current_price = volume_context.get(
+                'current_price'
+            )
+            price_change = volume_context.get(
+                'price_change'
+            )
+            price_change_pct = volume_context.get(
+                'price_change_pct'
+            )
+            effective_date = volume_context.get(
+                'effective_date'
+            )
+
+            if current_price is not None:
+                price_format = (
+                    f"${float(current_price):,.2f}"
+                )
+                price_change_format = (
+                    f"${float(price_change):+.2f}"
+                    if price_change is not None
+                    else "N/A"
+                )
+                price_pct_format = (
+                    f"{float(price_change_pct):+.2f}%"
+                    if price_change_pct is not None
+                    else "N/A"
+                )
+
+                price_line = (
+                    f"Price: {price_format} "
+                    f"({price_change_format}, "
+                    f"{price_pct_format})<br>"
+                )
             else:
-                hover_text = f"""<b>{title}</b><br>
-Current Volume: {volume_format}<br>
-{benchmark_label} Avg: {benchmark_format}<br>
-Volume Change: {pct_format}<br>
-<extra></extra>"""
+                price_line = ""
+
+            comparison_lines = []
+
+            for key, fallback_label in (
+                ('1d', '1D'),
+                ('1w', '1W Avg'),
+                ('10d', '2W Avg'),
+                ('1m', '1M Avg'),
+                ('60d', '3M Avg'),
+            ):
+                comparison = comparisons.get(key) or {}
+
+                if not comparison:
+                    continue
+
+                label = comparison.get(
+                    'label',
+                    fallback_label,
+                )
+
+                # Keep the colon directly after the label. Add nonbreaking
+                # spaces after the colon for the shorter 1D row.
+                label_spacing = (
+                    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                    if key == '1d'
+                    else " "
+                )
+
+                comparison_lines.append(
+                    f"vs. {label}:{label_spacing}"
+                    f"{_format_signed_pct(
+                        comparison.get('percentage_change')
+                    )} "
+                    f"({_format_compact_volume(
+                        comparison.get('benchmark_volume')
+                    )})"
+                )
+
+            if comparison_lines:
+                volume_detail = "<br>".join(
+                    comparison_lines
+                )
+            else:
+                # Backward-compatible fallback for an old payload.
+                volume_detail = (
+                    f"{benchmark_label} Avg: "
+                    f"{benchmark_format}<br>"
+                    f"Volume Change: {pct_format}"
+                )
+
+            as_of_line = ""
+
+            if effective_date:
+                try:
+                    effective_timestamp = pd.Timestamp(
+                        effective_date
+                    )
+                    as_of_value = (
+                        f"{effective_timestamp.month}/"
+                        f"{effective_timestamp.day}/"
+                        f"{str(effective_timestamp.year)[-2:]}"
+                    )
+                except Exception:
+                    as_of_value = str(effective_date)
+
+                as_of_line = (
+                    f"<br><br>As of: {as_of_value}"
+                )
+
+            ticker_line = (
+                f"<i>Ticker: {ticker}</i><br>"
+                if display_name and display_name != ticker
+                else ""
+            )
+
+            hover_text = (
+                f"<b>{title}</b><br>"
+                f"{ticker_line}"
+                f"{price_line}"
+                f"<br>"
+                f"Volume: {volume_format}<br>"
+                f"{volume_detail}"
+                f"{as_of_line}<br>"
+#                f"<extra></extra>"
+            )
         else:
             # Fallback for unknown data structure
             title = display_name if display_name else ticker

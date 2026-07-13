@@ -6642,7 +6642,14 @@ def fetch_volume_data(tickers, period, save_to_db: bool = True):
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            volume_data = volume_calculator.calculate_volume_performance_for_group(tickers, period)
+            volume_data = (
+                volume_calculator
+                .calculate_volume_performance_for_group(
+                    tickers,
+                    period,
+                    save_to_db=save_to_db,
+                )
+            )
             
             # Show database usage statistics
             valid_count = len([v for v in volume_data if not v.get('error', False)])

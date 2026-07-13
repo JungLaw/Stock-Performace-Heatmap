@@ -495,6 +495,349 @@ class DatabaseIntegratedVolumeCalculator:
         else:
             logger.warning(f"⚠️ Auto-fetch failed for {ticker} - unable to get missing benchmark data")
             return None
+
+    def _query_completed_context_from_database(
+        self,
+        ticker: str,
+        trading_days: List[datetime],
+    ) -> Optional[pd.DataFrame]:
+        """
+        Return exact completed-session price and volume rows from the database.
+
+        This is a bounded read for MINOR-005 context construction. It does not
+        change acquisition policy, persistence policy, or database schema.
+        """
+        conn = self._get_database_connection()
+        if not conn:
+            return None
+
+        try:
+            date_strings = [
+                trading_day.strftime('%Y-%m-%d')
+                for trading_day in trading_days
+            ]
+            placeholders = ','.join('?' for _ in date_strings)
+
+            query = f"""
+            SELECT Date, Close, "Adj Close", Volume
+            FROM {self.table_name}
+            WHERE Ticker = ?
+              AND Date IN ({placeholders})
+            ORDER BY Date ASC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[ticker] + date_strings,
+            )
+
+            if df.empty:
+                return None
+
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.set_index('Date', inplace=True)
+
+            return df
+
+        except Exception as e:
+            logger.error(
+                f"Completed-context database query error for {ticker}: {e}"
+            )
+            return None
+
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _normalize_completed_context_frame(
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """
+        Normalize a database or yfinance frame for strict context validation.
+
+        Price policy:
+        - prefer Adjusted Close when available;
+        - fall back to Close.
+        """
+        normalized = df.copy()
+
+        if isinstance(normalized.columns, pd.MultiIndex):
+            normalized.columns = [
+                column[0] if isinstance(column, tuple) else column
+                for column in normalized.columns
+            ]
+
+        normalized.index = pd.to_datetime(normalized.index)
+
+        if getattr(normalized.index, 'tz', None) is not None:
+            normalized.index = normalized.index.tz_localize(None)
+
+        normalized.index = normalized.index.normalize()
+
+        normalized = normalized[
+            ~normalized.index.duplicated(keep='first')
+        ].sort_index()
+
+        if (
+            'Adj Close' not in normalized.columns
+            and 'Close' in normalized.columns
+        ):
+            normalized['Adj Close'] = normalized['Close']
+
+        return normalized
+
+    def _get_completed_volume_context_frame(
+        self,
+        ticker: str,
+        save_to_db: bool = True,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Return the effective completed session plus 60 prior sessions.
+
+        The method performs one bounded database read. If strict coverage is
+        incomplete, it performs one bounded yfinance fallback for the complete
+        required range.
+
+        Database rows take precedence over overlapping fetched rows.
+        """
+        effective_day = get_last_completed_trading_day()
+
+        # 61 rows:
+        # - row 61 = displayed completed session
+        # - rows 1-60 = prior benchmark sessions
+        required_days = get_last_n_trading_days(
+            effective_day,
+            61,
+        )
+
+        required_index = pd.DatetimeIndex(
+            pd.to_datetime(required_days)
+        ).normalize()
+
+        database_frame = self._query_completed_context_from_database(
+            ticker,
+            required_days,
+        )
+
+        frames = []
+
+        if database_frame is not None and not database_frame.empty:
+            frames.append(
+                self._normalize_completed_context_frame(database_frame)
+            )
+
+        combined = (
+            pd.concat(frames).sort_index()
+            if frames
+            else pd.DataFrame()
+        )
+
+        has_full_coverage = (
+            not combined.empty
+            and required_index.isin(combined.index).all()
+        )
+
+        if not has_full_coverage:
+            start_date = required_days[0] - timedelta(days=15)
+            end_date = required_days[-1] + timedelta(days=3)
+
+            fetched_frame = self._fetch_volume_from_yfinance(
+                ticker,
+                start_date,
+                end_date,
+            )
+
+            if fetched_frame is None or fetched_frame.empty:
+                logger.warning(
+                    f"Unable to assemble completed-session context for {ticker}"
+                )
+                return None
+
+            fetched_frame = self._normalize_completed_context_frame(
+                fetched_frame
+            )
+
+            if save_to_db and self.db_available:
+                self._save_volume_data_to_db(
+                    ticker,
+                    fetched_frame,
+                    save_to_db=True,
+                )
+
+            elif not save_to_db:
+                # Preserve the existing volume-only session cache behavior.
+                # The complete fetched frame is used directly for this result.
+                self._add_to_session_cache(
+                    ticker,
+                    fetched_frame,
+                )
+
+            frames.append(fetched_frame)
+
+            combined = pd.concat(frames).sort_index()
+
+            # Database frame was appended first, so existing DB rows win
+            # whenever database and fetched frames overlap.
+            combined = combined[
+                ~combined.index.duplicated(keep='first')
+            ]
+
+        context = combined.reindex(required_index)
+
+        required_columns = [
+            'Close',
+            'Adj Close',
+            'Volume',
+        ]
+
+        if any(
+            column not in context.columns
+            for column in required_columns
+        ):
+            logger.warning(
+                f"Missing completed-context columns for {ticker}"
+            )
+            return None
+
+        context['Volume'] = pd.to_numeric(
+            context['Volume'],
+            errors='coerce',
+        )
+        context['Close'] = pd.to_numeric(
+            context['Close'],
+            errors='coerce',
+        )
+        context['Adj Close'] = pd.to_numeric(
+            context['Adj Close'],
+            errors='coerce',
+        )
+
+        context['Price'] = context['Adj Close'].where(
+            context['Adj Close'].notna(),
+            context['Close'],
+        )
+
+        has_missing_values = (
+            context[['Price', 'Volume']]
+            .isna()
+            .any()
+            .any()
+        )
+        has_invalid_volume = bool(
+            (context['Volume'] <= 0).any()
+        )
+
+        if has_missing_values or has_invalid_volume:
+            logger.warning(
+                f"Incomplete 61-session completed context for {ticker}"
+            )
+            return None
+
+        return context
+
+    @staticmethod
+    def _percentage_change(
+        current_value: float,
+        benchmark_value: float,
+    ) -> Optional[float]:
+        """Return percentage change or None when the benchmark is unusable."""
+        if benchmark_value is None or benchmark_value == 0:
+            return None
+
+        return (
+            (float(current_value) / float(benchmark_value))
+            - 1.0
+        ) * 100.0
+
+    def get_completed_volume_context(
+        self,
+        ticker: str,
+        save_to_db: bool = True,
+    ) -> Optional[Dict]:
+        """
+        Build reusable completed-session price and volume hover context.
+
+        All averages exclude the displayed completed session:
+        - 1D: immediately preceding completed-session volume
+        - 1W: prior 5-session mean
+        - 2W: prior 10-session mean
+        - 1M: prior 22-session mean
+        - 3M: prior 60-session mean
+        """
+        context = self._get_completed_volume_context_frame(
+            ticker,
+            save_to_db=save_to_db,
+        )
+
+        if context is None or len(context) != 61:
+            return None
+
+        current_row = context.iloc[-1]
+        prior_rows = context.iloc[:-1]
+
+        current_volume = int(current_row['Volume'])
+        current_price = float(current_row['Price'])
+
+        prior_price = float(
+            prior_rows.iloc[-1]['Price']
+        )
+
+        price_change = current_price - prior_price
+        price_change_pct = self._percentage_change(
+            current_price,
+            prior_price,
+        )
+
+        benchmark_values = {
+            '1d': float(
+                prior_rows.iloc[-1]['Volume']
+            ),
+            '1w': float(
+                prior_rows['Volume'].tail(5).mean()
+            ),
+            '10d': float(
+                prior_rows['Volume'].tail(10).mean()
+            ),
+            '1m': float(
+                prior_rows['Volume'].tail(22).mean()
+            ),
+            '60d': float(
+                prior_rows['Volume'].tail(60).mean()
+            ),
+        }
+
+        labels = {
+            '1d': '1D',
+            '1w': '1W Avg',
+            '10d': '2W Avg',
+            '1m': '1M Avg',
+            '60d': '3M Avg',
+        }
+
+        comparisons = {
+            key: {
+                'label': labels[key],
+                'benchmark_volume': benchmark_value,
+                'percentage_change': self._percentage_change(
+                    current_volume,
+                    benchmark_value,
+                ),
+            }
+            for key, benchmark_value in benchmark_values.items()
+        }
+
+        return {
+            'effective_date': (
+                context.index[-1].strftime('%Y-%m-%d')
+            ),
+            'current_price': current_price,
+            'prior_price': prior_price,
+            'price_change': price_change,
+            'price_change_pct': price_change_pct,
+            'current_volume': current_volume,
+            'volume_comparisons': comparisons,
+        }
     
     def get_current_volume(self, ticker: str, save_to_db: bool = True) -> Optional[int]:
         """
@@ -622,50 +965,106 @@ class DatabaseIntegratedVolumeCalculator:
             logger.warning(f"⚠️ Unable to calculate {period_label} benchmark for {ticker}")
             return None
     
-    def calculate_volume_performance(self, ticker: str, benchmark_period: str = '10d', save_to_db: bool = True) -> Dict:
+    def calculate_volume_performance(
+        self,
+        ticker: str,
+        benchmark_period: str = '10d',
+        save_to_db: bool = True,
+    ) -> Dict:
         """
-        Calculate complete volume performance data for a single ticker
-        
-        Args:
-            ticker: Stock ticker symbol
-            benchmark_period: Benchmark period for comparison ('10d', '1w', '1m', '60d')
-            
-        Returns:
-            Dictionary with volume performance data
+        Calculate the selected tile comparison and reusable hover context.
+
+        The selected benchmark continues to govern:
+        - volume_change
+        - tile color
+        - tile label
+        - summary statistics
+
+        The additional volume_context is hover-only enrichment.
         """
-        logger.info(f"🎯 Calculating volume performance for {ticker} ({benchmark_period} benchmark)")
-        
-        # Get current volume and benchmark average with auto-fetch support
-        current_volume = self.get_current_volume(ticker, save_to_db=save_to_db)
-        benchmark_avg = self.get_volume_benchmark(ticker, benchmark_period, save_to_db=save_to_db)
-        
-        if current_volume is None or benchmark_avg is None or benchmark_avg == 0:
+        logger.info(
+            f"🎯 Calculating volume performance for {ticker} "
+            f"({benchmark_period} benchmark)"
+        )
+
+        if benchmark_period not in self.VOLUME_BENCHMARK_PERIODS:
+            logger.error(
+                f"❌ Invalid benchmark period: {benchmark_period}"
+            )
+
             return {
                 'ticker': ticker,
-                'current_volume': current_volume,
-                'benchmark_average': benchmark_avg,
+                'current_volume': None,
+                'benchmark_average': None,
                 'volume_change': 0.0,
                 'benchmark_period': benchmark_period,
-                'benchmark_label': self.VOLUME_BENCHMARK_PERIODS.get(benchmark_period, {}).get('label', benchmark_period),
+                'benchmark_label': benchmark_period,
+                'volume_context': None,
                 'error': True,
-                'data_source': 'error'
+                'data_source': 'error',
             }
-        
-        # Calculate percentage change: (Current Volume / Benchmark Average) - 1
-        volume_change = ((current_volume / benchmark_avg) - 1) * 100
-        
+
+        volume_context = self.get_completed_volume_context(
+            ticker,
+            save_to_db=save_to_db,
+        )
+
+        if volume_context is None:
+            return {
+                'ticker': ticker,
+                'current_volume': None,
+                'benchmark_average': None,
+                'volume_change': 0.0,
+                'benchmark_period': benchmark_period,
+                'benchmark_label': (
+                    self.VOLUME_BENCHMARK_PERIODS[
+                        benchmark_period
+                    ]['label']
+                ),
+                'volume_context': None,
+                'error': True,
+                'data_source': 'error',
+            }
+
+        selected_comparison = (
+            volume_context['volume_comparisons'][
+                benchmark_period
+            ]
+        )
+
+        current_volume = volume_context['current_volume']
+        benchmark_average = (
+            selected_comparison['benchmark_volume']
+        )
+        volume_change = (
+            selected_comparison['percentage_change']
+        )
+
         result = {
             'ticker': ticker,
             'current_volume': current_volume,
-            'benchmark_average': benchmark_avg,
+            'benchmark_average': benchmark_average,
             'volume_change': volume_change,
             'benchmark_period': benchmark_period,
-            'benchmark_label': self.VOLUME_BENCHMARK_PERIODS[benchmark_period]['label'],
+            'benchmark_label': (
+                self.VOLUME_BENCHMARK_PERIODS[
+                    benchmark_period
+                ]['label']
+            ),
+            'volume_context': volume_context,
             'error': False,
-            'data_source': 'database'
+
+            # Preserve the existing public value. A broader provenance
+            # correction is outside MINOR-005.
+            'data_source': 'database',
         }
-        
-        logger.info(f"✅ {ticker}: {current_volume:,} vs {benchmark_avg:,.0f} avg = {volume_change:+.2f}%")
+
+        logger.info(
+            f"✅ {ticker}: {current_volume:,} vs "
+            f"{benchmark_average:,.0f} avg = "
+            f"{volume_change:+.2f}%"
+        )
+
         return result
     
     def calculate_volume_performance_for_group(self, tickers: List[str], benchmark_period: str = '10d', save_to_db: bool = True) -> List[Dict]:
