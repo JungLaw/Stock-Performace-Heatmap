@@ -7640,12 +7640,112 @@ def show_technical_analysis_dashboard():
         with week52_container:
             st.subheader("📊 52-Week High Analysis")
             
-            # Get current price for display
-            current_price = data.get('current_price', 0)
-            timestamp_str = datetime.now().strftime('%m/%d/%Y, %I:%M %p')
-            
-            # Display current price
-            st.markdown(f"**Current Price:** ${current_price:.2f} ({timestamp_str})")
+            # Reuse the Moving Average price bundle so the displayed price,
+            # effective date/time, and 52-week comparison calculations share
+            # the same provenance.
+            moving_average_data = data.get(
+                'moving_averages'
+            ) or {}
+
+            if (
+                not moving_average_data.get('error')
+                and moving_average_data.get('current_price')
+                is not None
+            ):
+                current_price = float(
+                    moving_average_data['current_price']
+                )
+                effective_date_raw = (
+                    moving_average_data.get(
+                        'price_effective_date'
+                    )
+                    or moving_average_data.get(
+                        'calculation_date'
+                    )
+                )
+                effective_timestamp_raw = (
+                    moving_average_data.get(
+                        'price_effective_timestamp'
+                    )
+                )
+            else:
+                # Compatibility fallback: retain the existing top-level
+                # price, but use its calculation date only. Never label
+                # this fallback with the current application time.
+                current_price = float(
+                    data.get('current_price') or 0
+                )
+                effective_date_raw = data.get(
+                    'calculation_date'
+                )
+                effective_timestamp_raw = None
+
+            effective_date = pd.to_datetime(
+                effective_date_raw,
+                errors='coerce',
+            )
+            effective_timestamp = pd.to_datetime(
+                effective_timestamp_raw,
+                errors='coerce',
+            )
+
+            if pd.notna(effective_timestamp):
+                if effective_timestamp.tzinfo is None:
+                    effective_timestamp = (
+                        effective_timestamp.tz_localize(
+                            'America/New_York'
+                        )
+                    )
+                else:
+                    effective_timestamp = (
+                        effective_timestamp.tz_convert(
+                            'America/New_York'
+                        )
+                    )
+
+            today = pd.Timestamp.now(
+                tz='America/New_York'
+            ).date()
+
+            if pd.notna(effective_date):
+                date_text = (
+                    f"{effective_date.month}/"
+                    f"{effective_date.day}/"
+                    f"{effective_date.strftime('%y')}"
+                )
+            else:
+                date_text = 'date unavailable'
+
+            if (
+                pd.notna(effective_timestamp)
+                and effective_timestamp.date() == today
+            ):
+                hour_12 = (
+                    effective_timestamp.hour % 12
+                    or 12
+                )
+                meridiem = (
+                    'A'
+                    if effective_timestamp.hour < 12
+                    else 'P'
+                )
+                time_text = (
+                    f"{hour_12}:"
+                    f"{effective_timestamp.minute:02d}"
+                    f"{meridiem}"
+                )
+
+                price_label = (
+                    f"Latest Price: ${current_price:.2f} "
+                    f"({date_text} @ {time_text})"
+                )
+            else:
+                price_label = (
+                    f"Latest Price: ${current_price:.2f} "
+                    f"({date_text})"
+                )
+
+            st.markdown(f"**{price_label}**")
             st.markdown("---")
             
             # Display 52-week analysis table if data available
