@@ -34,7 +34,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     ],
     # Trend / volatility
     "ADX": [14],   # ADX_14, DIp_14, DIn_14
-    "HMA": [21],
+    "HMA": [16, 21],
     # Expanded to satisfy BullBearPower(10/13/21) dependencies (ATR/ATRP_10/13/21)
     # ATR_50 / ATRP_50 added for long-term Rolling Heatmap volatility support.
     "ATR": [10, 12, 13, 14, 21, 50],   # add 10/13/21; keep 12/14; add 50 for LT heatmap
