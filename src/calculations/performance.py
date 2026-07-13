@@ -11,6 +11,7 @@ import numpy as np
 import sqlite3
 import yfinance as yf
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 import logging
@@ -768,60 +769,134 @@ class DatabaseIntegratedPerformanceCalculator:
     
     def get_current_price(self, ticker: str) -> Optional[float]:
         """
-        Get current price with optional session-level caching
-        
-        Args:
-            ticker: Stock ticker symbol
-            
-        Returns:
-            Current price as float, or None if not available
+        Get current price with optional session-level caching.
+
+        Price provenance is stored in ``current_price_cache`` for callers that
+        need display metadata, while this public method remains backward-
+        compatible and continues to return only the numeric price.
         """
-        # Check session cache first
         now = datetime.now()
         cache_key = ticker
-        
+
         if cache_key in self.current_price_cache:
             cached_data = self.current_price_cache[cache_key]
             cached_time = cached_data['timestamp']
             cache_age_minutes = (now - cached_time).total_seconds() / 60
-            
+
             if cache_age_minutes < self.cache_duration_minutes:
-                logger.info(f"💾 Using cached current price for {ticker}: ${cached_data['price']:.2f} (cached {cache_age_minutes:.1f}m ago)")
+                logger.info(
+                    f"💾 Using cached current price for {ticker}: "
+                    f"${cached_data['price']:.2f} "
+                    f"(cached {cache_age_minutes:.1f}m ago)"
+                )
                 return cached_data['price']
-        
-        # Fetch fresh current price from yfinance
+
         logger.info(f"📡 Fetching current price for {ticker} from yfinance")
-        
+
         try:
             stock = yf.Ticker(ticker)
-            
-            # Try to get current price from info first (faster)
             info = stock.info
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice')
-            
+
+            current_price = (
+                info.get('currentPrice')
+                or info.get('regularMarketPrice')
+            )
+
+            price_source = None
+            effective_timestamp = None
+            effective_date = None
+
             if current_price:
                 current_price = float(current_price)
+
+                price_source = (
+                    'yfinance.currentPrice'
+                    if info.get('currentPrice') is not None
+                    else 'yfinance.regularMarketPrice'
+                )
+
+                regular_market_time = info.get('regularMarketTime')
+
+                if regular_market_time:
+                    effective_timestamp = datetime.fromtimestamp(
+                        int(regular_market_time),
+                        tz=ZoneInfo('America/New_York'),
+                    )
+                    effective_date = effective_timestamp.date().isoformat()
+
             else:
-                # Fallback to recent history
                 hist = stock.history(period='2d')
-                if not hist.empty:
-                    current_price = float(hist['Close'].iloc[-1])
-                else:
-                    logger.warning(f"⚠️ No current price data available for {ticker}")
+
+                if hist.empty:
+                    logger.warning(
+                        f"⚠️ No current price data available for {ticker}"
+                    )
                     return None
-            
-            # Cache the current price
+
+                current_price = float(hist['Close'].iloc[-1])
+                price_source = 'yfinance.history_2d_close'
+
+                latest_index = pd.Timestamp(hist.index[-1])
+
+                if latest_index.tzinfo is not None:
+                    latest_index = latest_index.tz_convert(
+                        'America/New_York'
+                    )
+
+                effective_date = latest_index.date().isoformat()
+
             self.current_price_cache[cache_key] = {
                 'price': current_price,
-                'timestamp': now
+                'timestamp': now,
+                'price_source': price_source,
+                'effective_timestamp': (
+                    effective_timestamp.isoformat()
+                    if effective_timestamp is not None
+                    else None
+                ),
+                'effective_date': effective_date,
             }
-            
-            logger.info(f"✅ Retrieved current price for {ticker}: ${current_price:.2f}")
+
+            logger.info(
+                f"✅ Retrieved current price for {ticker}: "
+                f"${current_price:.2f}"
+            )
             return current_price
-            
+
         except Exception as e:
-            logger.error(f"Error fetching current price for {ticker}: {e}")
+            logger.error(
+                f"Error fetching current price for {ticker}: {e}"
+            )
             return None
+
+    def get_current_price_metadata(self, ticker: str) -> Dict:
+        """
+        Return cached provenance for the most recent get_current_price call.
+
+        This accessor never fetches data and does not change cache identity,
+        acquisition behavior, or persistence behavior.
+        """
+        cached_data = self.current_price_cache.get(ticker)
+
+        if not cached_data:
+            return {}
+
+        return {
+            'price': cached_data.get('price'),
+            'price_source': cached_data.get('price_source'),
+            'effective_timestamp': cached_data.get(
+                'effective_timestamp'
+            ),
+            'effective_date': cached_data.get('effective_date'),
+            'fetched_at': (
+                cached_data.get('timestamp').isoformat()
+                if isinstance(
+                    cached_data.get('timestamp'),
+                    datetime,
+                )
+                else None
+            ),
+        }
     
     def calculate_percentage_change(self, current_price: float, historical_price: float) -> float:
         """

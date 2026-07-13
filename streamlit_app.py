@@ -1,4 +1,4 @@
-# Stamp: Thu, July 9, 2026 2:25 PM
+# Stamp: Sun, July 12, 2026 4:47 PM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -6766,19 +6766,44 @@ def display_heatmap(performance_data, title, asset_group=None):
     # Display with full width
     st.plotly_chart(fig, use_container_width=True)
 
-def generate_ma_comment(ticker, period, ma_type, current_price, ma_value, price_vs_ma):
-    """Generate contextual comment for moving average"""
-    # Determine if price is above or below MA
-    if price_vs_ma > 0:
-        direction = "above"
-        fall_pct = abs((ma_value - current_price) / current_price * 100)
-        comment = f"{ticker} is {price_vs_ma:+.1f}% above its {period}D {ma_type}. It has to fall {fall_pct:.1f}% to reach it."
-    else:
-        direction = "below"
-        rise_pct = abs((ma_value - current_price) / current_price * 100)
-        comment = f"{ticker} is {price_vs_ma:.1f}% below its {period}D {ma_type}. It has to rise {rise_pct:.1f}% to reach it."
-    
-    return comment
+def generate_ma_comment(
+    ticker,
+    period,
+    ma_type,
+    current_price,
+    ma_value,
+    price_vs_ma,
+):
+    """Generate a compact user-facing moving-average distance comment."""
+    rounded_diff = round(float(price_vs_ma), 1)
+
+    if rounded_diff > 0:
+        reach_pct = abs(
+            (ma_value - current_price)
+            / current_price
+            * 100
+        )
+
+        return (
+            f"{ticker} is {abs(rounded_diff):.1f}% above its "
+            f"{period}D {ma_type}. "
+            f"It has to fall {reach_pct:.1f}% to reach it."
+        )
+
+    if rounded_diff < 0:
+        reach_pct = abs(
+            (ma_value - current_price)
+            / current_price
+            * 100
+        )
+
+        return (
+            f"{ticker} is {abs(rounded_diff):.1f}% below its "
+            f"{period}D {ma_type}. "
+            f"It has to rise {reach_pct:.1f}% to reach it."
+        )
+
+    return f"{ticker} is at its {period}D {ma_type}."
 
 def display_technical_indicators_cards(indicators_data):
     """Display technical indicators in card-based layout similar to Investing.com"""
@@ -7014,115 +7039,237 @@ def _generate_indicator_comment(indicator_key, indicator_data, signal_info):
     return description or f"{signal} signal detected."
 
 def display_moving_averages_table(ma_data):
-    """Display professional moving averages table with color coding and comments"""
+    """Display compact tabbed SMA and EMA analysis tables."""
     if not ma_data or ma_data.get('error'):
-        st.error(f"Error loading moving averages: {ma_data.get('message', 'Unknown error')}")
+        message = (
+            ma_data.get('message', 'Unknown error')
+            if ma_data
+            else 'Unknown error'
+        )
+        st.error(f"Error loading moving averages: {message}")
         return
-    
-    # Extract data
+
     ticker = ma_data['ticker']
-    current_price = ma_data['current_price']
-    calc_date = ma_data['calculation_date']
+    current_price = float(ma_data['current_price'])
     periods_data = ma_data['periods']
-    
-    # Display current price header
-    st.caption(f"Current Price: ${current_price:.2f} ({calc_date})")
-    
-    # Prepare table data
-    table_rows = []
-    periods = [5, 9, 10, 20, 21, 50, 100, 200]
-    
-    for period in periods:
-        period_key = f'MA{period}'
-        if period_key not in periods_data:
-            continue
-        
-        sma_data = periods_data[period_key]['sma']
-        ema_data = periods_data[period_key]['ema']
-        
-        # Generate comments for both SMA and EMA
-        sma_comment = generate_ma_comment(ticker, period, 'SMA', current_price, 
-                                         sma_data['value'], sma_data['price_vs_ma'])
-        ema_comment = generate_ma_comment(ticker, period, 'EMA', current_price,
-                                         ema_data['value'], ema_data['price_vs_ma'])
-        
-        # Column order: Period | SMA | P0/SMA | SMA/P0 | Signal | Comments | EMA | P0/EMA | EMA/P0 | Signal | Comments
-        row = {
-            'Period': f'MA{period}',
-            'SMA': f"${sma_data['value']:.2f}",
-            'P0/SMA': f"{sma_data['price_vs_ma']:+.1f}%",
-            'SMA/P0': f"{sma_data['ma_vs_price']:+.1f}%",
-            'SMA_Signal': sma_data['signal'],
-            'SMA_Comments': sma_comment,
-            'EMA': f"${ema_data['value']:.2f}",
-            'P0/EMA': f"{ema_data['price_vs_ma']:+.1f}%",
-            'EMA/P0': f"{ema_data['ma_vs_price']:+.1f}%",
-            'EMA_Signal': ema_data['signal'],
-            'EMA_Comments': ema_comment
-        }
-        table_rows.append(row)
-    
-    # Create DataFrame
-    df = pd.DataFrame(table_rows)
-    
-    # Apply styling with proper function for row-wise styling
-    def style_row(row):
-        """Apply color to signal cells"""
-        styles = [''] * len(row)
-        
-        # Find signal column indices
-        cols = list(row.index)
-        if 'SMA_Signal' in cols:
-            sma_signal_idx = cols.index('SMA_Signal')
-            if row['SMA_Signal'] == 'Buy':
-                styles[sma_signal_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
-            elif row['SMA_Signal'] == 'Sell':
-                styles[sma_signal_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
-            else:  # Neutral
-                styles[sma_signal_idx] = 'background-color: #f8f9fa; color: #6c757d; font-weight: bold'
-        
-        if 'EMA_Signal' in cols:
-            ema_signal_idx = cols.index('EMA_Signal')
-            if row['EMA_Signal'] == 'Buy':
-                styles[ema_signal_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
-            elif row['EMA_Signal'] == 'Sell':
-                styles[ema_signal_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
-            else:  # Neutral
-                styles[ema_signal_idx] = 'background-color: #f8f9fa; color: #6c757d; font-weight: bold'
-        
-        return styles
-    
-    # Apply styling
-    styled_df = df.style.apply(style_row, axis=1).set_properties(**{
-        'text-align': 'left',
-        'font-size': '14px',
-        'padding': '8px'
-    }).set_table_styles([
-        {'selector': 'th', 'props': [('background-color', '#f8f9fa'), 
-                                      ('font-weight', 'bold'),
-                                      ('text-align', 'left'),
-                                      ('padding', '10px')]}
-    ])
-    
-    # Display table
-    st.dataframe(
-        styled_df,
-        column_config={
-            'Period': st.column_config.TextColumn('Period', width='small'),
-            'SMA': st.column_config.TextColumn('SMA', width='small'),
-            'P0/SMA': st.column_config.TextColumn('P0/SMA', width='small'),
-            'SMA/P0': st.column_config.TextColumn('SMA/P0', width='small'),
-            'SMA_Signal': st.column_config.TextColumn('Signal', width='small'),
-            'SMA_Comments': st.column_config.TextColumn('Comments', width='large'),
-            'EMA': st.column_config.TextColumn('EMA', width='small'),
-            'P0/EMA': st.column_config.TextColumn('P0/EMA', width='small'),
-            'EMA/P0': st.column_config.TextColumn('EMA/P0', width='small'),
-            'EMA_Signal': st.column_config.TextColumn('Signal', width='small'),
-            'EMA_Comments': st.column_config.TextColumn('Comments', width='large')
-        },
-        hide_index=True,
-        use_container_width=True
+
+    effective_date_raw = (
+        ma_data.get('price_effective_date')
+        or ma_data.get('calculation_date')
     )
+    effective_timestamp_raw = ma_data.get(
+        'price_effective_timestamp'
+    )
+
+    effective_date = pd.to_datetime(
+        effective_date_raw,
+        errors='coerce',
+    )
+    effective_timestamp = pd.to_datetime(
+        effective_timestamp_raw,
+        errors='coerce',
+    )
+
+    if pd.notna(effective_timestamp):
+        if effective_timestamp.tzinfo is None:
+            effective_timestamp = (
+                effective_timestamp.tz_localize(
+                    'America/New_York'
+                )
+            )
+        else:
+            effective_timestamp = (
+                effective_timestamp.tz_convert(
+                    'America/New_York'
+                )
+            )
+
+    today = pd.Timestamp.now(
+        tz='America/New_York'
+    ).date()
+
+    if pd.notna(effective_date):
+        date_text = (
+            f"{effective_date.month}/"
+            f"{effective_date.day}/"
+            f"{effective_date.strftime('%y')}"
+        )
+    else:
+        date_text = 'date unavailable'
+
+    if (
+        pd.notna(effective_timestamp)
+        and effective_timestamp.date() == today
+    ):
+        hour_12 = effective_timestamp.hour % 12 or 12
+        meridiem = (
+            'A'
+            if effective_timestamp.hour < 12
+            else 'P'
+        )
+        time_text = (
+            f"{hour_12}:"
+            f"{effective_timestamp.minute:02d}"
+            f"{meridiem}"
+        )
+
+        price_label = (
+            f"Latest Price: ${current_price:.2f} "
+            f"({date_text} @ {time_text})"
+        )
+    else:
+        price_label = (
+            f"Latest Price: ${current_price:.2f} "
+            f"({date_text})"
+        )
+
+    st.caption(price_label)
+
+    periods_by_type = {
+        'SMA': [
+            5,
+            9,
+            10,
+            20,
+            21,
+            50,
+            100,
+            200,
+            250,
+        ],
+        'EMA': [
+            5,
+            9,
+            10,
+            20,
+            21,
+            50,
+            100,
+            200,
+        ],
+    }
+
+    def build_table(ma_type):
+        rows = []
+        key = ma_type.lower()
+
+        for period in periods_by_type[ma_type]:
+            period_data = (
+                periods_data
+                .get(f'MA{period}', {})
+                .get(key)
+            )
+
+            if not period_data:
+                continue
+
+            ma_value = float(period_data['value'])
+            price_vs_ma = float(
+                period_data['price_vs_ma']
+            )
+            signal_payload = (
+                period_data.get('signal')
+                or {}
+            )
+
+            if price_vs_ma > 0:
+                price_vs_text = (
+                    f"+{abs(price_vs_ma):.1f}% above"
+                )
+            elif price_vs_ma < 0:
+                price_vs_text = (
+                    f"-{abs(price_vs_ma):.1f}% below"
+                )
+            else:
+                price_vs_text = "0.0% at MA"
+
+            rows.append({
+                'Period': f'{ma_type}({period})',
+                'MA Value': f'${ma_value:.2f}',
+                'Price vs MA': price_vs_text,
+                'Signal': signal_payload.get(
+                    'signal',
+                    'N/A',
+                ),
+                'Strength': signal_payload.get(
+                    'strength',
+                    'N/A',
+                ),
+                'Comment': generate_ma_comment(
+                    ticker,
+                    period,
+                    ma_type,
+                    current_price,
+                    ma_value,
+                    price_vs_ma,
+                ),
+                '_price_vs_ma_numeric': price_vs_ma,
+            })
+
+        return pd.DataFrame(rows)
+
+    def render_table(ma_type):
+        table_df = build_table(ma_type)
+
+        if table_df.empty:
+            st.info(f"No {ma_type} data available.")
+            return
+
+        display_df = table_df.drop(
+            columns=['_price_vs_ma_numeric']
+        )
+
+        st.dataframe(
+            display_df,
+            column_config={
+                'Period': (
+                    st.column_config.TextColumn(
+                        'Period',
+                        width='small',
+                    )
+                ),
+                'MA Value': (
+                    st.column_config.TextColumn(
+                        'MA Value',
+                        width='small',
+                    )
+                ),
+                'Price vs MA': (
+                    st.column_config.TextColumn(
+                        'Price vs MA',
+                        width='small',
+                    )
+                ),
+                'Signal': (
+                    st.column_config.TextColumn(
+                        'Signal',
+                        width='small',
+                    )
+                ),
+                'Strength': (
+                    st.column_config.TextColumn(
+                        'Strength',
+                        width='small',
+                    )
+                ),
+                'Comment': (
+                    st.column_config.TextColumn(
+                        'Comment',
+                        width='large',
+                    )
+                ),
+            },
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    sma_tab, ema_tab = st.tabs(['SMA', 'EMA'])
+
+    with sma_tab:
+        render_table('SMA')
+
+    with ema_tab:
+        render_table('EMA')
 
 def display_pivot_points(ticker: str, pivot_data: Dict, current_price: float) -> None:
     """

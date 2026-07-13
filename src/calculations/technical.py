@@ -3025,11 +3025,11 @@ class DatabaseIntegratedTechnicalCalculator:
     
     def _calculate_moving_averages(self, ticker: str, save_to_db: bool = True) -> Dict:
         """
-        Calculate comprehensive moving averages analysis for all 8 periods
-        
-        Implements PRD specifications:
-        - Periods: 5, 9, 10, 20, 21, 50, 100, 200
-        - Both SMA and EMA for each period
+        Calculate comprehensive moving averages analysis.
+
+        Display periods:
+        - SMA: 5, 9, 10, 20, 21, 50, 100, 200, 250
+        - EMA: 5, 9, 10, 20, 21, 50, 100, 200
         - Bidirectional percentages: MA/P0 and P0/MA
         - Signals: Buy/Sell/Neutral (±0.025% threshold)
         
@@ -3051,82 +3051,204 @@ class DatabaseIntegratedTechnicalCalculator:
                 'message': 'pandas-ta-classic library required for moving averages'
             }
         
-        # Get sufficient OHLCV data (need 200+ periods for 200-day MA)
-        df = self._get_sufficient_ohlcv_data(ticker, periods_needed=200, save_to_db=save_to_db)
-        
-        if df is None or len(df) < 200:
-            logger.error(f"Insufficient data for {ticker}: {len(df) if df is not None else 0} records")
+        # SMA(250) requires at least 250 observations.
+        df = self._get_sufficient_ohlcv_data(
+            ticker,
+            periods_needed=250,
+            save_to_db=save_to_db,
+        )
+
+        if df is None or len(df) < 250:
+            available_records = len(df) if df is not None else 0
+
+            logger.error(
+                f"Insufficient data for {ticker}: "
+                f"{available_records} records"
+            )
+
             return {
                 'error': True,
-                'message': f'Insufficient data for moving averages: need 200 periods, have {len(df) if df is not None else 0}'
+                'message': (
+                    "Insufficient data for moving averages: "
+                    f"need 250 periods, have {available_records}"
+                ),
             }
         
         try:
-            # Current price - fetch live price from yfinance with session caching
-            current_price = self.performance_calculator.get_current_price(ticker)
-            
-            # Fallback to last database close if yfinance fails
+            # Current price - fetch through the existing
+            # yfinance/session-cache path.
+            current_price = (
+                self.performance_calculator.get_current_price(ticker)
+            )
+            price_metadata = (
+                self.performance_calculator
+                .get_current_price_metadata(ticker)
+            )
+
+            current_date = pd.Timestamp(df.index[-1])
+
+            if current_date.tzinfo is not None:
+                current_date = current_date.tz_localize(None)
+
+            # Fallback to the last available OHLCV close if the
+            # current-price helper fails. This path has a reliable
+            # effective date but no proven intraday market timestamp.
             if current_price is None:
-                current_price = df['Close'].iloc[-1]
-                logger.warning(f"⚠️ Using last database close for {ticker}: ${current_price:.2f}")
-            
-            current_date = df.index[-1]
-            
-            # All periods per PRD specification
-            periods = [5, 9, 10, 20, 21, 50, 100, 200]
-            
+                current_price = float(df['Close'].iloc[-1])
+                price_metadata = {
+                    'price_source': 'technical_ohlcv_last_close',
+                    'effective_timestamp': None,
+                    'effective_date': (
+                        current_date.date().isoformat()
+                    ),
+                    'fetched_at': None,
+                }
+
+                logger.warning(
+                    f"⚠️ Using last database close for {ticker}: "
+                    f"${current_price:.2f}"
+                )
+
+            effective_date = (
+                price_metadata.get('effective_date')
+                or current_date.date().isoformat()
+            )
+
+            sma_periods = [
+                5,
+                9,
+                10,
+                20,
+                21,
+                50,
+                100,
+                200,
+                250,
+            ]
+            ema_periods = [
+                5,
+                9,
+                10,
+                20,
+                21,
+                50,
+                100,
+                200,
+            ]
+            periods = list(
+                dict.fromkeys(sma_periods + ema_periods)
+            )
+
             ma_data = {
                 'ticker': ticker,
                 'current_price': current_price,
-                'calculation_date': current_date.strftime('%Y-%m-%d'),
+
+                # Existing fields retained for compatibility.
+                'calculation_date': (
+                    current_date.strftime('%Y-%m-%d')
+                ),
                 'timestamp': current_date.isoformat(),
+
+                # Price-specific provenance for display.
+                'price_source': price_metadata.get(
+                    'price_source'
+                ),
+                'price_effective_date': effective_date,
+                'price_effective_timestamp': (
+                    price_metadata.get('effective_timestamp')
+                ),
+                'price_fetched_at': price_metadata.get(
+                    'fetched_at'
+                ),
+
                 'error': False,
                 'periods': {}
             }
-            
-            # Calculate for each period
+
+            # Calculate only the MA types authorized for each period.
             for period in periods:
                 if len(df) < period:
-                    logger.warning(f"Skipping MA{period} - insufficient data")
+                    logger.warning(
+                        f"Skipping MA{period} - insufficient data"
+                    )
                     continue
-                
-                # Calculate SMA and EMA
-                sma_series = ta.sma(df['Close'], length=period)
-                ema_series = ta.ema(df['Close'], length=period)
-                
-                if sma_series.empty or ema_series.empty:
-                    logger.warning(f"Failed to calculate MA{period}")
-                    continue
-                
-                sma_value = sma_series.iloc[-1]
-                ema_value = ema_series.iloc[-1]
-                
-                # Calculate bidirectional percentages
-                sma_vs_price = ((sma_value - current_price) / current_price) * 100  # MA/P0
-                price_vs_sma = ((current_price - sma_value) / sma_value) * 100      # P0/MA
-                
-                ema_vs_price = ((ema_value - current_price) / current_price) * 100  # MA/P0
-                price_vs_ema = ((current_price - ema_value) / ema_value) * 100      # P0/MA
-                
-                # Generate signals using ±0.025% threshold
-                sma_signal = self._generate_ma_signal(current_price, sma_value)
-                ema_signal = self._generate_ma_signal(current_price, ema_value)
-                
-                # Store comprehensive data for this period
-                ma_data['periods'][f'MA{period}'] = {
-                    'sma': {
-                        'value': sma_value,
-                        'ma_vs_price': sma_vs_price,      # SMA/P0 (negative if price above)
-                        'price_vs_ma': price_vs_sma,      # P0/SMA (positive if price above)
-                        'signal': sma_signal
-                    },
-                    'ema': {
-                        'value': ema_value,
-                        'ma_vs_price': ema_vs_price,      # EMA/P0 (negative if price above)
-                        'price_vs_ma': price_vs_ema,      # P0/EMA (positive if price above)
-                        'signal': ema_signal
-                    }
-                }
+
+                period_payload = {}
+
+                if period in sma_periods:
+                    sma_series = ta.sma(
+                        df['Close'],
+                        length=period,
+                    )
+
+                    if (
+                        sma_series is not None
+                        and not sma_series.empty
+                        and pd.notna(sma_series.iloc[-1])
+                    ):
+                        sma_value = float(sma_series.iloc[-1])
+                        sma_vs_price = (
+                            (sma_value - current_price)
+                            / current_price
+                        ) * 100
+                        price_vs_sma = (
+                            (current_price - sma_value)
+                            / sma_value
+                        ) * 100
+
+                        period_payload['sma'] = {
+                            'value': sma_value,
+                            'ma_vs_price': sma_vs_price,
+                            'price_vs_ma': price_vs_sma,
+                            'signal': self._generate_ma_signal(
+                                current_price,
+                                sma_value,
+                            ),
+                        }
+                    else:
+                        logger.warning(
+                            f"Failed to calculate SMA({period})"
+                        )
+
+                if period in ema_periods:
+                    ema_series = ta.ema(
+                        df['Close'],
+                        length=period,
+                    )
+
+                    if (
+                        ema_series is not None
+                        and not ema_series.empty
+                        and pd.notna(ema_series.iloc[-1])
+                    ):
+                        ema_value = float(ema_series.iloc[-1])
+                        ema_vs_price = (
+                            (ema_value - current_price)
+                            / current_price
+                        ) * 100
+                        price_vs_ema = (
+                            (current_price - ema_value)
+                            / ema_value
+                        ) * 100
+
+                        period_payload['ema'] = {
+                            'value': ema_value,
+                            'ma_vs_price': ema_vs_price,
+                            'price_vs_ma': price_vs_ema,
+                            'signal': self._generate_ma_signal(
+                                current_price,
+                                ema_value,
+                            ),
+                        }
+                    else:
+                        logger.warning(
+                            f"Failed to calculate EMA({period})"
+                        )
+
+                if period_payload:
+                    ma_data['periods'][f'MA{period}'] = (
+                        period_payload
+                    )
             
             logger.info(f"✅ Calculated moving averages for {len(ma_data['periods'])} periods")
             return ma_data
