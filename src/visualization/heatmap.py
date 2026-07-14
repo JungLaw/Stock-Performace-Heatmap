@@ -568,9 +568,20 @@ Data unavailable<br>
                 font=dict(size=20, color="gray")
             )
             fig.update_layout(
-                title=title,
+                title=dict(
+                    text=title,
+                    font=dict(
+                        family="Arial, sans-serif",
+                        size=20,
+                        color="#333333",
+                    ),
+                    x=0.5,
+                    xanchor="center",
+                    y=0.97,
+                    yanchor="top",
+                ),
                 width=width,
-                height=height
+                height=height,
             )
             return fig
         
@@ -619,11 +630,14 @@ Data unavailable<br>
                 text=title,
                 font=dict(
                     family="Arial, sans-serif",
-                    size=24,
-                    color="#333333"
+                    size=20,
+                    color="#333333",
                 ),
-                x=0.5,  # Center the title
-                pad=dict(t=20, b=20)
+                x=0.5,
+                xanchor="center",
+                y=0.97,
+                yanchor="top",
+                pad=dict(t=20, b=20),
             ),
             
             # Remove margins for full-width display

@@ -1,6 +1,6 @@
 # Minor Backlog Ledger — TA Rule Engine
-Version: 1.2
-Last update: 7/13/26
+Version: 1.3
+Last update: 7/14/26
 
 ## Authority level
 
@@ -202,12 +202,17 @@ Promotion result:
 ---
 ### MINOR-004 — Price Performance Hover Context Expansion
 
-Status: Planned
+Status: Completed
 Type: UX / code / hover-display cleanup
 Source: user-requested hover enhancement for Performance Heatmap → Price Performance
 Priority: High
 Requires major workstream? No
-Docs update needed? Minor backlog ledger; Master Checklist only after completion if completed-status rollup is desired; Canonical Outline not expected
+Docs update needed? Minor backlog ledger only; Master Checklist and Canonical Outline not required
+
+Completion date: 7/14/26
+Core implementation commit: `e34845b` — `(feat) Complete MINOR-004 price performance hover context`
+Branch: `main`
+Push status: Pushed to `origin/main`
 
 Objective:
 Improve the Performance Heatmap hover content for `Analysis Mode: Price Performance` by adding richer context: current price, selected price-period comparison, current volume, volume comparisons versus multiple benchmark windows, and an as-of date for the displayed current data.
@@ -256,9 +261,64 @@ Scope boundaries:
 * Reuse existing volume benchmark logic if available.
 * Stop and reassess if this requires new persistence behavior, new DB schema, or a broad acquisition redesign.
 
+Completed implementation:
+
+- Preserved the existing Price Performance formulas, selected-period baseline, tile percentages, tile colors, and summary statistics.
+- Preserved the existing public current-price float API.
+- Added current-price metadata transport for:
+  - effective date
+  - effective market timestamp
+  - current cumulative regular-market volume
+- Reused the MINOR-005 completed-session volume acquisition foundation.
+- Added current cumulative volume comparisons against:
+  - latest completed session
+  - latest 5-session average
+  - latest 10-session average
+  - latest 22-session average
+  - latest 60-session average
+- Added whole-number `Share` values:
+  - `current volume / benchmark volume × 100`
+- Added a page-level Price Performance timestamp using the oldest reliable effective timestamp among valid displayed tickers.
+- Added date-only fallback for weekend, holiday, historical, or date-only source metadata.
+- Kept `Timestamp:` and `Baseline Date:` outside the hover.
+- Removed the Price Performance hover `As of:` line.
+- Preserved Price Performance output when live-volume context is unavailable.
+- Added follow-up Performance Heatmap presentation polish:
+  - centered chart title anchoring
+  - reduced chart-title font size
+  - no calculation or acquisition changes
+
+Verification completed:
+
+- Python compile checks passed.
+- Assertion-based Status Verification Block passed.
+- Active-session timestamp and current-volume checks passed.
+- Volume comparison and Share calculations passed focused manual review.
+- Price-only fallback behavior passed.
+- Volume Performance regression checks passed.
+- `git diff --check` passed.
+- Core implementation was committed and pushed successfully.
+
+Scope preserved:
+
+- No DB schema change.
+- No new persistence policy.
+- No new quote request for current volume.
+- No price-performance formula change.
+- No tile-color or sizing change.
+- No rulebook or signal-semantic change.
+- No Technical Analysis, Rolling Heatmap, or SCD calculation change.
+
+Promotion result:
+
+- Remained a minor scoped task.
+- No major-workstream promotion was required.
+- No Master Checklist or Canonical Outline update is required.
+
 Completion criteria:
 
-* Price Performance hover displays current price, selected price-period comparison, current volume, volume benchmark comparisons, and as-of date.
+* Price Performance hover displays current price, selected price-period change, current cumulative volume, completed-session volume benchmark comparisons, and whole-number Share values.
+* Page-level `Timestamp:` and `Baseline Date:` context display correctly outside the hover.
 * No unrelated Performance Heatmap behavior changes.
 * Existing price-performance tiles continue to render correctly.
 * Hover spacing/alignment is improved as much as Plotly supports.
@@ -271,12 +331,17 @@ Completion criteria:
 ---
 ### MINOR-005 — Volume Performance Hover Context / As-of Context Review
 
-Status: Planned
+Status: Completed
 Type: UX / code / hover-display cleanup / bounded feasibility review
 Source: user-requested hover enhancement for Performance Heatmap → Volume Performance
 Priority: High
-Requires major workstream? No, unless current-day / intraday as-of support requires new acquisition, cache, or persistence behavior
-Docs update needed? Minor backlog ledger; Master Checklist only after completion if completed-status rollup is desired; Canonical Outline not expected unless as-of support changes acquisition/cache/persistence architecture
+Requires major workstream? No
+Docs update needed? Minor backlog ledger only; Master Checklist and Canonical Outline not required
+
+Completion date: 7/14/26
+Commit: `88a258e` — `(feat) Complete MINOR-005 volume performance hover context`
+Branch: `main`
+Push status: Pushed to `origin/main`
 
 Objective:
 Improve the Performance Heatmap hover content for `Analysis Mode: Volume Performance` by adding price context, richer multi-window volume comparisons, and an as-of line. Also assess whether current-day / incomplete-volume as-of support can be implemented using existing Performance / Volume dashboard data paths without changing acquisition, cache, persistence, or DB behavior.
@@ -326,6 +391,55 @@ Scope boundaries:
 * Reuse existing Performance / Volume calculator paths if available.
 * Do not add new DB schema, persistence behavior, or broad acquisition/cache behavior inside this minor task.
 * Stop and reassess if current-day support requires new acquisition architecture, new cache policy, or material performance changes.
+
+Completed implementation:
+
+- Preserved the selected Volume Performance benchmark as the tile percentage, color, label, and summary-statistics driver.
+- Added completed-session price context:
+  - effective completed-session price
+  - prior-session absolute price change
+  - prior-session percentage price change
+- Added volume comparisons against:
+  - prior completed session
+  - prior 5-session average
+  - prior 10-session average
+  - prior 22-session average
+  - prior 60-session average
+- Excluded the displayed completed session from all average-volume benchmarks.
+- Added compact K / M / B benchmark formatting.
+- Added explicit signed volume percentage changes.
+- Added completed-session `As of:` context to the Volume Performance hover.
+- Corrected `save_to_db` propagation through the Volume Performance orchestration path.
+- Verified that deselecting database saving prevents a newly fetched ticker from being persisted.
+- Added follow-up page-level Volume Performance context:
+  - `As of:` directly below the Performance Heatmap header
+  - date resolves from the last completed trading session
+- Added shared Performance Heatmap chart-title centering polish without changing Volume Performance calculations.
+
+Verification completed:
+
+- Python compile checks passed.
+- Assertion-based Status Verification Block passed.
+- Hover and benchmark checks passed.
+- Session-only ticker persistence behavior passed.
+- Price Performance regression checks passed.
+- `git diff --check` passed.
+- Commit and push completed successfully.
+
+Scope preserved:
+
+- No DB schema change.
+- No new persistence behavior.
+- No broad acquisition or cache redesign.
+- No tile formula, color-threshold, or sizing change.
+- No Technical Analysis, Rolling Heatmap, or SCD change.
+
+Promotion result:
+
+- Remained a minor scoped task.
+- Current-day/intraday Volume Performance was not added to MINOR-005.
+- Current intraday volume was implemented later only for MINOR-004 Price Performance using the existing quote response.
+- No Master Checklist or Canonical Outline update is required.
 
 Completion criteria:
 * Volume Performance hover displays ticker, price context, current volume, volume comparisons across 1D / 1W / 2W / 1M / 3M, and an as-of line.

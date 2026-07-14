@@ -8661,8 +8661,27 @@ def show_performance_heatmaps():
                 st.caption(
                     f"Baseline Date: {baseline_date}"
                 )
+
+        else:
+            last_completed_day = pd.Timestamp(
+                get_last_completed_trading_day()
+            )
+
+            volume_as_of = (
+                f"{last_completed_day.month}/"
+                f"{last_completed_day.day}/"
+                f"{str(last_completed_day.year)[-2:]}"
+            )
+
+            st.caption(
+                f"As of: {volume_as_of}"
+            )
         
-        display_heatmap(current_data, title, controls['group'])
+        display_heatmap(
+            current_data,
+            title,
+            controls['group'],
+        )
         
         # Display data table
         with st.expander("📋 Detailed Data Table", expanded=False):
