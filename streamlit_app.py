@@ -1,4 +1,3 @@
-# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -5082,9 +5081,22 @@ def _build_scd_single_indicator_hover_customdata(
         f" | Price: {price_delta}" if price_delta else ""
     )
 
+    indicator_delta_line = (
+        custom.get("delta_line", "")
+        .removesuffix("<br>")
+    )
+
+    custom["single_combined_delta_line"] = (
+        f"{indicator_delta_line}"
+        f"{custom.get('single_price_delta_suffix', '')}<br>"
+        if indicator_delta_line
+        else ""
+    )
+
     if _is_scd_crossover_event_row(row_key) and custom.get("crossover_summary_block"):
         custom["single_price_value_suffix"] = ""
         custom["single_price_delta_suffix"] = ""
+        custom["single_combined_delta_line"] = ""
         custom["scd_single_value_line"] = ""
     else:
         custom["scd_single_value_line"] = (
@@ -5219,8 +5231,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.scd_single_value_line}"
             "%{customdata.crossover_summary_block}"
             "%{customdata.crossover_context_block}"
-            "%{customdata.delta_line}"
-            "%{customdata.single_price_delta_suffix}"
+            "%{customdata.single_combined_delta_line}"
             "%{customdata.single_combined_trend_line}"
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
