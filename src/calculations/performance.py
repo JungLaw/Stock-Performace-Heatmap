@@ -1,4 +1,4 @@
-# Stamp: Tue, Feb 10, 2026 4:12 PM
+# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Database-Integrated Performance Calculator
 
@@ -805,6 +805,7 @@ class DatabaseIntegratedPerformanceCalculator:
             price_source = None
             effective_timestamp = None
             effective_date = None
+            current_volume = None
 
             if current_price:
                 current_price = float(current_price)
@@ -816,6 +817,17 @@ class DatabaseIntegratedPerformanceCalculator:
                 )
 
                 regular_market_time = info.get('regularMarketTime')
+                regular_market_volume = info.get(
+                    'regularMarketVolume'
+                )
+
+                if regular_market_volume is not None:
+                    try:
+                        current_volume = int(
+                            regular_market_volume
+                        )
+                    except (TypeError, ValueError):
+                        current_volume = None
 
                 if regular_market_time:
                     effective_timestamp = datetime.fromtimestamp(
@@ -836,6 +848,14 @@ class DatabaseIntegratedPerformanceCalculator:
                 current_price = float(hist['Close'].iloc[-1])
                 price_source = 'yfinance.history_2d_close'
 
+                if 'Volume' in hist.columns:
+                    try:
+                        current_volume = int(
+                            hist['Volume'].iloc[-1]
+                        )
+                    except (TypeError, ValueError):
+                        current_volume = None
+
                 latest_index = pd.Timestamp(hist.index[-1])
 
                 if latest_index.tzinfo is not None:
@@ -855,6 +875,7 @@ class DatabaseIntegratedPerformanceCalculator:
                     else None
                 ),
                 'effective_date': effective_date,
+                'current_volume': current_volume,
             }
 
             logger.info(
@@ -888,6 +909,9 @@ class DatabaseIntegratedPerformanceCalculator:
                 'effective_timestamp'
             ),
             'effective_date': cached_data.get('effective_date'),
+            'current_volume': cached_data.get(
+                'current_volume'
+            ),
             'fetched_at': (
                 cached_data.get('timestamp').isoformat()
                 if isinstance(
@@ -929,7 +953,14 @@ class DatabaseIntegratedPerformanceCalculator:
         
         # Get current and historical prices using database-first approach
         current_price = self.get_current_price(ticker)
-        historical_price = self.get_historical_price(ticker, period, save_to_db=save_to_db)
+        current_price_metadata = (
+            self.get_current_price_metadata(ticker)
+        )
+        historical_price = self.get_historical_price(
+            ticker,
+            period,
+            save_to_db=save_to_db,
+        )
         
         if current_price is None or historical_price is None:
             return {
@@ -940,6 +971,9 @@ class DatabaseIntegratedPerformanceCalculator:
                 'absolute_change': 0.0,
                 'period': period,
                 'period_label': get_enhanced_period_label(period),
+                'current_price_metadata': (
+                    current_price_metadata
+                ),
                 'error': True,
                 'data_source': 'error'
             }
@@ -958,6 +992,9 @@ class DatabaseIntegratedPerformanceCalculator:
             'absolute_change': absolute_change,
             'period': period,
             'period_label': get_enhanced_period_label(period),
+            'current_price_metadata': (
+                current_price_metadata
+            ),
             'error': False,
             'data_source': data_source
         }

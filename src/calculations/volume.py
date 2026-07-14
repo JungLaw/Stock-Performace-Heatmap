@@ -1,3 +1,4 @@
+# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Database-Integrated Volume Calculator
 
@@ -836,6 +837,92 @@ class DatabaseIntegratedVolumeCalculator:
             'price_change': price_change,
             'price_change_pct': price_change_pct,
             'current_volume': current_volume,
+            'volume_comparisons': comparisons,
+        }
+
+    def get_live_volume_context(
+        self,
+        ticker: str,
+        current_volume: int,
+        save_to_db: bool = True,
+    ) -> Optional[Dict]:
+        """
+        Compare current cumulative volume with completed-session baselines.
+
+        Baselines use the latest completed sessions:
+        - 1D: latest completed session
+        - 1W: latest 5 completed sessions
+        - 2W: latest 10 completed sessions
+        - 1M: latest 22 completed sessions
+        - 3M: latest 60 completed sessions
+        """
+        if current_volume is None or int(current_volume) < 0:
+            return None
+
+        context = self._get_completed_volume_context_frame(
+            ticker,
+            save_to_db=save_to_db,
+        )
+
+        if context is None or len(context) != 61:
+            return None
+
+        completed_rows = context.iloc[-60:]
+
+        benchmark_values = {
+            '1d': float(
+                completed_rows.iloc[-1]['Volume']
+            ),
+            '1w': float(
+                completed_rows['Volume'].tail(5).mean()
+            ),
+            '10d': float(
+                completed_rows['Volume'].tail(10).mean()
+            ),
+            '1m': float(
+                completed_rows['Volume'].tail(22).mean()
+            ),
+            '60d': float(
+                completed_rows['Volume'].tail(60).mean()
+            ),
+        }
+
+        labels = {
+            '1d': '1D',
+            '1w': '1W Avg',
+            '10d': '2W Avg',
+            '1m': '1M Avg',
+            '60d': '3M Avg',
+        }
+
+        comparisons = {}
+
+        for key, benchmark_volume in benchmark_values.items():
+            share_pct = (
+                (
+                    float(current_volume)
+                    / benchmark_volume
+                )
+                * 100.0
+                if benchmark_volume
+                else None
+            )
+
+            comparisons[key] = {
+                'label': labels[key],
+                'benchmark_volume': benchmark_volume,
+                'percentage_change': self._percentage_change(
+                    current_volume,
+                    benchmark_volume,
+                ),
+                'share_pct': share_pct,
+            }
+
+        return {
+            'effective_date': (
+                context.index[-1].strftime('%Y-%m-%d')
+            ),
+            'current_volume': int(current_volume),
             'volume_comparisons': comparisons,
         }
     

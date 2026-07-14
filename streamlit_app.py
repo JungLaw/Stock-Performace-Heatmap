@@ -1,4 +1,4 @@
-# Stamp: Sun, July 12, 2026 4:47 PM
+# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Stock Performance Heatmap Dashboard - Main Application
 
@@ -6601,10 +6601,46 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            performance_data = calculator.calculate_performance_for_group(tickers, period, save_to_db=save_to_db)
+            performance_data = (
+                calculator.calculate_performance_for_group(
+                    tickers,
+                    period,
+                    save_to_db=save_to_db,
+                )
+            )
+
+            volume_calculator = (
+                st.session_state.volume_calculator
+            )
+
+            for item in performance_data:
+                if item.get('error', False):
+                    continue
+
+                price_metadata = (
+                    item.get('current_price_metadata')
+                    or {}
+                )
+                current_volume = price_metadata.get(
+                    'current_volume'
+                )
+
+                if current_volume is None:
+                    item['live_volume_context'] = None
+                    continue
+
+                item['live_volume_context'] = (
+                    volume_calculator.get_live_volume_context(
+                        item['ticker'],
+                        current_volume=current_volume,
+                        save_to_db=save_to_db,
+                    )
+                )
             
             # Show database usage statistics
-            summary = calculator.get_performance_summary(performance_data)
+            summary = calculator.get_performance_summary(
+                performance_data
+            )
             
             progress_bar.progress(1.0)
             status_text.empty()
@@ -8511,22 +8547,120 @@ def show_performance_heatmaps():
         # Display heatmap
         st.subheader("🗺️ Performance Heatmap")
         
-        # Add baseline date info (only for price mode)
+        # Add timestamp and baseline date info (only for price mode)
         if controls['analysis_mode'] == 'price':
+            valid_items = [
+                item
+                for item in current_data
+                if not item.get('error', False)
+            ]
+
+            reliable_timestamps = []
+            reliable_dates = []
+
+            for item in valid_items:
+                metadata = (
+                    item.get('current_price_metadata')
+                    or {}
+                )
+                effective_timestamp = metadata.get(
+                    'effective_timestamp'
+                )
+                effective_date = metadata.get(
+                    'effective_date'
+                )
+
+                if effective_timestamp:
+                    try:
+                        reliable_timestamps.append(
+                            pd.Timestamp(
+                                effective_timestamp
+                            )
+                        )
+                    except Exception:
+                        pass
+
+                if effective_date:
+                    try:
+                        reliable_dates.append(
+                            pd.Timestamp(effective_date)
+                        )
+                    except Exception:
+                        pass
+
+            timestamp_caption = None
+
+            if reliable_timestamps:
+                oldest_timestamp = min(
+                    reliable_timestamps
+                )
+                now_local = datetime.now()
+
+                if (
+                    is_us_trading_day(now_local)
+                    and oldest_timestamp.date()
+                    == now_local.date()
+                ):
+                    hour = (
+                        oldest_timestamp
+                        .strftime('%I')
+                        .lstrip('0')
+                        or '0'
+                    )
+                    timestamp_caption = (
+                        f"{oldest_timestamp.month}/"
+                        f"{oldest_timestamp.day}/"
+                        f"{str(oldest_timestamp.year)[-2:]}"
+                        f" @ {hour}:"
+                        f"{oldest_timestamp.strftime('%M')}"
+                        f"{oldest_timestamp.strftime('%p')[0]}"
+                    )
+                else:
+                    timestamp_caption = (
+                        f"{oldest_timestamp.month}/"
+                        f"{oldest_timestamp.day}/"
+                        f"{str(oldest_timestamp.year)[-2:]}"
+                    )
+
+            elif reliable_dates:
+                oldest_date = min(reliable_dates)
+                timestamp_caption = (
+                    f"{oldest_date.month}/"
+                    f"{oldest_date.day}/"
+                    f"{str(oldest_date.year)[-2:]}"
+                )
+
+            if timestamp_caption:
+                st.caption(
+                    f"Timestamp: {timestamp_caption}"
+                )
+
             baseline_date = None
-            if current_data:
-                for item in current_data:
-                    if not item.get('error', False):
-                        period = item.get('period', '1d')
-                        
-                        # FIXED: Use proper trading day calculation for baseline date
-                        from src.calculations.performance import get_baseline_date_for_display
-                        baseline_date_str = get_baseline_date_for_display(period)
-                        baseline_date = datetime.strptime(baseline_date_str, '%Y-%m-%d').strftime('%m/%d/%y')
-                        break
-            
+
+            if valid_items:
+                period = valid_items[0].get(
+                    'period',
+                    '1d',
+                )
+
+                from src.calculations.performance import (
+                    get_baseline_date_for_display,
+                )
+
+                baseline_date_str = (
+                    get_baseline_date_for_display(
+                        period
+                    )
+                )
+                baseline_date = datetime.strptime(
+                    baseline_date_str,
+                    '%Y-%m-%d',
+                ).strftime('%m/%d/%y')
+
             if baseline_date:
-                st.caption(f"Baseline Date: {baseline_date}")
+                st.caption(
+                    f"Baseline Date: {baseline_date}"
+                )
         
         display_heatmap(current_data, title, controls['group'])
         

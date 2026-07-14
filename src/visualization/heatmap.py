@@ -1,3 +1,4 @@
+# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Heatmap Visualization - Finviz-Style Treemap Implementation
 
@@ -153,37 +154,183 @@ class FinvizHeatmapGenerator:
         
         # Handle both price and volume data structures
         if 'percentage_change' in performance_item:
-            # Price performance data
-            pct_change = performance_item['percentage_change']
-            current_price = performance_item['current_price']
-            historical_price = performance_item['historical_price']
-            absolute_change = performance_item['absolute_change']
-            period_label = performance_item.get('period_label', 'N/A')
-            
-            # Use display name if provided, otherwise use ticker
-            title = display_name if display_name else ticker
-            
-            # Format prices and changes
-            price_format = f"${current_price:.2f}" if current_price else "N/A"
-            hist_price_format = f"${historical_price:.2f}" if historical_price else "N/A"
-            abs_change_format = f"${absolute_change:+.2f}" if absolute_change else "N/A"
-            pct_format = f"{pct_change:+.2f}%" if pct_change is not None else "N/A"
-            
-            # Create price hover text
-            if display_name and display_name != ticker:
-                hover_text = f"""<b>{title}</b><br>
-<i>Ticker: {ticker}</i><br>
-Current: {price_format}<br>
-{period_label}: {hist_price_format}<br>
-Change: {abs_change_format} ({pct_format})<br>
-<extra></extra>"""
+            pct_change = performance_item[
+                'percentage_change'
+            ]
+            current_price = performance_item[
+                'current_price'
+            ]
+            absolute_change = performance_item[
+                'absolute_change'
+            ]
+            live_volume_context = (
+                performance_item.get(
+                    'live_volume_context'
+                )
+                or {}
+            )
+            comparisons = (
+                live_volume_context.get(
+                    'volume_comparisons'
+                )
+                or {}
+            )
+
+            title = (
+                display_name
+                if display_name
+                else ticker
+            )
+
+            def _format_compact_volume(value):
+                if value is None:
+                    return "N/A"
+
+                numeric_value = float(value)
+
+                if abs(numeric_value) >= 1_000_000_000:
+                    return (
+                        f"{numeric_value / 1_000_000_000:.1f}B"
+                    )
+
+                if abs(numeric_value) >= 1_000_000:
+                    return (
+                        f"{numeric_value / 1_000_000:.1f}M"
+                    )
+
+                if abs(numeric_value) >= 1_000:
+                    return (
+                        f"{numeric_value / 1_000:.1f}K"
+                    )
+
+                return f"{numeric_value:,.0f}"
+
+            def _format_signed_pct(value):
+                if value is None:
+                    return "N/A"
+
+                return f"{float(value):+.1f}%"
+
+            def _format_share(value):
+                if value is None:
+                    return "N/A"
+
+                return f"{float(value):.0f}%"
+
+            price_format = (
+                f"${float(current_price):,.2f}"
+                if current_price is not None
+                else "N/A"
+            )
+            absolute_change_format = (
+                f"${float(absolute_change):+.2f}"
+                if absolute_change is not None
+                else "N/A"
+            )
+            price_pct_format = (
+                f"{float(pct_change):+.1f}%"
+                if pct_change is not None
+                else "N/A"
+            )
+
+            current_volume = (
+                live_volume_context.get(
+                    'current_volume'
+                )
+            )
+            volume_format = (
+                f"{int(current_volume):,}"
+                if current_volume is not None
+                else "N/A"
+            )
+
+            comparison_lines = []
+
+            for key, fallback_label in (
+                ('1d', '1D'),
+                ('1w', '1W Avg'),
+                ('10d', '2W Avg'),
+                ('1m', '1M Avg'),
+                ('60d', '3M Avg'),
+            ):
+                comparison = (
+                    comparisons.get(key)
+                    or {}
+                )
+
+                if not comparison:
+                    continue
+
+                label = comparison.get(
+                    'label',
+                    fallback_label,
+                )
+                label_spacing = (
+                    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                    if key == '1d'
+                    else " "
+                )
+
+                comparison_lines.append(
+                    f"- vs. {label}:"
+                    f"{label_spacing}"
+                    f"{_format_signed_pct(
+                        comparison.get(
+                            'percentage_change'
+                        )
+                    )} "
+                    f"({_format_compact_volume(
+                        comparison.get(
+                            'benchmark_volume'
+                        )
+                    )}) "
+                    f"| Share: {_format_share(
+                        comparison.get(
+                            'share_pct'
+                        )
+                    )}"
+                )
+
+            if (
+                display_name
+                and display_name != ticker
+            ):
+                hover_header = (
+                    f"<b>{title}</b><br>"
+                    f"<i>Ticker: {ticker}</i><br>"
+                )
             else:
-                hover_text = f"""<b>{title}</b><br>
-Current: {price_format}<br>
-{period_label}: {hist_price_format}<br>
-Change: {abs_change_format} ({pct_format})<br>
-<extra></extra>"""
-                
+                hover_header = (
+                    f"<b>Ticker: {ticker}</b><br>"
+                )
+
+            volume_lines = "<br>".join(
+                comparison_lines
+            )
+
+            if volume_lines:
+                hover_text = (
+                    f"{hover_header}"
+                    f"Price: {price_format} "
+                    f"({absolute_change_format}, "
+                    f"{price_pct_format})"
+                    f"<br><br>"
+                    f"Current Volume: "
+                    f"{volume_format}<br>"
+                    f"{volume_lines}<br>"
+                    f"<extra></extra>"
+                )
+            else:
+                hover_text = (
+                    f"{hover_header}"
+                    f"Price: {price_format} "
+                    f"({absolute_change_format}, "
+                    f"{price_pct_format})<br>"
+                    f"<extra></extra>"
+                )
+
+
         elif 'volume_change' in performance_item:
             # Volume performance data
             pct_change = performance_item['volume_change']
