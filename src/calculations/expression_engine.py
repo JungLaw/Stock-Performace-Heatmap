@@ -171,6 +171,28 @@ def falling_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
     return result
 
 
+def not_rising_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
+    """
+    True where `series` is not strictly rising across the requested bars.
+
+    This is the elementwise Boolean complement of rising_2bar().
+    It exists because the expression engine's scalar `not` operator cannot
+    safely negate a pandas Series.
+    """
+    return ~rising_2bar(series, bars)
+
+
+def not_falling_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
+    """
+    True where `series` is not strictly falling across the requested bars.
+
+    This is the elementwise Boolean complement of falling_2bar().
+    It exists because the expression engine's scalar `not` operator cannot
+    safely negate a pandas Series.
+    """
+    return ~falling_2bar(series, bars)
+
+
 class ExpressionEngine:
     """
     High-level wrapper around SafeExpressionEvaluator.
@@ -185,7 +207,9 @@ class ExpressionEngine:
         base_funcs = {
             "rising_2bar": rising_2bar,
             "falling_2bar": falling_2bar,
-            "abs": abs,    
+            "not_rising_2bar": not_rising_2bar,
+            "not_falling_2bar": not_falling_2bar,
+            "abs": abs,
         }
 
         if extra_functions:
