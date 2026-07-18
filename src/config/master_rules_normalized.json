@@ -678,12 +678,12 @@
         "feature_scopes": {
           "heatmap": {
             "8_17_5": {
-              "strong_buy": "MACD_8_17_5 > MACD_8_17_5_signal and rising_2bar(MACD_8_17_5_hist, 2) and MACD_8_17_5_hist > 0",
-              "buy": "MACD_8_17_5 > MACD_8_17_5_signal",
-              "neutral": "abs(MACD_8_17_5_hist) <= 0.1 * ATR_8",
-              "sell": "MACD_8_17_5 < MACD_8_17_5_signal",
-              "strong_sell": "MACD_8_17_5 < MACD_8_17_5_signal and falling_2bar(MACD_8_17_5_hist, 2) and MACD_8_17_5_hist < 0",
-              "notes": ""
+              "strong_buy": "MACD_8_17_5_line < 0 and MACD_8_17_5_hist > 0 and rising_2bar(MACD_8_17_5_hist, 2)",
+              "buy": "MACD_8_17_5_line < 0 and MACD_8_17_5_hist > 0 and not_rising_2bar(MACD_8_17_5_hist, 2)",
+              "neutral": "(MACD_8_17_5_line >= 0 and MACD_8_17_5_hist >= 0) or (MACD_8_17_5_line <= 0 and MACD_8_17_5_hist <= 0)",
+              "sell": "MACD_8_17_5_line > 0 and MACD_8_17_5_hist < 0 and not_falling_2bar(MACD_8_17_5_hist, 2)",
+              "strong_sell": "MACD_8_17_5_line > 0 and MACD_8_17_5_hist < 0 and falling_2bar(MACD_8_17_5_hist, 2)",
+              "notes": "Fast MACD contrarian zero-line reversal-state logic. Buy states require the MACD line below zero with a positive histogram; sell states require the MACD line above zero with a negative histogram. Strong states require strict two-bar histogram expansion in the reversal direction."
             },
             "12_26_9": {
               "strong_buy": "MACD_12_26_9_line < 0 and MACD_12_26_9_hist > 0 and rising_2bar(MACD_12_26_9_hist, 2)",
@@ -694,12 +694,12 @@
               "notes": "Contrarian zero-line reversal-state logic. Buy states require the MACD line below zero with a positive histogram; sell states require the MACD line above zero with a negative histogram. Strong states require strict two-bar histogram expansion in the reversal direction."
             },
             "20_50_10": {
-              "strong_buy": "MACD_20_50_10 > MACD_20_50_10_signal and rising_2bar(MACD_20_50_10_hist, 2) and MACD_20_50_10_hist > 0",
-              "buy": "MACD_20_50_10 > MACD_20_50_10_signal",
-              "neutral": "abs(MACD_20_50_10_hist) <= 0.3 * ATR_20",
-              "sell": "MACD_20_50_10 < MACD_20_50_10_signal",
-              "strong_sell": "MACD_20_50_10 < MACD_20_50_10_signal and falling_2bar(MACD_20_50_10_hist, 2) and MACD_20_50_10_hist < 0",
-              "notes": ""
+              "strong_buy": "MACD_20_50_10_line < 0 and MACD_20_50_10_hist > 0 and rising_2bar(MACD_20_50_10_hist, 2)",
+              "buy": "MACD_20_50_10_line < 0 and MACD_20_50_10_hist > 0 and not_rising_2bar(MACD_20_50_10_hist, 2)",
+              "neutral": "(MACD_20_50_10_line >= 0 and MACD_20_50_10_hist >= 0) or (MACD_20_50_10_line <= 0 and MACD_20_50_10_hist <= 0)",
+              "sell": "MACD_20_50_10_line > 0 and MACD_20_50_10_hist < 0 and not_falling_2bar(MACD_20_50_10_hist, 2)",
+              "strong_sell": "MACD_20_50_10_line > 0 and MACD_20_50_10_hist < 0 and falling_2bar(MACD_20_50_10_hist, 2)",
+              "notes": "Slow MACD contrarian zero-line reversal-state logic. Buy states require the MACD line below zero with a positive histogram; sell states require the MACD line above zero with a negative histogram. Strong states require strict two-bar histogram expansion in the reversal direction."
             },
             "5_34_1": {
               "strong_buy": "",
