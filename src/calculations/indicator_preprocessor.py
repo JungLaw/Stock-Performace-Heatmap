@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 # Default indicator configuration (single source of parameter truth)
 # ----------------------------------------------------------------------
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "RSI": [10, 14, 21, 30],  
+    "RSI": [10, 14, 21, 30],
     "MACD": [
         (12, 26, 9),
-        (5, 34, 1), 
-        (8, 17, 5), 
-        (20, 50, 10), 
+        (5, 34, 1),
+        (8, 17, 5),
+        (20, 50, 10),
     ],
     "STOCH": [
         (14, 3, 3),
@@ -28,7 +28,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "SMA": [10, 20, 50, 100, 200],
     # Expanded to satisfy BullBearPower(10/13/21) dependencies (EMA_10/13/21)
     "EMA": [10, 13, 20, 21, 50],   # [5, 10, 13, 20, 50, 100, 200]
-    
+
     "BB": [
         (20, 2.0),
     ],
@@ -38,11 +38,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Expanded to satisfy BullBearPower(10/13/21) dependencies (ATR/ATRP_10/13/21)
     # ATR_50 / ATRP_50 added for long-term Rolling Heatmap volatility support.
     "ATR": [10, 12, 13, 14, 21, 50],   # add 10/13/21; keep 12/14; add 50 for LT heatmap
-    "ATRP": [10, 12, 13, 14, 21, 50],  # (ATR% vs price); add 10/13/21; keep 12/14; add 50 for LT heatmap    
+    "ATRP": [5, 10, 12, 13, 14, 20, 21, 50],  # (ATR% vs price); add 10/13/21; keep 12/14; add 50 for LT heatmap
 
     # Momentum / oscillators
     "CCI": [14, 20],   # CCI_20 (window 20)
-    "ROC": [9, 12, 20, 50],   
+    "ROC": [9, 12, 20, 50],
     "WILLR": [5, 14, 20],
     "UO": [(7, 14, 28)],
     # Detrended Price Oscillator; values are also normalized to percent-points of price.
@@ -627,7 +627,7 @@ def compute_all_indicators(
         if p_i == 20 and abs(n_std - 2.0) < 1e-12:
             df["BB_PCT_B"] = bb_pct_b
             df["BB_BW"] = bb_bw
- 
+
     # ====================================================
     # ATR and ATRP (pandas_ta_classic.atr)
     # ====================================================
@@ -840,7 +840,7 @@ def compute_all_indicators(
             if not isinstance(triplet, (list, tuple)) or len(triplet) < 3:
                 continue
             s_i, m_i, l_i = (int(triplet[0]), int(triplet[1]), int(triplet[2]))
-            df[f"UO_{s_i}_{m_i}_{l_i}"] = np.nan     
+            df[f"UO_{s_i}_{m_i}_{l_i}"] = np.nan
 
     # ====================================================
     # DPO (Detrended Price Oscillator)
@@ -902,15 +902,15 @@ def compute_all_indicators(
 
     # --- MFI ---
     # Requires High/Low and Volume.
-    if {"High", "Low"}.issubset(df.columns) and vol is not None:    
+    if {"High", "Low"}.issubset(df.columns) and vol is not None:
         for length in cfg.get("MFI", []):
             l_i = int(length)
             if hasattr(ta, "mfi"):
                 # UPDATED 12/31
                 mfi_series = _mfi_local(
-                    df["High"], 
-                    df["Low"], 
-                    price, 
+                    df["High"],
+                    df["Low"],
+                    price,
                     vol, l_i
                     )
                 # original version
@@ -942,7 +942,7 @@ def compute_all_indicators(
             else:
                 cmf_series = pd.Series(np.nan, index=df.index, dtype="float64")
             # Normalize to float64 for downstream numeric consumers
-            df[f"CMF_{l_i}"] = pd.to_numeric(cmf_series, errors="coerce").astype("float64")  
+            df[f"CMF_{l_i}"] = pd.to_numeric(cmf_series, errors="coerce").astype("float64")
     else:
         for length in cfg.get("CMF", []):
             l_i = int(length)

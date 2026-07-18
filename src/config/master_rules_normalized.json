@@ -1,5 +1,5 @@
 {
-  "version": "0.2.9",
+  "version": "0.2.10",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -103,46 +103,46 @@
             "10": {
               "strong_buy": "Close > SMA_10 and SMA_10_slope > 0.002 and rising_2bar(SMA_10)",
               "buy": "Close > SMA_10 and SMA_10_slope > 0",
-              "neutral": "abs(Close/SMA_10 - 1) <= 0.25 * ATRP_10",
+              "neutral": "abs(Close/SMA_10 - 1) * 100 <= 0.50 * ATRP_10",
               "sell": "Close < SMA_10 and SMA_10_slope < 0",
               "strong_sell": "Close < SMA_10 and SMA_10_slope < -0.002 and falling_2bar(SMA_10)",
-              "k": 0.25,
+              "k": 0.5,
               "notes": "Loose slope confirmation; ATR-scaled neutral zone."
             },
             "20": {
               "strong_buy": "Close > SMA_20 and SMA_20_slope > 0.0015 and rising_2bar(SMA_20)",
               "buy": "Close > SMA_20 and SMA_20_slope > 0",
-              "neutral": "abs(Close/SMA_20 - 1) <= 0.50 * ATRP_20",
+              "neutral": "abs(Close/SMA_20 - 1) * 100 <= 0.50 * ATRP_20",
               "sell": "Close < SMA_20 and SMA_20_slope < 0",
               "strong_sell": "Close < SMA_20 and SMA_20_slope < -0.0015 and falling_2bar(SMA_20)",
-              "k": 0.15,
+              "k": 0.5,
               "notes": "Thresholds scale with smoothing."
             },
             "50": {
               "strong_buy": "Close > SMA_50 and SMA_50_slope > 0.0015 and rising_2bar(SMA_50)",
               "buy": "Close > SMA_50 and SMA_50_slope > 0",
-              "neutral": "abs(Close/SMA_50 - 1) <= 0.5 * ATRP_50",
+              "neutral": "abs(Close/SMA_50 - 1) * 100 <= 0.50 * ATRP_50",
               "sell": "Close < SMA_50 and SMA_50_slope < 0",
               "strong_sell": "Close < SMA_50 and SMA_50_slope < -0.0015 and falling_2bar(SMA_50)",
-              "k": 0.15,
+              "k": 0.5,
               "notes": "Thresholds scale with smoothing."
             },
             "100": {
               "strong_buy": "Close > SMA_100 and SMA_100_slope > 0.001 and rising_2bar(SMA_100)",
               "buy": "Close > SMA_100 and SMA_100_slope > 0",
-              "neutral": "abs(Close/SMA_100 - 1) <= 1.0 * ATRP_100",
+              "neutral": "abs(Close/SMA_100 - 1) * 100 <= 0.25 * ATRP_100",
               "sell": "Close < SMA_100 and SMA_100_slope < 0",
               "strong_sell": "Close < SMA_100 and SMA_100_slope < -0.001 and falling_2bar(SMA_100)",
-              "k": 0.1,
+              "k": 0.25,
               "notes": "Long SMA rarely accelerates; thresholds lowered."
             },
             "200": {
               "strong_buy": "Close > SMA_200 and (SMA_200_slope > 0.001) and rising_2bar(SMA_200)",
               "buy": "Close > SMA_200 and (SMA_200_slope > 0)",
-              "neutral": "abs(Close/SMA_200 - 1) <= (1.0 * ATRP_200)",
+              "neutral": "abs(Close/SMA_200 - 1) * 100 <= (0.25 * ATRP_200)",
               "sell": "Close < SMA_200 and (SMA_200_slope < 0)",
               "strong_sell": "Close < SMA_200 and (SMA_200_slope < -0.001) and falling_2bar(SMA_200)",
-              "k": 0.1,
+              "k": 0.25,
               "notes": "Long SMA rarely accelerates; thresholds lowered."
             }
           },
@@ -199,7 +199,7 @@
           ],
           [
             55
-          ],          
+          ],
           [
             100
           ],
@@ -212,73 +212,73 @@
             "5": {
               "strong_buy": "Close > EMA_5 and EMA_5_slope > 0.0025 and rising_2bar(EMA_5)",
               "buy": "Close > EMA_5 and EMA_5_slope > 0",
-              "neutral": "abs(Close/EMA_5 - 1) <= 0.25 * ATRP_5",
+              "neutral": "abs(Close/EMA_5 - 1) * 100 <= (0.50 * ATRP_5)",
               "sell": "Close < EMA_5 and EMA_5_slope < 0",
               "strong_sell": "Close < EMA_5 and EMA_5_slope < -0.0025 and falling_2bar(EMA_5)",
-              "k": 0.25,
+              "k": 0.50,
               "notes": "EMA more responsive slightly higher slope threshold."
             },
             "10": {
               "strong_buy": "Close > EMA_10 and EMA_10_slope > 0.0025 and rising_2bar(EMA_10)",
               "buy": "Close > EMA_10 and EMA_10_slope > 0",
-              "neutral": "abs(Close/EMA_10 - 1) <= 0.25 * ATRP_10",
+              "neutral": "abs(Close/EMA_10 - 1) * 100 <= (0.50 * ATRP_10)",
               "sell": "Close < EMA_10 and EMA_10_slope < 0",
               "strong_sell": "Close < EMA_10 and EMA_10_slope < -0.0025 and falling_2bar(EMA_10)",
-              "k": 0.25,
-              "notes": "EMA more responsive slightly higher slope threshold."
+              "k": 0.50,
+              "notes": "Short EMA trend filter; neutral means price is within 0.50 * ATRP_n of EMA(n), treating small volatility-adjusted deviations as noise."
             },
             "13": {
               "strong_buy": "Close > EMA_13 and EMA_13_slope > 0.0025 and rising_2bar(EMA_13)",
               "buy": "Close > EMA_13 and EMA_13_slope > 0",
-              "neutral": "abs(Close/EMA_13 - 1) <= 0.25 * ATRP_13",
+              "neutral": "abs(Close/EMA_13 - 1) * 100 <= (0.50 * ATRP_13)",
               "sell": "Close < EMA_13 and EMA_13_slope < 0",
               "strong_sell": "Close < EMA_13 and EMA_13_slope < -0.0025 and falling_2bar(EMA_13)",
-              "k": 0.25,
+              "k": 0.50,
               "notes": "EMA more responsive slightly higher slope threshold."
             },
             "20": {
               "strong_buy": "Close > EMA_20 and EMA_20_slope > 0.002 and rising_2bar(EMA_20)",
               "buy": "Close > EMA_20 and EMA_20_slope > 0",
-              "neutral": "abs(Close/EMA_20 - 1) <= 0.50 * ATRP_20",
+              "neutral": "abs(Close/EMA_20 - 1) * 100 <= (0.50 * ATRP_20)",
               "sell": "Close < EMA_20 and EMA_20_slope < 0",
               "strong_sell": "Close < EMA_20 and EMA_20_slope < -0.002 and falling_2bar(EMA_20)",
-              "k": 0.2,
-              "notes": "EMA retains quicker reaction vs. SMA."
+              "k": 0.50,
+              "notes": "Daily-swing EMA trend filter; neutral means price is within 0.50 * ATRP_n of EMA(n), treating small volatility-adjusted deviations as noise."
             },
             "21": {
               "strong_buy": "Close > EMA_21 and EMA_21_slope > 0.002 and rising_2bar(EMA_21)",
               "buy": "Close > EMA_21 and EMA_21_slope > 0",
-              "neutral": "abs(Close/EMA_21 - 1) <= 0.50 * ATRP_21",
+              "neutral": "abs(Close/EMA_21 - 1) * 100 <= (0.50 * ATRP_21)",
               "sell": "Close < EMA_21 and EMA_21_slope < 0",
               "strong_sell": "Close < EMA_21 and EMA_21_slope < -0.002 and falling_2bar(EMA_21)",
-              "k": 0.2,
+              "k": 0.50,
               "notes": "EMA retains quicker reaction vs. SMA."
-            },            
+            },
             "50": {
               "strong_buy": "Close > EMA_50 and EMA_50_slope > 0.002 and rising_2bar(EMA_50)",
               "buy": "Close > EMA_50 and EMA_50_slope > 0",
-              "neutral": "abs(Close/EMA_50 - 1) <= 0.50 * ATRP_50",
+              "neutral": "abs(Close/EMA_50 - 1) * 100 <= (0.40 * ATRP_50)",
               "sell": "Close < EMA_50 and EMA_50_slope < 0",
               "strong_sell": "Close < EMA_50 and EMA_50_slope < -0.002 and falling_2bar(EMA_50)",
-              "k": 0.2,
-              "notes": "EMA retains quicker reaction vs. SMA."
+              "k": 0.40,
+              "notes": "Medium-term EMA trend filter; neutral means price is within 0.40 * ATRP_50 of EMA(50), treating small volatility-adjusted deviations as noise."
             },
             "100": {
               "strong_buy": "Close > EMA_100 and EMA_100_slope > 0.0015 and rising_2bar(EMA_100)",
               "buy": "Close > EMA_100 and EMA_100_slope > 0",
-              "neutral": "abs(Close/EMA_100 - 1) <= 1.0 * ATRP_100",
+              "neutral": "abs(Close/EMA_100 - 1) * 100 <= (0.25 * ATRP_100)",
               "sell": "Close < EMA_100 and EMA_100_slope < 0",
               "strong_sell": "Close < EMA_100 and EMA_100_slope < -0.0015 and falling_2bar(EMA_100)",
-              "k": 0.15,
+              "k": 0.25,
               "notes": "Long EMAs smooth heavily; scaled slope thresholds."
             },
             "200": {
               "strong_buy": "Close > EMA_200 and EMA_200_slope > 0.0015 and rising_2bar(EMA_200)",
               "buy": "Close > EMA_200 and EMA_200_slope > 0",
-              "neutral": "abs(Close/EMA_200 - 1) <= 1.0 * ATRP_200",
+              "neutral": "abs(Close/EMA_200 - 1) * 100 <= (0.25 * ATRP_200)",
               "sell": "Close < EMA_200 and EMA_200_slope < 0",
               "strong_sell": "Close < EMA_200 and EMA_200_slope < -0.0015 and falling_2bar(EMA_200)",
-              "k": 0.15,
+              "k": 0.25,
               "notes": "Long EMAs smooth heavily; scaled slope thresholds."
             }
           },
@@ -735,7 +735,7 @@
           "source": "internal_spec"
         }
       },
-      "Williams_R": {    
+      "Williams_R": {
         "params": [
           [
             5
@@ -1083,7 +1083,7 @@
     "Volatility": {
       "ATR": {
         "params": [
-          [5], 
+          [5],
           [9],
           [10],
           [13],

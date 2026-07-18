@@ -1,16 +1,40 @@
-# Williams R%
+
+
+|Bucket|What it answers|Indicators|
+|---|---|---|
+|**Momentum / oscillators**|Overbought/oversold, turning points|RSI, Stochastic, MACD, ROC, **Williams %R**, CCI, UO, DPO|
+|**Trend direction**|Which way, and is there even a trend?|SMA, EMA, HMA|
+|**Trend strength**|Is the trend strong enough to trust?|ADX|
+|**Volatility**|How big are the swings, right now?|Bollinger Bands, ATR|
+|**Volume / money flow**|Is real participation behind the move?|CMF, MFI, VWMA|
+|**Sentiment / power balance**|Who's winning, bulls or bears?|Bull Bear Power|
+
+
+# Industry-standard baseline
+
+Williams %R is normally interpreted as a bounded oscillator from `0` to `-100`. It reflects where the close sits relative to the highest high / lowest low over the lookback period. The common default interpretation is:
+
+```text
+0 to -20      = overbought / near top of range
+-80 to -100   = oversold / near bottom of range
+around -50    = midpoint of recent range
+```
+
+
+---
+# Williams R% (original notes)
 
 **Purpose:** Identify overbought and oversold levels by measuring where the current close falls within the recent price range, similar to Stochastic but with inverted scale.
 
 **Use when:** You want overbought/oversold signals with faster, more sensitive readings than traditional Stochastic.
 - **Market conditions:** The indicator works best in sideways or ranging markets. In strong trends, it can stay overbought or oversold for a long time, so use it with caution and confirmation
 
-**Key Concept:** Uses the same logic as Stochastic but inverted, ranging from 0 to -100. 
+**Key Concept:** Uses the same logic as Stochastic but inverted, ranging from 0 to -100.
 - More sensitive to recent price action and often provides earlier signals.
 
 **Calculation:** `%R = [(Highest High - Current Close) ÷ (Highest High - Lowest Low)] × -100`, typically over 14 periods.
 
-**Signals & Interpretation:** 
+**Signals & Interpretation:**
 Momentum indicator scaled 0 to -100.
 
 - **Overbought**:  '`> -20`'
