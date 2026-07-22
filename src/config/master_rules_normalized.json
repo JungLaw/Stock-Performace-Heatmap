@@ -1251,28 +1251,28 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "MFI_10 > 75 and rising_2bar(MFI_10)",
-              "buy": "MFI_10 > 65",
-              "neutral": "35 <= MFI_10 <= 65",
-              "sell": "MFI_10 < 35",
-              "strong_sell": "MFI_10 < 25 and falling_2bar(MFI_10)",
-              "notes": "Loose slope logic = only 2-bar confirmation. Strong zones use 75/25 instead of extreme 80/20 for responsiveness."
+              "strong_buy": "MFI_10 <= 15",
+              "buy": "MFI_10 > 15 and MFI_10 <= 25",
+              "neutral": "MFI_10 > 25 and MFI_10 < 75",
+              "sell": "MFI_10 >= 75 and MFI_10 < 85",
+              "strong_sell": "MFI_10 >= 85",
+              "notes": "Persistent current-value state classification. Low MFI indicates oversold opportunity bias; high MFI indicates overbought risk. Project thresholds are 15/25/75/85. "
             },
             "14": {
-              "strong_buy": "MFI_14 > 75 and rising_2bar(MFI_14)",
-              "buy": "MFI_14 > 65",
-              "neutral": "35 <= MFI_14 <= 65",
-              "sell": "MFI_14 < 35",
-              "strong_sell": "MFI_14 < 25 and falling_2bar(MFI_14)",
-              "notes": "MFI(14) standard; retain same levels for intuitive read-across."
+              "strong_buy": "MFI_14 <= 15",
+              "buy": "MFI_14 > 15 and MFI_14 <= 25",
+              "neutral": "MFI_14 > 25 and MFI_14 < 75",
+              "sell": "MFI_14 >= 75 and MFI_14 < 85",
+              "strong_sell": "MFI_14 >= 85",
+              "notes": "Persistent current-value state classification. Low MFI indicates oversold opportunity bias; high MFI indicates overbought risk. Project thresholds are 15/25/75/85. No reversal, crossover, or direction confirmation is required."
             },
             "30": {
-              "strong_buy": "MFI_30 > 75 and rising_2bar(MFI_30)",
-              "buy": "MFI_30 > 65",
-              "neutral": "35 <= MFI_30 <= 65",
-              "sell": "MFI_30 < 35",
-              "strong_sell": "MFI_30 < 25 and falling_2bar(MFI_30)",
-              "notes": "Longer window smooths noise; thresholds unchanged for consistency."
+              "strong_buy": "MFI_30 <= 15",
+              "buy": "MFI_30 > 15 and MFI_30 <= 25",
+              "neutral": "MFI_30 > 25 and MFI_30 < 75",
+              "sell": "MFI_30 >= 75 and MFI_30 < 85",
+              "strong_sell": "MFI_30 >= 85",
+              "notes": "Persistent current-value state classification. Low MFI indicates oversold opportunity bias; high MFI indicates overbought risk. Project thresholds are 15/25/75/85. No reversal, crossover, or direction confirmation is required."
             }
           },
           "overlay": {

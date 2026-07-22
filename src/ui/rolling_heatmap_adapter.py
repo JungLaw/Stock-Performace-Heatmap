@@ -516,18 +516,45 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     # Volume-based
     "MFI_10": {
         "display_name": "MFI(10)",
-        "definition": "MFI combines price and volume to estimate buying vs selling pressure. 10d: more sensitivity to recent price & volume Δs; identify overbought/oversold conditions quickly.",
-        "how_to_read": "Higher suggests stronger buying pressure; lower suggests stronger selling pressure.",
+        "definition": (
+            "MFI combines typical price and volume into a 0–100 "
+            "oscillator. MFI(10) is the fastest configured variant."
+        ),
+        "how_to_read": (
+            "Low readings indicate oversold opportunity bias; high readings "
+            "indicate overbought risk.<br>"
+            "≤15: Strong Buy | 15–25: Buy | 25–75: Neutral | "
+            "75–85: Sell | ≥85: Strong Sell.<br>"
+            "The score describes the current MFI state, not a confirmed reversal."
+        ),
     },
     "MFI_14": {
-        "display_name": "MFI (14)",
-        "definition": "Money Flow Index combines price and volume to estimate buying vs selling pressure.",
-        "how_to_read": "MFI<20 → Oversold (buy) | MFI>80 → Overbought (sell). Neutral: 45–55.",
+        "display_name": "MFI(14)",
+        "definition": (
+            "MFI combines typical price and volume into a 0–100 "
+            "oscillator. MFI(14) is the standard reference variant."
+        ),
+        "how_to_read": (
+            "Low readings indicate oversold opportunity bias; high readings "
+            "indicate overbought risk.<br>"
+            "≤15: Strong Buy | 15–25: Buy | 25–75: Neutral | "
+            "75–85: Sell | ≥85: Strong Sell.<br>"
+            "The score describes the current MFI state, not a confirmed reversal."
+        ),
     },
     "MFI_30": {
         "display_name": "MFI(30)",
-        "definition": "30d: for LT analysis, smoothing out ST volatility to focus on sustained buying/selling pressure.",
-        "how_to_read": "Higher suggests stronger buying pressure; lower suggests stronger selling pressure.",
+        "definition": (
+            "MFI combines typical price and volume into a 0–100 "
+            "oscillator. MFI(30) is the slowest configured variant."
+        ),
+        "how_to_read": (
+            "Low readings indicate oversold opportunity bias; high readings "
+            "indicate overbought risk.<br>"
+            "≤15: Strong Buy | 15–25: Buy | 25–75: Neutral | "
+            "75–85: Sell | ≥85: Strong Sell.<br>"
+            "The score describes the current MFI state, not a confirmed reversal."
+        ),
     },
     "CMF_10": {
         "display_name": "CMF(10)",

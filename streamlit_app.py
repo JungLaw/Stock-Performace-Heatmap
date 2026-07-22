@@ -4971,11 +4971,36 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     row_count = max(len(y_labels), 1)
-    dynamic_height = max(450, 30 * row_count + 160)
+    base_height = 30 * row_count + 160
+
+    # Preserve the compact 450px layout for very small matrices, then add
+    # vertical hover clearance as row density increases. The supplemental
+    # allowance is capped at the ten-row level; normal row-based scaling
+    # takes over once it becomes larger.
+    hover_clearance_height = (
+        450
+        + 15 * max(min(row_count, 10) - 3, 0)
+    )
+    dynamic_height = max(
+        450,
+        base_height,
+        hover_clearance_height,
+    )
+
+    # Price plus exactly three indicator rows is a narrow Plotly placement
+    # boundary for detailed first-row hover labels. Add a modest allowance
+    # only for that layout; one-, two-, and larger-indicator matrices retain
+    # their already validated dimensions.
+    if row_count == 4:
+        dynamic_height = max(dynamic_height, 500)
+
+    # Very short matrices place the first indicator row close to the upper
+    # figure boundary. Reserve top placement space for detailed hover labels.
+    top_margin = 120 if row_count <= 4 else 30
 
     fig.update_layout(
         title="",
-        margin=dict(l=170, r=20, t=30, b=40),
+        margin=dict(l=170, r=20, t=top_margin, b=40),
         height=dynamic_height,
         hoverlabel=dict(align="left"),
     )
