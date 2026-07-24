@@ -259,21 +259,62 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     # Momentum / oscillators
     "RSI_10": {
         "display_name": "RSI(10)",
-        "definition": "Compares recent gains vs losses on a 0–100 scale. 80+ = strong sell | 70+ = sell | <30 = buy | <20 = strong buy",
-        "how_to_read": "When RSI is rising above 50 and MACD crosses above its signal line,<br>" 
-        "it reinforces the likelihood of an uptrend continuation.<br>" 
-        "If RSI makes lower highs while MACD makes higher highs (or vice versa),<br>" 
-        "it may indicate weakening momentum and a potential trend shift.",
+        "definition": (
+            "A fast 0–100 RSI interpretation that assigns progressively "
+            "stronger contrarian scores as the current reading becomes more "
+            "extreme."
+        ),
+        "how_to_read": (
+            "<20: Strong Buy | 20–30: Buy | 30–70: Neutral | "
+            "70–80: Sell | >80: Strong Sell.<br>"
+            "This row uses the current RSI level only; recent direction and "
+            "reversal confirmation are not required."
+        ),
     },
     "RSI_14": {
-        "display_name": "RSI (14)",
-        "definition": "Relative Strength Index compares recent gains vs losses on a 0–100 scale.",
-        "how_to_read": "Higher = stronger recent gains; lower = stronger recent losses.",
+        "display_name": "RSI(14)",
+        "definition": (
+            "An aggressive contrarian RSI model that combines the current "
+            "extreme zone with the direction of the last two bar-to-bar moves."
+        ),
+        "how_to_read": (
+            "<30: Buy; if RSI also fell for two consecutive moves: Strong Buy.<br>"
+            "30–70: Neutral.<br>"
+            ">70: Sell; if RSI is >75 and also rose for two consecutive moves: "
+            "Strong Sell.<br>"
+            "Strong means the extreme is still worsening, not that a reversal "
+            "has begun."
+        ),
     },
     "RSI_21": {
         "display_name": "RSI(21)",
-        "definition": "Relative Strength Index compares recent gains vs losses on a 0–100 scale.",
-        "how_to_read": "↑RSI above 50 + ↑volume ~ strong buying interest (reinforcing continuation of an uptrend). If RSI signals divergence (e.g., RSI (lower highs) + price (higher highs) +  high volume ~ possible trend reversal.",
+        "definition": (
+            "A slower contrarian RSI model that strengthens an extreme-zone "
+            "signal only after two consecutive moves back toward neutral."
+        ),
+        "how_to_read": (
+            "<30: Buy; if RSI rose for two consecutive moves while still <30: "
+            "Strong Buy.<br>"
+            "30–70: Neutral.<br>"
+            ">70: Sell; if RSI fell for two consecutive moves while still >70: "
+            "Strong Sell.<br>"
+            "Strong indicates selective early reversal evidence."
+        ),
+    },
+    "RSI_30": {
+        "display_name": "RSI(30)",
+        "definition": (
+            "A slower contrarian RSI model using a symmetric 30–70 zone and one-bar "
+            "reversal confirmation."
+        ),
+        "how_to_read": (
+            "<30: Buy; if RSI rose from the prior bar while still <30: "
+            "Strong Buy.<br>"
+            "30–70: Neutral.<br>"
+            ">70: Sell; if RSI fell from the prior bar while still >70: "
+            "Strong Sell.<br>"
+            "Strong indicates selective early reversal evidence."
+        ),
     },
     "WILLR_5": {
         "display_name": "Williams %R(5)",

@@ -320,18 +320,26 @@ class SignalEngine:
         else:
             signal_series = pd.Series("neutral", index=df.index, dtype="object")
 
-        # MFI is classified only where its parameter-specific numeric value
-        # is initialized. Capture that validity state before evaluating the
-        # rule block, then restore missing observations before returning.
+        # RSI and MFI are classified only where their parameter-specific
+        # numeric values are initialized. Capture that validity state before
+        # evaluating the rule block, then restore missing observations before
+        # returning.
         #
-        # Do not suppress a missing-column defect here. If the canonical MFI
-        # column does not exist, normal expression evaluation must still raise
-        # or follow the caller's existing skip_errors behavior.
-        mfi_missing_mask: Optional[pd.Series] = None
-        if indicator_name == "MFI":
-            mfi_col = f"MFI_{param_key}"
-            if mfi_col in df.columns:
-                mfi_missing_mask = df[mfi_col].isna()
+        # Do not suppress a missing-column defect here. If the canonical
+        # indicator column does not exist, normal expression evaluation must
+        # still raise or follow the caller's existing skip_errors behavior.
+        indicator_missing_mask: Optional[pd.Series] = None
+
+        parameterized_value_prefixes = {
+            "RSI": "RSI",
+            "MFI": "MFI",
+        }
+
+        value_prefix = parameterized_value_prefixes.get(indicator_name)
+        if value_prefix is not None:
+            value_col = f"{value_prefix}_{param_key}"
+            if value_col in df.columns:
+                indicator_missing_mask = df[value_col].isna()
 
         # Build context from df columns
         context = {col: df[col] for col in df.columns}
@@ -407,10 +415,10 @@ class SignalEngine:
             signal_series[mask.astype(bool)] = label
 
         # The ordinary continuous-indicator path begins with "neutral".
-        # Restore uninitialized MFI observations to missing so they are not
-        # misrepresented as valid Neutral / 0 classifications.
-        if mfi_missing_mask is not None:
-            signal_series.loc[mfi_missing_mask] = pd.NA
+        # Restore uninitialized RSI/MFI observations to missing so they are
+        # not misrepresented as valid Neutral / 0 classifications.
+        if indicator_missing_mask is not None:
+            signal_series.loc[indicator_missing_mask] = pd.NA
 
         return signal_series
 

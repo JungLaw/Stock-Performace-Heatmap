@@ -526,35 +526,36 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "RSI_10 > 60 and rising_2bar(RSI_10)",
-              "buy": "RSI_10 > 55",
-              "neutral": "45 <= RSI_10 <= 55",
-              "sell": "RSI_10 < 45",
-              "strong_sell": "RSI_10 < 40 and falling_2bar(RSI_10)",
-              "notes": "Loose 2-bar slope for strong signals; neutral band fixed across timeframes."
+              "strong_buy": "RSI_10 < 20",
+              "buy": "20 <= RSI_10 <= 30",
+              "neutral": "30 < RSI_10 < 70",
+              "sell": "70 <= RSI_10 <= 80",
+              "strong_sell": "RSI_10 > 80",
+              "notes": "20/80 Contrarian extreme-band model. Lower RSI receives progressively stronger bullish scores; higher RSI receives progressively stronger bearish scores. Direction or reversal confirmation is not required."
             },
             "14": {
-              "strong_buy": "RSI_14 < 25 and rising_2bar(RSI_14)",
-              "buy": "RSI_14 < 30",
+              "strong_buy": "RSI_14 < 30 and falling_2bar(RSI_14)",
+              "buy": "RSI_14 < 30 and not_falling_2bar(RSI_14)",
               "neutral": "30 <= RSI_14 <= 70",
-              "sell": "RSI_14 > 70",
-              "strong_sell": "RSI_14 > 85 and falling_2bar(RSI_14)",
-              "notes": "Same thresholds maintain consistency across charts."
+              "sell": "(RSI_14 > 70 and RSI_14 <= 75) or (RSI_14 > 75 and not_rising_2bar(RSI_14))",
+              "strong_sell": "RSI_14 > 75 and rising_2bar(RSI_14)",
+              "notes": "Aggressive Contrarian model. Strong means RSI remains extreme and has moved farther into that extreme for 2 consecutive moves; it does not mean a reversal has begun. Exact 30-70 = Neutral."
             },
             "21": {
-              "strong_buy": "RSI_21 > 60 and rising_2bar(RSI_21)",
-              "buy": "RSI_21 > 55",
-              "neutral": "45 <= RSI_21 <= 55",
-              "sell": "RSI_21 < 45",
-              "strong_sell": "RSI_21 < 40 and falling_2bar(RSI_21)",
-              "notes": "RSI smoothed more heavily but thresholds remain stable."
+              "strong_buy": "RSI_21 < 30 and rising_2bar(RSI_21)",
+              "buy": "RSI_21 < 30 and not_rising_2bar(RSI_21)",
+              "neutral": "30 <= RSI_21 <= 70",
+              "sell": "RSI_21 > 70 and not_falling_2bar(RSI_21)",
+              "strong_sell": "RSI_21 > 70 and falling_2bar(RSI_21)",
+              "notes": "2-bar|30-70 Contrarian reversal-confirmation model. Strong Buy requires 2 consecutive upward moves while RSI remains below 30; Strong Sell requires 2 consecutive downward moves while RSI remains above 70. Exact 30-70 = Neutral."
             },
             "30": {
-              "strong_buy": "",
-              "buy": "",
-              "neutral": "",
-              "sell": "",
-              "strong_sell": ""
+              "strong_buy": "RSI_30 < 30 and rising_2bar(RSI_30, 1)",
+              "buy": "RSI_30 < 30 and not_rising_2bar(RSI_30, 1)",
+              "neutral": "30 <= RSI_30 <= 70",
+              "sell": "RSI_30 > 70 and not_falling_2bar(RSI_30, 1)",
+              "strong_sell": "RSI_30 > 70 and falling_2bar(RSI_30, 1)",
+              "notes": "1-bar|30-70 Contrarian reversal-confirmation model. A 1-bar rise below 30 strengthens Buy to Strong Buy; a 1-bar decline above 70 strengthens Sell to Strong Sell. Exact 30-70 = Neutral."
             }
           },
           "overlay": {
@@ -1256,7 +1257,7 @@
               "neutral": "MFI_10 > 25 and MFI_10 < 75",
               "sell": "MFI_10 >= 75 and MFI_10 < 85",
               "strong_sell": "MFI_10 >= 85",
-              "notes": "Persistent current-value state classification. Low MFI indicates oversold opportunity bias; high MFI indicates overbought risk. Project thresholds are 15/25/75/85. "
+              "notes": "Persistent current-value state classification. Low MFI indicates oversold opportunity bias; high MFI indicates overbought risk. Project thresholds are 15/25/75/85."
             },
             "14": {
               "strong_buy": "MFI_14 <= 15",
