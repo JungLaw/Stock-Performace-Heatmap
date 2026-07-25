@@ -967,6 +967,62 @@ def translate_rule_text(expr: str) -> str:
     #   MACD_12_26_9  -> MACD(12,26,9)
     import re
 
+    # Direction-helper cleanup.
+    #
+    # These helpers default to 2 comparisons when the bars argument is
+    # omitted, but some rules explicitly request a 1-period comparison:
+    #
+    #   rising_2bar(RSI(14))
+    #       -> has risen across 2 consecutive moves: RSI(14)
+    #
+    #   rising_2bar(RSI(30), 1)
+    #       -> has risen from the prior period: RSI(30)
+    #
+    # Handle negated helpers in the same pass so a substring replacement
+    # cannot produce malformed wording such as "not_has risen ...".
+    direction_helper_pattern = re.compile(
+        r"\b"
+        r"(not_)?"
+        r"(rising|falling)_2bar"
+        r"\(\s*"
+        r"([^,()]+?)"
+        r"\s*"
+        r"(?:,\s*(\d+)\s*)?"
+        r"\)"
+    )
+
+    def _direction_helper_repl(match: re.Match) -> str:
+        is_negated = bool(match.group(1))
+        direction = match.group(2)
+        series_text = match.group(3).strip()
+        explicit_bars = match.group(4)
+
+        bars = int(explicit_bars) if explicit_bars is not None else 2
+
+        if direction == "rising":
+            verb = "risen"
+        else:
+            verb = "fallen"
+
+        negation = " not" if is_negated else ""
+
+        if bars == 1:
+            return (
+                f"has{negation} {verb} from the prior period: "
+                f"{series_text}"
+            )
+
+        move_word = "move" if bars == 1 else "moves"
+        return (
+            f"has{negation} {verb} across "
+            f"{bars} consecutive {move_word}: {series_text}"
+        )
+
+    text = direction_helper_pattern.sub(
+        _direction_helper_repl,
+        text,
+    )
+
     token_pattern = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_(?:\d+(?:\.\d+)?)(?:_(?:\d+(?:\.\d+)?))*\b")
 
     def _token_repl(match: re.Match) -> str:
@@ -974,24 +1030,6 @@ def translate_rule_text(expr: str) -> str:
         return _humanize_indicator_token(raw)
 
     text = token_pattern.sub(_token_repl, text)
-
-    # Helper-call cleanup:
-    # Convert:
-    #   rising_2bar(SMA_100)
-    # to:
-    #   has risen for 2 bars: SMA(100)
-    #
-    # and similarly for falling_2bar(...), without leaving a stray trailing ')'.
-    text = re.sub(
-        r"rising_2bar\(([^)]+)\)",
-        r"has risen for 2 bars: \1",
-        text,
-    )
-    text = re.sub(
-        r"falling_2bar\(([^)]+)\)",
-        r"has fallen for 2 bars: \1",
-        text,
-    )
 
     # Keep ATRP display readable as a first-pass presentation alias.
     text = re.sub(r"\bATRP_(\d+(?:\.\d+)?)\b", r"ATR%(\1)", text)
