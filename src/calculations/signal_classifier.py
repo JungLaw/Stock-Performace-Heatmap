@@ -341,6 +341,16 @@ class SignalEngine:
             if value_col in df.columns:
                 indicator_missing_mask = df[value_col].isna()
 
+        elif indicator_name == "Stochastic":
+            k_col = f"STOCHK_{param_key}"
+            d_col = f"STOCHD_{param_key}"
+
+            if k_col in df.columns and d_col in df.columns:
+                indicator_missing_mask = (
+                    df[k_col].isna()
+                    | df[d_col].isna()
+                )
+
         # Build context from df columns
         context = {col: df[col] for col in df.columns}
 

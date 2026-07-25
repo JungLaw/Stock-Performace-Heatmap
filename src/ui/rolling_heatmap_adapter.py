@@ -526,18 +526,44 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
 
     "STOCH_14_3_3": {
         "display_name": "Stoch(14,3,3)",
-        "definition": "Stochastic Oscillator %K using parameters 14, 3, and 3.",
-        "how_to_read": "Displayed value is %K. Higher values indicate price closing near the recent high; lower values indicate price closing near the recent low.",
+        "definition": (
+            "Stochastic Oscillator compares the current close with its recent "
+            "high-low range. The displayed value is %K; %D is its smoothed "
+            "signal line."
+        ),
+        "how_to_read": (
+            "%K below 20 is oversold and above 80 is overbought. Buy/Sell "
+            "identify an extreme-zone condition; Strong Buy/Strong Sell also "
+            "require %K/%D reversal positioning and one-bar %K direction "
+            "confirmation."
+        ),
     },
     "STOCH_5_3_3": {
         "display_name": "Stoch(5,3,3)",
-        "definition": "Stochastic Oscillator %K using parameters 5, 3, and 3.",
-        "how_to_read": "Shorter lookback makes this more reactive than Stoch(14,3,3). Displayed value is %K.",
+        "definition": (
+            "Stochastic Oscillator compares the current close with its recent "
+            "high-low range. The displayed value is %K; %D is its smoothed "
+            "signal line."
+        ),
+        "how_to_read": (
+            "This shorter variant reacts quickly. %K below 20 is oversold and "
+            "above 80 is overbought. Strong states require reversal positioning "
+            "relative to %D plus one-bar %K direction confirmation."
+        ),
     },
     "STOCH_21_5_5": {
         "display_name": "Stoch(21,5,5)",
-        "definition": "Stochastic Oscillator %K using parameters 21, 5, and 5.",
-        "how_to_read": "Longer lookback makes this smoother and slower. Displayed value is %K.",
+        "definition": (
+            "Stochastic Oscillator compares the current close with its recent "
+            "high-low range. The displayed value is %K; %D is its smoothed "
+            "signal line."
+        ),
+        "how_to_read": (
+            "This longer, more heavily smoothed variant changes more slowly. "
+            "%K below 20 is oversold and above 80 is overbought. Strong states "
+            "also require reversal positioning and one-bar %K direction "
+            "confirmation."
+        ),
     },
     "BullBearPower_10": {
         "display_name": "BullBear(10)",
@@ -2373,12 +2399,20 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     macd_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-            # STOCH: Custom hover content (deltas)
+            # STOCH: Custom hover context derived from the existing rolling
+            # payload. This is display-only metadata; scoring remains owned by
+            # the rulebook and signal-classifier path.
             if key.startswith("STOCH_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
 
+                stoch_k = v
+                prev_stoch_k = prev_v
                 stoch_d = extra_map.get("stoch_d")
-                prev_stoch_d = prev_extra_map.get("stoch_d") if isinstance(prev_extra_map, dict) else None
+                prev_stoch_d = (
+                    prev_extra_map.get("stoch_d")
+                    if isinstance(prev_extra_map, dict)
+                    else None
+                )
 
                 stoch_d_delta_abs = None
                 if not _is_missing(stoch_d) and not _is_missing(prev_stoch_d):
@@ -2390,14 +2424,112 @@ def build_plotly_heatmap_inputs(
                 stoch_d_delta_pct = safe_pct_delta(stoch_d, prev_stoch_d)
 
                 if not _is_missing(stoch_d):
+                    stoch_d_suffix = ""
+                    if stoch_d_delta_abs is not None or stoch_d_delta_pct is not None:
+                        stoch_d_suffix = (
+                            f" ({format_signed_number(stoch_d_delta_abs, decimals=2)}"
+                            f"{f', {format_signed_percent(stoch_d_delta_pct, decimals=1)}' if stoch_d_delta_pct is not None else ''})"
+                        )
+
                     parts.append(
-                        f"%D: {format_signed_number(stoch_d, decimals=2)} "
-                        f"({format_signed_number(stoch_d_delta_abs, decimals=2)}"
-                        f"{f', {format_signed_percent(stoch_d_delta_pct, decimals=1)}' if stoch_d_delta_pct is not None else ''})"
+                        f"%D: {float(stoch_d):.2f}{stoch_d_suffix}"
                     )
 
+                spread = None
+                prev_spread = None
+                spread_delta_abs = None
+                spread_delta_bps = None
+
+                if not _is_missing(stoch_k) and not _is_missing(stoch_d):
+                    try:
+                        spread = float(stoch_k) - float(stoch_d)
+                    except Exception:
+                        spread = None
+
+                if (
+                    not _is_missing(prev_stoch_k)
+                    and not _is_missing(prev_stoch_d)
+                ):
+                    try:
+                        prev_spread = (
+                            float(prev_stoch_k) - float(prev_stoch_d)
+                        )
+                    except Exception:
+                        prev_spread = None
+
+                if spread is not None and prev_spread is not None:
+                    spread_delta_abs = spread - prev_spread
+                    spread_delta_bps = spread_delta_abs * 100.0
+
+                if spread is not None:
+                    spread_suffix = ""
+                    if spread_delta_abs is not None:
+                        spread_suffix = (
+                            f" ({format_signed_number(spread_delta_abs, decimals=2)}, "
+                            f"{format_signed_number(spread_delta_bps, decimals=0)} bps)"
+                        )
+
+                    parts.append(
+                        f"Spread: {format_signed_number(spread, decimals=2)}"
+                        f"{spread_suffix}"
+                    )
+
+                stoch_d_trend = infer_trend(stoch_d, prev_stoch_d)
+                spread_trend = infer_trend(spread, prev_spread)
+
+                secondary_trends = []
+                if stoch_d_trend:
+                    secondary_trends.append(f"%D: {stoch_d_trend}")
+                if spread_trend:
+                    secondary_trends.append(f"Spread: {spread_trend}")
+
+                if secondary_trends:
+                    parts.append(
+                        "Trend: " + " | ".join(secondary_trends)
+                    )
+
+                zone = ""
+                if not _is_missing(stoch_k):
+                    try:
+                        stoch_k_float = float(stoch_k)
+                        if stoch_k_float < 20.0:
+                            zone = "Oversold"
+                        elif stoch_k_float > 80.0:
+                            zone = "Overbought"
+                        else:
+                            zone = "Neutral"
+                    except Exception:
+                        zone = ""
+
+                if zone:
+                    parts.append("")
+                    parts.append(f"Zone: {zone}")
+
+                position = ""
+                if spread is not None:
+                    if abs(spread) <= 1e-12:
+                        position = "%K equal to %D"
+                    elif spread > 0:
+                        position = "%K above %D"
+                    else:
+                        position = "%K below %D"
+
+                if position:
+                    parts.append(f"Position: {position}")
+
+                cross = "None"
+                if spread is not None and prev_spread is not None:
+                    if prev_spread <= 0.0 and spread > 0.0:
+                        cross = "Bullish crossover today"
+                    elif prev_spread >= 0.0 and spread < 0.0:
+                        cross = "Bearish crossover today"
+
+                parts.append(f"Cross: {cross}")
+
                 if parts:
-                    stoch_context_block = "<br>" + "<br>".join(parts) + "<br>"
+                    stoch_context_block = (
+                        "<br>" + "<br>".join(parts) + "<br>"
+                    )
 
             # DPO: Custom hover content (raw value + deltas)
             if key.startswith("DPO_") and isinstance(extra_map, dict) and extra_map:

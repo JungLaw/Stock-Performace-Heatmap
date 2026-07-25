@@ -305,7 +305,7 @@ def compute_all_indicators(
             stoch_df = ta.stoch(
                 high=df["High"],
                 low=df["Low"],
-                close=price,  # use canonical price (Adj Close preferred)
+                close=df["Close"],
                 k=k_i,
                 d=d_i,
                 smooth_k=s_i,

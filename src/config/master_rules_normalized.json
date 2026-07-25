@@ -1,5 +1,5 @@
 {
-  "version": "0.2.10",
+  "version": "0.2.11",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -604,28 +604,28 @@
         "feature_scopes": {
           "heatmap": {
             "5_3_3": {
-              "strong_buy": "STOCHK_5_3_3 > STOCHD_5_3_3 and rising_2bar(STOCHK_5_3_3) and STOCHK_5_3_3 > 60",
-              "buy": "STOCHK_5_3_3 > STOCHD_5_3_3",
-              "neutral": "abs(STOCHK_5_3_3 - STOCHD_5_3_3) <= 5 or (45 <= STOCHK_5_3_3 <= 55)",
-              "sell": "STOCHK_5_3_3 < STOCHD_5_3_3",
-              "strong_sell": "STOCHK_5_3_3 < STOCHD_5_3_3 and falling_2bar(STOCHK_5_3_3) and STOCHK_5_3_3 < 40",
-              "notes": "Loose slope confirmation; 5 tick micro-cross filter hugely reduces noise."
+              "strong_buy": "STOCHK_5_3_3 < 20 and STOCHK_5_3_3 > STOCHD_5_3_3 and rising_2bar(STOCHK_5_3_3, 1)",
+              "buy": "STOCHK_5_3_3 < 20 and (STOCHK_5_3_3 <= STOCHD_5_3_3 or not_rising_2bar(STOCHK_5_3_3, 1))",
+              "neutral": "20 <= STOCHK_5_3_3 <= 80",
+              "sell": "STOCHK_5_3_3 > 80 and (STOCHK_5_3_3 >= STOCHD_5_3_3 or not_falling_2bar(STOCHK_5_3_3, 1))",
+              "strong_sell": "STOCHK_5_3_3 > 80 and STOCHK_5_3_3 < STOCHD_5_3_3 and falling_2bar(STOCHK_5_3_3, 1)",
+              "notes": "Oversold/overbought reversal-state model. Strong states require %K/%D reversal positioning and one-bar %K direction confirmation."
             },
             "14_3_3": {
-              "strong_buy": "STOCHK_14_3_3 > STOCHD_14_3_3 and rising_2bar(STOCHK_14_3_3) and STOCHK_14_3_3 > 60",
-              "buy": "STOCHK_14_3_3 > STOCHD_14_3_3",
-              "neutral": "abs(STOCHK_14_3_3 - STOCHD_14_3_3) <= 5 or (45 <= STOCHK_14_3_3 <= 55)",
-              "sell": "STOCHK_14_3_3 < STOCHD_14_3_3",
-              "strong_sell": "STOCHK_14_3_3 < STOCHD_14_3_3 and falling_2bar(STOCHK_14_3_3) and STOCHK_14_3_3 < 40",
-              "notes": "Intermediate window = classic stoch behavior."
+              "strong_buy": "STOCHK_14_3_3 < 20 and STOCHK_14_3_3 > STOCHD_14_3_3 and rising_2bar(STOCHK_14_3_3, 1)",
+              "buy": "STOCHK_14_3_3 < 20 and (STOCHK_14_3_3 <= STOCHD_14_3_3 or not_rising_2bar(STOCHK_14_3_3, 1))",
+              "neutral": "20 <= STOCHK_14_3_3 <= 80",
+              "sell": "STOCHK_14_3_3 > 80 and (STOCHK_14_3_3 >= STOCHD_14_3_3 or not_falling_2bar(STOCHK_14_3_3, 1))",
+              "strong_sell": "STOCHK_14_3_3 > 80 and STOCHK_14_3_3 < STOCHD_14_3_3 and falling_2bar(STOCHK_14_3_3, 1)",
+              "notes": "Oversold/overbought reversal-state model. Strong states require %K/%D reversal positioning and one-bar %K direction confirmation."
             },
             "21_5_5": {
-              "strong_buy": "STOCHK_21_5_5 > STOCHD_21_5_5 and rising_2bar(STOCHK_21_5_5) and STOCHK_21_5_5 > 60",
-              "buy": "STOCHK_21_5_5 > STOCHD_21_5_5",
-              "neutral": "abs(STOCHK_21_5_5 - STOCHD_21_5_5) <= 5 or (45 <= STOCHK_21_5_5 <= 55)",
-              "sell": "STOCHK_21_5_5 < STOCHD_21_5_5",
-              "strong_sell": "STOCHK_21_5_5 < STOCHD_21_5_5 and falling_2bar(STOCHK_21_5_5) and STOCHK_21_5_5 < 40",
-              "notes": "Longer periods reduce noise; same logic applies."
+              "strong_buy": "STOCHK_21_5_5 < 20 and STOCHK_21_5_5 > STOCHD_21_5_5 and rising_2bar(STOCHK_21_5_5, 1)",
+              "buy": "STOCHK_21_5_5 < 20 and (STOCHK_21_5_5 <= STOCHD_21_5_5 or not_rising_2bar(STOCHK_21_5_5, 1))",
+              "neutral": "20 <= STOCHK_21_5_5 <= 80",
+              "sell": "STOCHK_21_5_5 > 80 and (STOCHK_21_5_5 >= STOCHD_21_5_5 or not_falling_2bar(STOCHK_21_5_5, 1))",
+              "strong_sell": "STOCHK_21_5_5 > 80 and STOCHK_21_5_5 < STOCHD_21_5_5 and falling_2bar(STOCHK_21_5_5, 1)",
+              "notes": "Oversold/overbought reversal-state model. Strong states require %K/%D reversal positioning and one-bar %K direction confirmation."
             }
           },
           "overlay": {
