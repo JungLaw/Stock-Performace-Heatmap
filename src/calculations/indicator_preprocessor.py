@@ -935,7 +935,7 @@ def compute_all_indicators(
                 cmf_series = ta.cmf(
                     high=df["High"],
                     low=df["Low"],
-                    close=price,
+                    close=df["Close"],
                     volume=vol,   # volume=df[vol_col],
                     length=l_i,
                 )

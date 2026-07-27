@@ -1319,36 +1319,37 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "CMF_10 > 0.20 and rising_2bar(CMF_10)",
-              "buy": "CMF_10 > 0.10",
+              "strong_buy": "CMF_10 > 0.25 and rising_2bar(CMF_10)",
+              "buy": "CMF_10 > 0.10 and (CMF_10 <= 0.25 or not_rising_2bar(CMF_10))",
               "neutral": "-0.10 <= CMF_10 <= 0.10",
-              "sell": "CMF_10 < -0.10",
-              "strong_sell": "CMF_10 < -0.20 and falling_2bar(CMF_10)",
-              "notes": "Volume price confirmation. 0.1 zone is robust."
+              "sell": "CMF_10 < -0.10 and (CMF_10 >= -0.25 or not_falling_2bar(CMF_10))",
+              "strong_sell": "CMF_10 < -0.25 and falling_2bar(CMF_10)",
+              "notes": "Fast CMF window. Strong states require CMF beyond ±0.25 and continued strengthening across two consecutive moves."
             },
             "21": {
               "strong_buy": "CMF_21 > 0.20 and rising_2bar(CMF_21)",
-              "buy": "CMF_21 > 0.10",
+              "buy": "CMF_21 > 0.10 and (CMF_21 <= 0.20 or not_rising_2bar(CMF_21))",
               "neutral": "-0.10 <= CMF_21 <= 0.10",
-              "sell": "CMF_21 < -0.10",
+              "sell": "CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))",
               "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)",
-              "notes": "Default CMF window used industry-wide."
+              "notes": "Standard CMF window. Strong states require CMF beyond ±0.20 and continued strengthening across two consecutive moves."
             },
             "50": {
-              "strong_buy": "CMF_50 > 0.20 and rising_2bar(CMF_50)",
-              "buy": "CMF_50 > 0.10",
+              "strong_buy": "CMF_50 > 0.15 and rising_2bar(CMF_50)",
+              "buy": "CMF_50 > 0.10 and (CMF_50 <= 0.15 or not_rising_2bar(CMF_50))",
               "neutral": "-0.10 <= CMF_50 <= 0.10",
-              "sell": "CMF_50 < -0.10",
-              "strong_sell": "CMF_50 < -0.20 and falling_2bar(CMF_50)",
-              "notes": "Long smoothing reduces volatility of CMF."
+              "sell": "CMF_50 < -0.10 and (CMF_50 >= -0.15 or not_falling_2bar(CMF_50))",
+              "strong_sell": "CMF_50 < -0.15 and falling_2bar(CMF_50)",
+              "notes": "Slow CMF window. Strong states use ±0.15 because long smoothing compresses CMF magnitude and makes higher thresholds overly dormant."
             },
             "30": {
-              "strong_buy": "CMF_30 > 0.20 and rising_2bar(CMF_30)",
-              "buy": "CMF_30 > 0.10",
+              "strong_buy": "CMF_30 > 0.175 and rising_2bar(CMF_30)",
+              "buy": "CMF_30 > 0.10 and (CMF_30 <= 0.175 or not_rising_2bar(CMF_30))",
               "neutral": "-0.10 <= CMF_30 <= 0.10",
-              "sell": "CMF_30 < -0.10",
-              "strong_sell": "CMF_30 < -0.20 and falling_2bar(CMF_30)",
-              "notes": "Volume–price confirmation. ±0.1 zone is robust."            }
+              "sell": "CMF_30 < -0.10 and (CMF_30 >= -0.175 or not_falling_2bar(CMF_30))",
+              "strong_sell": "CMF_30 < -0.175 and falling_2bar(CMF_30)",
+              "notes": "Medium-slow CMF window. Strong states use ±0.175 because the smoother series has a narrower empirical range."
+            }
           },
           "overlay": {
             "21": {

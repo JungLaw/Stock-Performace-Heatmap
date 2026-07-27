@@ -625,23 +625,64 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "CMF_10": {
         "display_name": "CMF(10)",
-        "definition": "CMF estimates buying/selling pressure using price and volume.",
-        "how_to_read": "Above 0 suggests accumulation; below 0 suggests distribution.",
+        "definition": (
+            "CMF estimates whether volume is associated more "
+            "with closes near the upper or lower part of each period's range. "
+            "Displayed value is the canonical CMF value x 100."
+        ),
+        "how_to_read": (
+            "'+' values -> accumulation pressure; '-' values "
+            "-> distribution pressure.<br>"
+            "-10 to +10: Neutral | Above +10: Buy | Below -10: Sell.<br>"
+            "Beyond ±25 becomes Strong only when CMF also strengthens in that "
+            "direction across 2 consecutive moves."
+        ),
     },
     "CMF_21": {
-        "display_name": "CMF (21)",
-        "definition": "Chaikin Money Flow estimates buying/selling pressure using price and volume.",
-        "how_to_read": ">0: accumulation bias (buying pressure) | Above +0.25 = strong accumulation; <0 = distribution bias (selling pressure) | Below -0.25 = strong distribution",
+        "display_name": "CMF(21)",
+        "definition": (
+            "CMF estimates whether volume is associated more "
+            "with closes near the upper or lower part of each period's range. "
+            "CMF(21) is the standard reference window. Displayed value is "
+            "the canonical CMF value x 100."
+        ),
+        "how_to_read": (
+            "'+' values -> accumulation pressure; '-' values "
+            "-> distribution pressure.<br>"
+            "-10 to +10: Neutral | Above +10: Buy | Below -10: Sell.<br>"
+            "Beyond ±20 becomes Strong only when CMF also strengthens in that "
+            "direction across 2 consecutive moves."
+        ),
     },
     "CMF_50": {
         "display_name": "CMF(50)",
-        "definition": "CMF estimates buying/selling pressure using price and volume.",
-        "how_to_read": "Effective in both trending and ranging markets. Works well on daily and weekly charts for swing trading analysis.",
+        "definition": (
+            "CMF over a slow 50-period window estimates "
+            "persistent accumulation or distribution pressure. Displayed "
+            "value is the canonical CMF value x 100."
+        ),
+        "how_to_read": (
+            "'+' values -> accumulation pressure; '-' values "
+            "-> distribution pressure.<br>"
+            "-10 to +10: Neutral | Above +10: Buy | Below -10: Sell.<br>"
+            "Beyond ±15 becomes Strong only when CMF also strengthens in that "
+            "direction across 2 consecutive moves."
+        ),
     },
     "CMF_30": {
         "display_name": "CMF(30)",
-        "definition": "CMF estimates buying/selling pressure using price and volume.",
-        "how_to_read": "Above 0 suggests accumulation; below 0 suggests distribution.",
+        "definition": (
+            "CMF over a medium-slow 30-period window estimates "
+            "sustained accumulation or distribution pressure. Displayed "
+            "value is the canonical CMF value x 100."
+        ),
+        "how_to_read": (
+            "Positive values indicate accumulation pressure; negative values "
+            "indicate distribution pressure.<br>"
+            "-10 to +10: Neutral | Above +10: Buy | Below -10: Sell.<br>"
+            "Beyond ±17.5 becomes Strong only when CMF also strengthens in "
+            "that direction across 2 consecutive moves."
+        ),
     },
     "OBV": {
         "display_name": "OBV",
@@ -709,7 +750,7 @@ def format_cell_value(indicator_key: str, v: Any) -> str:
     if indicator_key.startswith("BB_BW"):
         return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
-        return f"{fv:.3f}"
+        return f"{fv * 100.0:+.1f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
         return _abbr(fv)
     return f"{fv:.2f}"
@@ -787,7 +828,7 @@ def format_hover_value(indicator_key: str, v: Any) -> str:
     if indicator_key.startswith("BB_BW"):
         return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
-        return f"{fv:.3f}"
+        return f"{fv * 100.0:+.1f}"
     if indicator_key.startswith("DPO_"):
         return f"{fv:+.2f}%"             # percent-point units   
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
@@ -2284,6 +2325,7 @@ def build_plotly_heatmap_inputs(
                         "macd_context_block": "",
                         "adx_context_block": "",
                         "stoch_context_block": "",
+                        "cmf_context_block": "",
                         "bullbear_context_block": "",
                         "dpo_context_block": "",
                         "band_context_block": "",
@@ -2376,6 +2418,7 @@ def build_plotly_heatmap_inputs(
 
             macd_context_block = ""
             stoch_context_block = ""
+            cmf_context_block = ""
             bullbear_context_block = ""
             dpo_context_block = ""
             band_context_block = ""
@@ -2569,6 +2612,84 @@ def build_plotly_heatmap_inputs(
                         "<br>" + "<br>".join(parts) + "<br>"
                     )
 
+            # CMF: Display-scale deltas and directional context.
+            #
+            # Numeric and rule truth remain in canonical raw CMF units
+            # (-1 to +1). This block converts existing values to the
+            # -100 to +100 presentation scale only.
+            if key.startswith("CMF_"):
+                cmf_thresholds = {
+                    "CMF_10": 0.25,
+                    "CMF_21": 0.20,
+                    "CMF_30": 0.175,
+                    "CMF_50": 0.15,
+                }
+
+                cmf_threshold = cmf_thresholds.get(key)
+                cmf_value = None
+                prev_cmf_value = None
+                prior_2_cmf_value = None
+
+                try:
+                    if not _is_missing(v):
+                        cmf_value = float(v)
+                    if not _is_missing(prev_v):
+                        prev_cmf_value = float(prev_v)
+                    if idx > 1 and not _is_missing(values[idx - 2]):
+                        prior_2_cmf_value = float(values[idx - 2])
+                except Exception:
+                    cmf_value = None
+                    prev_cmf_value = None
+                    prior_2_cmf_value = None
+
+                parts = []
+
+                if cmf_value is not None:
+                    if cmf_value > 0.10:
+                        pressure_state = "Accumulation"
+                    elif cmf_value < -0.10:
+                        pressure_state = "Distribution"
+                    else:
+                        pressure_state = "Balanced / Neutral"
+
+                    parts.append(f"Pressure: {pressure_state}")
+
+                if cmf_threshold is not None:
+                    parts.append(
+                        "Strong threshold: "
+                        f"±{cmf_threshold * 100.0:g}"
+                    )
+
+                confirmation = "Not available"
+                if (
+                    cmf_value is not None
+                    and prev_cmf_value is not None
+                    and prior_2_cmf_value is not None
+                ):
+                    if (
+                        cmf_value
+                        > prev_cmf_value
+                        > prior_2_cmf_value
+                    ):
+                        confirmation = "Rising across 2 moves"
+                    elif (
+                        cmf_value
+                        < prev_cmf_value
+                        < prior_2_cmf_value
+                    ):
+                        confirmation = "Falling across 2 moves"
+                    else:
+                        confirmation = "Not met"
+
+                parts.append(
+                    f"2-move confirmation: {confirmation}"
+                )
+
+                if parts:
+                    cmf_context_block = (
+                        "<br>" + "<br>".join(parts) + "<br>"
+                    )
+
             # DPO: Custom hover content (raw value + deltas)
             if key.startswith("DPO_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
@@ -2732,10 +2853,58 @@ def build_plotly_heatmap_inputs(
             # ----------------------------
             # Preformatted hover fragments ('Indicator'-row)
             # ----------------------------
-            delta_abs_fmt = format_signed_number(delta_abs, decimals=2)
-            delta_pct_suffix = f" ({format_signed_percent(delta_pct, decimals=2)})" if delta_pct is not None else ""
+            if key.startswith("CMF_"):
+                cmf_delta_display = (
+                    delta_abs * 100.0
+                    if delta_abs is not None
+                    else None
+                )
+
+                # Suppress relative change when the prior raw value would
+                # round to 0.0 on the one-decimal display scale. This avoids
+                # enormous or undefined percentages around the zero line.
+                cmf_delta_pct = delta_pct
+
+                if not _is_missing(prev_v):
+                    try:
+                        if abs(float(prev_v)) < 0.0005:
+                            cmf_delta_pct = None
+                    except Exception:
+                        cmf_delta_pct = None
+
+                delta_abs_fmt = format_signed_number(
+                    cmf_delta_display,
+                    decimals=1,
+                )
+                delta_pct_suffix = (
+                    " ("
+                    + format_signed_percent(
+                        cmf_delta_pct,
+                        decimals=1,
+                    )
+                    + ")"
+                    if cmf_delta_pct is not None
+                    else ""
+                )
+            else:
+                delta_abs_fmt = format_signed_number(
+                    delta_abs,
+                    decimals=2,
+                )
+                delta_pct_suffix = (
+                    " ("
+                    + format_signed_percent(
+                        delta_pct,
+                        decimals=2,
+                    )
+                    + ")"
+                    if delta_pct is not None
+                    else ""
+                )
+
             delta_line = "" if _is_crossover_key(key) else (
-                f"Δ vs prior day: {delta_abs_fmt}{delta_pct_suffix}<br>"
+                f"Δ vs prior day: "
+                f"{delta_abs_fmt}{delta_pct_suffix}<br>"
             )
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
             signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
@@ -3013,7 +3182,7 @@ def build_plotly_heatmap_inputs(
                     "definition": definition,
                     "how_to_read": how_to_read,
 
-                    # preformatted hover fields
+                    # preformatted hover fields (Indicator customdata)
                     "delta_abs_fmt": delta_abs_fmt,
                     "delta_pct_suffix": delta_pct_suffix,
                     "delta_line": delta_line,
@@ -3030,9 +3199,10 @@ def build_plotly_heatmap_inputs(
                     "crossover_context_block": crossover_context_block,
                     "crossover_summary_block": crossover_summary_block,
                     "crossover_spread": crossover_spread,
-					"macd_context_block": macd_context_block,
+                    "macd_context_block": macd_context_block,
                     "adx_context_block": adx_context_block,
-                    "stoch_context_block": stoch_context_block, 
+                    "stoch_context_block": stoch_context_block,
+                    "cmf_context_block": cmf_context_block,
                     "dpo_context_block": dpo_context_block,
                     "bullbear_context_block": bullbear_context_block,
                     "meta": rolling_payload.get("meta", {}),
@@ -3084,6 +3254,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
+        "%{customdata.cmf_context_block}"
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
