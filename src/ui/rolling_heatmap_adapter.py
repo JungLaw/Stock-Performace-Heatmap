@@ -1238,6 +1238,20 @@ def build_plotly_heatmap_inputs(
     ohlcv_by_date: Dict[str, Dict[str, Any]] = {}
     close_history_by_date: Dict[str, List[float]] = {}
 
+    # Full trailing-close histories and SMA projection helper columns are
+    # required only by crossover-event hover calculations. Avoid building
+    # those structures for ordinary indicator rows such as RSI, CMF, STOCH,
+    # MACD, and moving-average state rows.
+    crossover_hover_row_keys = {
+        "EMA_9_X_EMA_21",
+        "SMA_20_X_SMA_50",
+        "SMA_50_X_SMA_200",
+    }
+    needs_crossover_hover_context = any(
+        str(indicator_key).strip() in crossover_hover_row_keys
+        for indicator_key in indicator_keys
+    )
+
     if ohlcv_df is not None:
         try:
             hover_df = ohlcv_df.copy().sort_index()
@@ -1246,39 +1260,68 @@ def build_plotly_heatmap_inputs(
             # These helper columns are not score truth, rule truth, or numeric-layer
             # outputs. They are adapter-local context derived from existing OHLCV.
             close_col = "Adj Close" if "Adj Close" in hover_df.columns else "Close"
-            if close_col in hover_df.columns:
-                close_series = pd.to_numeric(hover_df[close_col], errors="coerce")
+
+            if (
+                needs_crossover_hover_context
+                and close_col in hover_df.columns
+            ):
+                close_series = pd.to_numeric(
+                    hover_df[close_col],
+                    errors="coerce",
+                )
 
                 # Keep enough trailing close history to simulate SMA crossover
                 # behavior under a constant-close future-price assumption.
+                # This work is intentionally limited to crossover-row requests.
                 max_crossover_sma_len = 200
-                raw_date_keys = [str(idx_val) for idx_val in hover_df.index]
+                raw_date_keys = [
+                    str(idx_val)
+                    for idx_val in hover_df.index
+                ]
                 normalized_date_keys = [
                     _normalize_hover_date_key(idx_val)
                     for idx_val in hover_df.index
                 ]
                 close_values = close_series.tolist()
 
-                for pos, normalized_date_key in enumerate(normalized_date_keys):
-                    start_pos = max(0, pos - max_crossover_sma_len + 1)
-                    trailing_values = close_values[start_pos : pos + 1]
+                for pos, normalized_date_key in enumerate(
+                    normalized_date_keys
+                ):
+                    start_pos = max(
+                        0,
+                        pos - max_crossover_sma_len + 1,
+                    )
+                    trailing_values = close_values[
+                        start_pos : pos + 1
+                    ]
                     trailing_history = [
                         float(value)
                         for value in trailing_values
                         if not _is_missing(value)
                     ]
 
-                    close_history_by_date[normalized_date_key] = trailing_history
+                    close_history_by_date[
+                        normalized_date_key
+                    ] = trailing_history
 
                     raw_date_key = raw_date_keys[pos]
                     if raw_date_key != normalized_date_key:
-                        close_history_by_date[raw_date_key] = trailing_history
+                        close_history_by_date[
+                            raw_date_key
+                        ] = trailing_history
 
                 for sma_len in (20, 50, 200):
                     hover_df[f"__SMA_SUM_{sma_len}"] = (
-                        close_series.rolling(sma_len, min_periods=sma_len).sum()
+                        close_series
+                        .rolling(
+                            sma_len,
+                            min_periods=sma_len,
+                        )
+                        .sum()
                     )
-                    hover_df[f"__SMA_OLDEST_{sma_len}"] = close_series.shift(sma_len - 1)
+                    hover_df[f"__SMA_OLDEST_{sma_len}"] = (
+                        close_series.shift(sma_len - 1)
+                    )
 
             hover_df.index = hover_df.index.astype(str)
             hover_records = hover_df.to_dict(orient="index")

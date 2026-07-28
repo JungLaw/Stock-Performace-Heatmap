@@ -2894,11 +2894,42 @@ def _build_scd_single_indicator_cell_from_bundle(
         adapter_lookup=adapter_lookup,
     )
 
-    price_cell = _build_scd_price_cell_from_context_df(
-        ticker=ticker,
-        date_key=date_key,
-        context_df=context_df,
+    # The shared Rolling Heatmap adapter emits its display-only __PRICE__
+    # row alongside requested indicator rows. Reuse that already-built
+    # Price cell instead of repeatedly copying, normalizing, sorting, and
+    # scanning the context dataframe for every displayed date.
+    adapter_price_entry = (
+        adapter_lookup
+        .get("__PRICE__", {})
+        .get(str(date_key), {})
     )
+    adapter_price_customdata = adapter_price_entry.get("customdata")
+
+    if (
+        isinstance(adapter_price_customdata, dict)
+        and adapter_price_customdata
+    ):
+        price_cell = {
+            "ticker": str(ticker).strip().upper(),
+            "row_key": "__PRICE__",
+            "date": str(date_key).strip(),
+            "value": adapter_price_customdata.get("raw_value"),
+            "signal": "",
+            "score": adapter_price_entry.get("z"),
+            "hover": None,
+            "status": "ok",
+            "display_text": adapter_price_entry.get("text", ""),
+            "adapter_customdata": dict(adapter_price_customdata),
+        }
+    else:
+        # Defensive compatibility fallback for malformed, partial, or older
+        # payloads that do not contain an adapter-owned Price entry.
+        price_cell = _build_scd_price_cell_from_context_df(
+            ticker=ticker,
+            date_key=date_key,
+            context_df=context_df,
+        )
+
     if price_cell.get("status") == "ok":
         cell["price_cell"] = price_cell
 
