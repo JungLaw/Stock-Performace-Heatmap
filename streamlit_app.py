@@ -317,6 +317,12 @@ def initialize_session_state():
     if 'scd_single_chart_visible_tickers' not in st.session_state:
         st.session_state.scd_single_chart_visible_tickers = []
 
+    # Stock Comparison Dashboard Single Indicator Price Trend Chart state.
+    # This is an independent display transform over matrix-owned Price cells.
+    # It must not trigger acquisition, adapter, cache, or calculation work.
+    if 'scd_single_price_chart_value_mode' not in st.session_state:
+        st.session_state.scd_single_price_chart_value_mode = 'Indexed to 100'
+
     # Stock Comparison Dashboard v1: Date-anchor controls
     # These are display/request controls only. They do not create a new
     # acquisition path, scoring path, or persistence behavior.
@@ -5588,13 +5594,101 @@ def _get_scd_single_chart_hover_fields(
     chart_value: Optional[float],
     value_mode: str,
 ) -> list[Any]:
-    """Return compact hover customdata for one Single Indicator chart point."""
+    """
+    Return compact hover customdata for one Single Indicator chart point.
+
+    Indicator delta is calculated from the underlying indicator series rather
+    than from the selected chart transform. This keeps the hover value stable
+    across Indicator value, Indexed to 100, change, percentage-change, and
+    Score display modes.
+    """
     row_key = str(matrix.get("row_key", ""))
+    dates = list(matrix.get("dates", []))
     cells = matrix.get("cells", {})
     cell = cells.get(date_key, {}).get(ticker, {})
 
-    price_cell = cell.get("price_cell") if isinstance(cell, dict) else None
+    indicator_value = _get_scd_single_chart_source_value(
+        row_key=row_key,
+        cell=cell,
+        value_mode="Indicator value",
+    )
+
+    indicator_delta_line = "N/A"
+
+    # Ordinary indicator cells already carry adapter-formatted delta metadata.
+    # Reuse it so the chart hover follows the same display units as the heatmap.
+    #
+    # Example:
+    #   canonical CMF delta: -0.043
+    #   displayed CMF delta: -4.3
+    #
+    # Crossover charts visualize MA spread rather than the event-row value, so
+    # they retain the chart-local spread calculation below.
+    indicator_cd = (
+        cell.get("adapter_customdata")
+        if isinstance(cell, dict)
+        else None
+    )
+
+    if (
+        not _is_scd_crossover_event_row(row_key)
+        and isinstance(indicator_cd, dict)
+        and indicator_cd.get("delta_abs_fmt")
+    ):
+        indicator_delta_line = (
+            f"{indicator_cd.get('delta_abs_fmt', '')}"
+            f"{indicator_cd.get('delta_pct_suffix', '')}"
+        )
+    else:
+        try:
+            date_position = dates.index(date_key)
+        except ValueError:
+            date_position = -1
+
+        if date_position > 0 and indicator_value is not None:
+            prior_date_key = dates[date_position - 1]
+            prior_cell = cells.get(
+                prior_date_key,
+                {},
+            ).get(
+                ticker,
+                {},
+            )
+            prior_indicator_value = _get_scd_single_chart_source_value(
+                row_key=row_key,
+                cell=prior_cell,
+                value_mode="Indicator value",
+            )
+
+            if prior_indicator_value is not None:
+                indicator_delta_abs = (
+                    indicator_value
+                    - prior_indicator_value
+                )
+
+                if abs(prior_indicator_value) > 1e-9:
+                    indicator_delta_pct = (
+                        indicator_delta_abs
+                        / abs(prior_indicator_value)
+                        * 100.0
+                    )
+                    indicator_delta_line = (
+                        f"{indicator_delta_abs:+.1f} "
+                        f"({indicator_delta_pct:+.1f}%)"
+                    )
+                else:
+                    indicator_delta_line = (
+                        f"{indicator_delta_abs:+.1f} "
+                        "(relative change unavailable)"
+                    )
+
+    price_cell = (
+        cell.get("price_cell")
+        if isinstance(cell, dict)
+        else None
+    )
     price_cd = {}
+
     if isinstance(price_cell, dict):
         maybe_cd = price_cell.get("adapter_customdata")
         if isinstance(maybe_cd, dict):
@@ -5602,6 +5696,7 @@ def _get_scd_single_chart_hover_fields(
 
     price_value = price_cd.get("formatted_value", "")
     price_delta = ""
+
     if price_cd.get("delta_abs_fmt"):
         price_delta = (
             f"{price_cd.get('delta_abs_fmt', '')}"
@@ -5615,6 +5710,7 @@ def _get_scd_single_chart_hover_fields(
         chart_value,
         price_value,
         price_delta,
+        indicator_delta_line,
     ]
 
 
@@ -5706,6 +5802,7 @@ def _build_scd_single_indicator_chart_figure(
                     "<b>%{fullData.name}</b><br>"
                     "Date: %{customdata[0]}<br>"
                     f"{row_label}: %{{customdata[1]}}<br>"
+                    "Δ vs prior day: %{customdata[6]}<br>"
                     f"Chart value ({resolved_mode}): %{{customdata[3]:.2f}}<br>"
                     "Signal: %{customdata[2]}<br>"
                     "Price: %{customdata[4]}<br>"
@@ -5752,6 +5849,364 @@ def _build_scd_single_indicator_chart_figure(
     fig.update_yaxes(title=y_axis_title)
 
     return fig, resolved_mode, warnings
+
+
+def _get_scd_single_price_chart_value_modes() -> list[str]:
+    """Return supported display modes for the SCD Price Trend Chart."""
+    return [
+        "Indexed to 100",
+        "Stock price",
+    ]
+
+
+def _get_scd_single_price_value(
+    cell: Dict[str, Any],
+) -> Optional[float]:
+    """
+    Return the matrix-owned numeric Price value for one SCD cell.
+
+    The optimized Single Indicator matrix normally stores the adapter-owned
+    __PRICE__ raw value in price_cell["value"]. The customdata fallback keeps
+    this display helper compatible with older or partial matrix payloads.
+    """
+    if not isinstance(cell, dict):
+        return None
+
+    price_cell = cell.get("price_cell")
+    if not isinstance(price_cell, dict):
+        return None
+
+    price_value = _coerce_scd_chart_numeric_value(
+        price_cell.get("value")
+    )
+    if price_value is not None:
+        return price_value
+
+    adapter_cd = price_cell.get("adapter_customdata")
+    if isinstance(adapter_cd, dict):
+        return _coerce_scd_chart_numeric_value(
+            adapter_cd.get("raw_value")
+        )
+
+    return None
+
+
+def _build_scd_single_price_chart_series(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    value_mode: str,
+) -> tuple[
+    dict[str, list[Optional[float]]],
+    dict[str, list[Optional[float]]],
+    list[str],
+]:
+    """
+    Build actual-price and display-price series from matrix-owned Price cells.
+
+    Returns:
+        display_series:
+            Stock price or Indexed-to-100 values used on the y-axis.
+
+        actual_price_series:
+            Untransformed Price values retained for hover display.
+
+        warnings:
+            Per-ticker transform limitations.
+
+    This helper is display-only. It does not alter matrix cells, acquisition,
+    rolling payloads, adapters, caches, persistence, or indicator computation.
+    """
+    dates = list(matrix.get("dates", []))
+    cells = matrix.get("cells", {})
+
+    actual_price_series: dict[
+        str,
+        list[Optional[float]],
+    ] = {}
+
+    for ticker in visible_tickers:
+        values: list[Optional[float]] = []
+
+        for date_key in dates:
+            cell = cells.get(date_key, {}).get(ticker, {})
+            values.append(
+                _get_scd_single_price_value(cell)
+            )
+
+        actual_price_series[ticker] = values
+
+    warnings: list[str] = []
+
+    if value_mode == "Stock price":
+        return (
+            dict(actual_price_series),
+            actual_price_series,
+            warnings,
+        )
+
+    display_series: dict[
+        str,
+        list[Optional[float]],
+    ] = {}
+
+    for ticker, values in actual_price_series.items():
+        first_valid = next(
+            (
+                value
+                for value in values
+                if value is not None
+            ),
+            None,
+        )
+
+        if (
+            first_valid is None
+            or first_valid <= 0
+            or abs(first_valid) <= 1e-9
+        ):
+            display_series[ticker] = [
+                None
+                for _ in values
+            ]
+            warnings.append(
+                f"{ticker}: Indexed to 100 unavailable because "
+                "no positive starting Price value is available."
+            )
+            continue
+
+        display_series[ticker] = [
+            (
+                value / first_valid * 100.0
+                if value is not None
+                else None
+            )
+            for value in values
+        ]
+
+    return (
+        display_series,
+        actual_price_series,
+        warnings,
+    )
+
+
+def _build_scd_single_price_chart_figure(
+    *,
+    matrix: Dict[str, Any],
+    visible_tickers: list[str],
+    selected_value_mode: str,
+) -> tuple[go.Figure, list[str]]:
+    """
+    Build the SCD Price Trend Chart from existing matrix-owned Price cells.
+    """
+    dates = list(matrix.get("dates", []))
+    date_labels = [
+        _format_scd_compact_date_label(date_key)
+        for date_key in dates
+    ]
+
+    value_modes = _get_scd_single_price_chart_value_modes()
+    resolved_mode = (
+        selected_value_mode
+        if selected_value_mode in value_modes
+        else "Indexed to 100"
+    )
+
+    (
+        display_series,
+        actual_price_series,
+        warnings,
+    ) = _build_scd_single_price_chart_series(
+        matrix=matrix,
+        visible_tickers=visible_tickers,
+        value_mode=resolved_mode,
+    )
+
+    fig = go.Figure()
+
+    for ticker in visible_tickers:
+        y_values = display_series.get(ticker, [])
+        actual_prices = actual_price_series.get(ticker, [])
+
+        customdata = [
+            [
+                str(date_key),
+                (
+                    actual_prices[index]
+                    if index < len(actual_prices)
+                    else None
+                ),
+            ]
+            for index, date_key in enumerate(dates)
+        ]
+
+        if resolved_mode == "Stock price":
+            chart_value_line = (
+                "Stock price: $%{y:,.2f}<br>"
+            )
+        else:
+            chart_value_line = (
+                "Indexed value: %{y:,.2f}<br>"
+                "Stock price: $%{customdata[1]:,.2f}<br>"
+            )
+
+        fig.add_trace(
+            go.Scatter(
+                x=date_labels,
+                y=y_values,
+                mode="lines+markers",
+                name=ticker,
+                customdata=customdata,
+                connectgaps=False,
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>"
+                    "Date: %{customdata[0]}<br>"
+                    f"{chart_value_line}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    original_height = max(
+        420,
+        35 * max(len(visible_tickers), 1) + 260,
+    )
+    dynamic_height = max(
+        330,
+        int(round(original_height * 0.75)), # change height of 'Price trend' chart
+    )
+
+    fig.update_layout(
+        title=dict(
+            text="Price Trend Chart",
+            x=0.0,
+            xanchor="left",
+            y=0.98,
+            yanchor="top",
+        ),
+        height=dynamic_height,
+        margin=dict(
+            l=70,
+            r=30,
+            t=105,
+            b=70,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="left",
+            x=0,
+        ),
+        hoverlabel=dict(align="left"),
+    )
+
+    fig.update_xaxes(
+        title="Date",
+        type="category",
+        tickmode="array",
+        tickvals=date_labels,
+        ticktext=date_labels,
+    )
+
+    if resolved_mode == "Stock price":
+        fig.update_yaxes(
+            title="Stock price ($)",
+            tickprefix="$",
+            tickformat=",.2f",
+        )
+    else:
+        fig.update_yaxes(
+            title="Indexed price",
+            tickformat=",.2f",
+        )
+        fig.add_hline(
+            y=100,
+            line_dash="dot",
+            opacity=0.45,
+        )
+
+    return fig, warnings
+
+
+def _render_scd_single_price_chart_view(
+    matrix: Dict[str, Any],
+) -> None:
+    """
+    Render the independent SCD Price Trend Chart below the indicator chart.
+
+    Ticker visibility is handled by this chart's native Plotly legend and is
+    intentionally independent from the indicator chart legend.
+    """
+    if not isinstance(matrix, dict) or not matrix:
+        return
+
+    tickers = list(matrix.get("tickers", []))
+    if not tickers:
+        st.info("No tickers available for the Price Trend Chart.")
+        return
+
+    value_modes = _get_scd_single_price_chart_value_modes()
+    current_mode = st.session_state.get(
+        "scd_single_price_chart_value_mode",
+        "Indexed to 100",
+    )
+
+    if current_mode not in value_modes:
+        current_mode = "Indexed to 100"
+        st.session_state.scd_single_price_chart_value_mode = (
+            current_mode
+        )
+
+    fig, warnings = _build_scd_single_price_chart_figure(
+        matrix=matrix,
+        visible_tickers=tickers,
+        selected_value_mode=current_mode,
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="scd_single_price_trend_chart",
+        config={
+            "doubleClickDelay": 800,
+            "responsive": True,
+        },
+    )
+
+    st.selectbox(
+        "Price chart value",
+        options=value_modes,
+        index=value_modes.index(current_mode),
+        key="scd_single_price_chart_value_mode",
+        help=(
+            "Indexed to 100 rebases each ticker's first valid Price "
+            "in the displayed date range to 100. Stock price shows "
+            "the underlying dollar values."
+        ),
+    )
+
+    st.markdown(
+        "<small style='color: #6c757d;'>"
+        "Tip: This chart has an independent legend. "
+        "Click a ticker to hide/show it; double-click to isolate it."
+        "</small>",
+        unsafe_allow_html=True,
+    )
+
+    if warnings:
+        with st.expander(
+            "Price chart transform notes",
+            expanded=False,
+        ):
+            for warning in warnings:
+                st.markdown(
+                    f"<small style='color: #6c757d;'>"
+                    f"- {warning}"
+                    f"</small>",
+                    unsafe_allow_html=True,
+                )
 
 
 def _render_scd_single_indicator_chart_view(matrix: Dict[str, Any]) -> None:
@@ -5856,6 +6311,7 @@ def _render_scd_single_indicator_matrix_view(matrix: Dict[str, Any]) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     _render_scd_single_indicator_chart_view(matrix)
+    _render_scd_single_price_chart_view(matrix)
 
     detail_df = _build_scd_single_indicator_detail_table(matrix)
 
