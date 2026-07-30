@@ -463,7 +463,7 @@ Items from the Minor Backlog Ledger should be promoted into this Master Checklis
 ## Continuity & Scope Enforcement
 
 All phases and options are governed by:
-- `constraints_chatgpt.md`
+- `docs/Constraints_ChatGPT.md`
 - Explicit deferrals and exclusions carry forward automatically
 - New phases do not reset scope unless explicitly stated
 

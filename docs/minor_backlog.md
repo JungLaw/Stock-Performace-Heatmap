@@ -9,7 +9,7 @@ This file is an intake and triage ledger for minor tasks, audits, cleanup items,
 It is subordinate to:
 1. `TA_RULE_ENGINE_CANONICAL_OUTLINE.md`
 2. `Master Checklist (Authoritative)- Phase 3.md`
-3. `Constraints_ChatGPT.md`
+3. `docs/Constraints_ChatGPT.md`
 
 This ledger does not create new scope by itself.
 
