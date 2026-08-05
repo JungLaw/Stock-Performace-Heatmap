@@ -2390,6 +2390,7 @@ def build_plotly_heatmap_inputs(
                         "delta_pct_suffix": delta_pct_suffix,
                         "delta_line": f"Δ vs prior day: {delta_abs_fmt}{delta_pct_suffix}<br>",
                         "trend_line": trend_line,
+                        "alignment_line": "",
                         "signal_line": signal_line,
                         "rule_block": rule_block,
                         "notes_block": notes_block,
@@ -2451,6 +2452,10 @@ def build_plotly_heatmap_inputs(
 
             delta_pct = safe_pct_delta(v, prev_v)
             trend = infer_trend(v, prev_v)
+
+            # ROC-only display context. Numeric truth remains in canonical
+            # fractional ROC units; these fields are derived for hover only.
+            alignment_line = ""
 
             formatted_value = format_hover_value(key, v)
             score_label = score_to_label(s)
@@ -2653,6 +2658,68 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     stoch_context_block = (
                         "<br>" + "<br>".join(parts) + "<br>"
+                    )
+
+            # ROC: Compare the day-over-day price direction with the
+            # day-over-day ROC direction. This is a one-bar alignment
+            # interpretation, not formal swing-point divergence detection.
+            if key.startswith("ROC_"):
+                current_price = price_by_date.get(d_raw)
+                prev_date = raw_dates[idx - 1] if idx > 0 else None
+                previous_price = (
+                    price_by_date.get(prev_date)
+                    if prev_date is not None
+                    else None
+                )
+
+                price_trend = infer_trend(
+                    current_price,
+                    previous_price,
+                )
+                roc_trend = trend
+
+                direction_symbol = {
+                    "Rising": "+",
+                    "Falling": "-",
+                    "Flat": "0",
+                }
+
+                alignment_text = {
+                    ("Rising", "Rising"):
+                        "confirming upside momentum",
+                    ("Falling", "Falling"):
+                        "confirming downside momentum",
+                    ("Rising", "Falling"):
+                        "upside momentum weakening",
+                    ("Falling", "Rising"):
+                        "downside momentum easing",
+                    ("Flat", "Rising"):
+                        "momentum improving while price is flat",
+                    ("Flat", "Falling"):
+                        "momentum weakening while price is flat",
+                    ("Rising", "Flat"):
+                        "price rising with stable momentum",
+                    ("Falling", "Flat"):
+                        "price falling with stable momentum",
+                    ("Flat", "Flat"):
+                        "price and momentum unchanged",
+                }.get(
+                    (price_trend, roc_trend)
+                )
+
+                price_symbol = direction_symbol.get(price_trend)
+                roc_symbol = direction_symbol.get(roc_trend)
+
+                if (
+                    alignment_text
+                    and price_symbol is not None
+                    and roc_symbol is not None
+                ):
+                    alignment_line = (
+                        "Alignment: "
+                        f"P({price_symbol}), "
+                        f"ROC({roc_symbol}) = "
+                        f"{alignment_text}<br>"
                     )
 
             # CMF: Display-scale deltas and directional context.
@@ -2929,6 +2996,35 @@ def build_plotly_heatmap_inputs(
                     if cmf_delta_pct is not None
                     else ""
                 )
+                delta_unit_suffix = ""
+
+            elif key.startswith("ROC_"):
+                roc_delta_display = (
+                    delta_abs * 100.0
+                    if delta_abs is not None
+                    else None
+                )
+
+                delta_abs_fmt = format_signed_number(
+                    roc_delta_display,
+                    decimals=2,
+                )
+                delta_pct_suffix = (
+                    " ("
+                    + format_signed_percent(
+                        delta_pct,
+                        decimals=1,
+                    )
+                    + ")"
+                    if delta_pct is not None
+                    else ""
+                )
+                delta_unit_suffix = (
+                    " pps"
+                    if roc_delta_display is not None
+                    else ""
+                )
+
             else:
                 delta_abs_fmt = format_signed_number(
                     delta_abs,
@@ -2944,10 +3040,13 @@ def build_plotly_heatmap_inputs(
                     if delta_pct is not None
                     else ""
                 )
+                delta_unit_suffix = ""
 
             delta_line = "" if _is_crossover_key(key) else (
                 f"Δ vs prior day: "
-                f"{delta_abs_fmt}{delta_pct_suffix}<br>"
+                f"{delta_abs_fmt}"
+                f"{delta_unit_suffix}"
+                f"{delta_pct_suffix}<br>"
             )
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
             signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
@@ -3230,6 +3329,7 @@ def build_plotly_heatmap_inputs(
                     "delta_pct_suffix": delta_pct_suffix,
                     "delta_line": delta_line,
                     "trend_line": trend_line,
+                    "alignment_line": alignment_line,
                     "signal_line": signal_line,
                     "rule_block": rule_block,
                     "notes_block": notes_block,
@@ -3293,6 +3393,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
         "%{customdata.trend_line}"
+        "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.macd_context_block}"

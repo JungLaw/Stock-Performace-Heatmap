@@ -42,7 +42,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
     # Momentum / oscillators
     "CCI": [14, 20],   # CCI_20 (window 20)
-    "ROC": [9, 12, 20, 50],
+    "ROC": [9, 12, 14, 20, 50],
     "WILLR": [5, 14, 20],
     "UO": [(7, 14, 28)],
     # Detrended Price Oscillator; values are also normalized to percent-points of price.

@@ -320,10 +320,10 @@ class SignalEngine:
         else:
             signal_series = pd.Series("neutral", index=df.index, dtype="object")
 
-        # RSI and MFI are classified only where their parameter-specific
-        # numeric values are initialized. Capture that validity state before
-        # evaluating the rule block, then restore missing observations before
-        # returning.
+        # RSI, MFI, and ROC are classified only where their
+        # parameter-specific numeric values are initialized. Capture that
+        # validity state before evaluating the rule block, then restore
+        # missing observations before returning.
         #
         # Do not suppress a missing-column defect here. If the canonical
         # indicator column does not exist, normal expression evaluation must
@@ -333,6 +333,7 @@ class SignalEngine:
         parameterized_value_prefixes = {
             "RSI": "RSI",
             "MFI": "MFI",
+            "ROC": "ROC",
         }
 
         value_prefix = parameterized_value_prefixes.get(indicator_name)

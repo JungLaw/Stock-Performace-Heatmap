@@ -822,41 +822,41 @@
           "heatmap": {
             "9": {
               "strong_buy": "ROC_9 > 0.05",
-              "buy": "ROC_9 > 0.02",
+              "buy": "ROC_9 > 0.02 and ROC_9 <= 0.05",
               "neutral": "-0.02 <= ROC_9 <= 0.02",
-              "sell": "ROC_9 < -0.02",
+              "sell": "ROC_9 >= -0.05 and ROC_9 < -0.02",
               "strong_sell": "ROC_9 < -0.05",
               "notes": "Symmetric thresholds; ROC strong zones represent meaningful momentum."
             },
             "12": {
               "strong_buy": "ROC_12 > 0.07",
-              "buy": "ROC_12 > 0.03",
+              "buy": "ROC_12 > 0.03 and ROC_12 <= 0.07",
               "neutral": "-0.03 <= ROC_12 <= 0.03",
-              "sell": "ROC_12 < -0.03",
+              "sell": "ROC_12 >= -0.07 and ROC_12 < -0.03",
               "strong_sell": "ROC_12 < -0.07",
               "notes": "Longer ROC slightly larger thresholds."
             },
             "14": {
               "strong_buy": "ROC_14 > 0.07",
-              "buy": "ROC_14 > 0.03",
+              "buy": "ROC_14 > 0.03 and ROC_14 <= 0.07",
               "neutral": "-0.03 <= ROC_14 <= 0.03",
-              "sell": "ROC_14 < -0.03",
+              "sell": "ROC_14 >= -0.07 and ROC_14 < -0.03",
               "strong_sell": "ROC_14 < -0.07",
               "notes": "Measures the momentum of price changes. Compares the current price to a price 'n' periods ago."
             },
             "20": {
               "strong_buy": "ROC_20 > 0.07",
-              "buy": "ROC_20 > 0.03",
+              "buy": "ROC_20 > 0.03 and ROC_20 <= 0.07",
               "neutral": "-0.03 <= ROC_20 <= 0.03",
-              "sell": "ROC_20 < -0.03",
+              "sell": "ROC_20 >= -0.07 and ROC_20 < -0.03",
               "strong_sell": "ROC_20 < -0.07",
               "notes": "Longer ROC slightly larger thresholds."
             },
             "50": {
               "strong_buy": "ROC_50 > 0.10",
-              "buy": "ROC_50 > 0.05",
+              "buy": "ROC_50 > 0.05 and ROC_50 <= 0.10",
               "neutral": "-0.05 <= ROC_50 <= 0.05",
-              "sell": "ROC_50 < -0.05",
+              "sell": "ROC_50 >= -0.10 and ROC_50 < -0.05",
               "strong_sell": "ROC_50 < -0.10",
               "notes": "Long ROC smooths momentum widen bands."
             }

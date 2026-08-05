@@ -4872,6 +4872,7 @@ def _build_scd_hover_customdata(
         "delta_pct_suffix",
         "delta_line",
         "trend_line",
+        "alignment_line",
         "adx_context_block",
         "signal_line",
         "macd_context_block",
@@ -4973,6 +4974,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
         "%{customdata.trend_line}"
+        "%{customdata.alignment_line}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
@@ -5296,6 +5298,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.crossover_context_block}"
             "%{customdata.single_combined_delta_line}"
             "%{customdata.single_combined_trend_line}"
+            "%{customdata.alignment_line}"
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
             "%{customdata.signal_line}"
@@ -5633,11 +5636,12 @@ def _get_scd_single_chart_hover_fields(
     if (
         not _is_scd_crossover_event_row(row_key)
         and isinstance(indicator_cd, dict)
-        and indicator_cd.get("delta_abs_fmt")
+        and indicator_cd.get("delta_line")
     ):
         indicator_delta_line = (
-            f"{indicator_cd.get('delta_abs_fmt', '')}"
-            f"{indicator_cd.get('delta_pct_suffix', '')}"
+            str(indicator_cd.get("delta_line", ""))
+            .removeprefix("Δ vs prior day: ")
+            .removesuffix("<br>")
         )
     else:
         try:
@@ -5703,6 +5707,13 @@ def _get_scd_single_chart_hover_fields(
             f"{price_cd.get('delta_pct_suffix', '')}"
         )
 
+    alignment_line = ""
+
+    if isinstance(indicator_cd, dict):
+        alignment_line = str(
+            indicator_cd.get("alignment_line", "")
+        )
+
     return [
         str(date_key),
         _format_scd_heatmap_text(row_key, cell),
@@ -5711,6 +5722,7 @@ def _get_scd_single_chart_hover_fields(
         price_value,
         price_delta,
         indicator_delta_line,
+        alignment_line,
     ]
 
 
@@ -5803,6 +5815,7 @@ def _build_scd_single_indicator_chart_figure(
                     "Date: %{customdata[0]}<br>"
                     f"{row_label}: %{{customdata[1]}}<br>"
                     "Δ vs prior day: %{customdata[6]}<br>"
+                    "%{customdata[7]}"
                     f"Chart value ({resolved_mode}): %{{customdata[3]:.2f}}<br>"
                     "Signal: %{customdata[2]}<br>"
                     "Price: %{customdata[4]}<br>"
