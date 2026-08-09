@@ -193,6 +193,49 @@ def not_falling_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
     return ~falling_2bar(series, bars)
 
 
+def not_falling_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
+    """
+    True where `series` is not strictly falling across the requested bars.
+
+    This is the elementwise Boolean complement of falling_2bar().
+    It exists because the expression engine's scalar `not` operator cannot
+    safely negate a pandas Series.
+    """
+    return ~falling_2bar(series, bars)
+
+
+def count_below(series: pd.Series, threshold: float, bars: int) -> pd.Series:
+    """
+    Count observations below `threshold` across the current row and the
+    preceding `bars - 1` rows. A full valid window is required; incomplete
+    windows return 0 so persistence rules cannot mature prematurely.
+    """
+    if bars < 1:
+        raise ValueError("bars must be >= 1")
+
+    numeric = pd.to_numeric(series, errors="coerce")
+
+    valid_count = (
+        numeric.notna()
+        .astype(int)
+        .rolling(window=bars, min_periods=bars)
+        .sum()
+    )
+
+    below_count = (
+        (numeric < threshold)
+        .astype(int)
+        .rolling(window=bars, min_periods=bars)
+        .sum()
+    )
+
+    return (
+        below_count
+        .where(valid_count == bars, 0)
+        .astype(int)
+    )
+
+
 class ExpressionEngine:
     """
     High-level wrapper around SafeExpressionEvaluator.
@@ -209,6 +252,7 @@ class ExpressionEngine:
             "falling_2bar": falling_2bar,
             "not_rising_2bar": not_rising_2bar,
             "not_falling_2bar": not_falling_2bar,
+            "count_below": count_below,
             "abs": abs,
         }
 

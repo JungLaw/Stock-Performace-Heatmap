@@ -320,7 +320,7 @@ class SignalEngine:
         else:
             signal_series = pd.Series("neutral", index=df.index, dtype="object")
 
-        # RSI, MFI, and ROC are classified only where their
+        # RSI, MFI, ROC and Williams %R are classified only where their
         # parameter-specific numeric values are initialized. Capture that
         # validity state before evaluating the rule block, then restore
         # missing observations before returning.
@@ -334,6 +334,7 @@ class SignalEngine:
             "RSI": "RSI",
             "MFI": "MFI",
             "ROC": "ROC",
+            "Williams_R": "WILLR",
         }
 
         value_prefix = parameterized_value_prefixes.get(indicator_name)
@@ -426,8 +427,9 @@ class SignalEngine:
             signal_series[mask.astype(bool)] = label
 
         # The ordinary continuous-indicator path begins with "neutral".
-        # Restore uninitialized RSI/MFI observations to missing so they are
-        # not misrepresented as valid Neutral / 0 classifications.
+        # Restore uninitialized parameterized-indicator observations to
+        # missing so they are not misrepresented as valid Neutral / 0
+        # classifications.
         if indicator_missing_mask is not None:
             signal_series.loc[indicator_missing_mask] = pd.NA
 

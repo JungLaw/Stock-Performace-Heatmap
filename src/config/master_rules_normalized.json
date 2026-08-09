@@ -759,12 +759,12 @@
               "notes": "Inverse of Stoch logic. Neutral = 55 to 45."
             },
             "14": {
-              "strong_buy": "WILLR_14 > -40 and rising_2bar(WILLR_14)",
-              "buy": "WILLR_14 > -55",
-              "neutral": "-55 <= WILLR_14 <= -45",
-              "sell": "WILLR_14 < -45",
-              "strong_sell": "WILLR_14 < -60 and falling_2bar(WILLR_14)",
-              "notes": "Most stable version of %R."
+              "strong_buy": "WILLR_14 < -90 and count_below(WILLR_14, -90, 4) >= 3",
+              "buy": "(WILLR_14 < -97 or count_below(WILLR_14, -90, 2) >= 2) and count_below(WILLR_14, -90, 4) < 3",
+              "neutral": "(WILLR_14 >= -90 and WILLR_14 < -7) or (WILLR_14 >= -97 and WILLR_14 < -90 and count_below(WILLR_14, -90, 2) < 2 and count_below(WILLR_14, -90, 4) < 3)",
+              "sell": "WILLR_14 >= -7",
+              "strong_sell": "WILLR_14 >= -5 and falling_2bar(WILLR_14, 1)",
+              "notes": "WILLR(14): Strong Buy requires 3 of the last 4 observations below -90; Buy captures either an extreme reading below -97 or 2 consecutive observations below -90 before Strong Buy persistence matures; >= -7 Sell; >= -5 rollover Strong Sell."
             },
             "20": {
               "strong_buy": "WILLR_20 > -40 and rising_2bar(WILLR_20)",
