@@ -1,5 +1,5 @@
 {
-  "version": "0.2.11",
+  "version": "0.2.12",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -751,12 +751,12 @@
         "feature_scopes": {
           "heatmap": {
             "5": {
-              "strong_buy": "WILLR_5 > -40 and rising_2bar(WILLR_5)",
-              "buy": "WILLR_5 > -55",
-              "neutral": "-55 <= WILLR_5 <= -45",
-              "sell": "WILLR_5 < -45",
-              "strong_sell": "WILLR_5 < -60 and falling_2bar(WILLR_5)",
-              "notes": "Inverse of Stoch logic. Neutral = 55 to 45."
+              "strong_buy": "WILLR_5 <= -97",
+              "buy": "WILLR_5 > -97 and WILLR_5 <= -95",
+              "neutral": "WILLR_5 > -95 and WILLR_5 < -5",
+              "sell": "WILLR_5 >= -5",
+              "strong_sell": "WILLR_5 >= -5 and falling_2bar(WILLR_5, 1)",
+              "notes": "WILLR(5): short-term contrarian extremes; <= -97 Strong Buy; -97 to -95 Buy; >= -5 Sell; >= -5 with rollover Strong Sell."
             },
             "14": {
               "strong_buy": "WILLR_14 < -90 and count_below(WILLR_14, -90, 4) >= 3",
@@ -767,12 +767,12 @@
               "notes": "WILLR(14): Strong Buy requires 3 of the last 4 observations below -90; Buy captures either an extreme reading below -97 or 2 consecutive observations below -90 before Strong Buy persistence matures; >= -7 Sell; >= -5 rollover Strong Sell."
             },
             "20": {
-              "strong_buy": "WILLR_20 > -40 and rising_2bar(WILLR_20)",
-              "buy": "WILLR_20 > -55",
-              "neutral": "-55 <= WILLR_20 <= -45",
-              "sell": "WILLR_20 < -45",
-              "strong_sell": "WILLR_20 < -60 and falling_2bar(WILLR_20)",
-              "notes": "Longer smoothing reduces noise significantly."
+              "strong_buy": "WILLR_20 < -99.9 or (WILLR_20 < -90 and count_below(WILLR_20, -90, 4) >= 3)",
+              "buy": "WILLR_20 < -85 and count_below(WILLR_20, -85, 2) >= 2 and WILLR_20 >= -99.9 and (WILLR_20 >= -90 or count_below(WILLR_20, -90, 4) < 3)",
+              "neutral": "(WILLR_20 >= -85 and WILLR_20 < -10) or (WILLR_20 < -85 and WILLR_20 >= -99.9 and count_below(WILLR_20, -85, 2) < 2 and (WILLR_20 >= -90 or count_below(WILLR_20, -90, 4) < 3))",
+              "sell": "WILLR_20 >= -10",
+              "strong_sell": "WILLR_20 >= -5 and falling_2bar(WILLR_20, 1)",
+              "notes": "WILLR(20): slower contrarian extremes; < -99.9 is an immediate extreme-floor Strong Buy override; otherwise persistence confirms oversold Buy/Strong Buy; >= -10 Sell; >= -5 with rollover Strong Sell."
             }
           },
           "overlay": {
