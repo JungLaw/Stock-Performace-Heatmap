@@ -1,4 +1,4 @@
-# Summary: EMA(20) 'Signals'
+## Summary: EMA(20) 'Signals'
 Status: A
 
 | Signal        | Layman’s translation                                                              | Literal trigger                                                       | Rule logic                                                                                                                |
@@ -10,7 +10,7 @@ Status: A
 | `strong_sell` | Price is below a 20-period EMA that is clearly and recently falling.              | `Close < EMA_20`, `EMA_20_slope < -0.002`, and `falling_2bar(EMA_20)` | Price is below EMA(20), the EMA(20) slope is meaningfully negative, and EMA(20) is falling across the recent 2-bar check. |
 
 ---
-# EMA(20) — brief overview
+## EMA(20) — brief overview
 
 For `EMA(20)`:
 
@@ -40,15 +40,15 @@ EMA is often paired with trend-strength or momentum tools such as ADX or RSI for
 * **SMA(50) or EMA(50)** — to compare the short/intermediate EMA(20) posture against a slower medium-term trend baseline.
 
 ---
-# EMA(20) Rule Translation
+## EMA(20) Rule Translation
 
-## Strong buy
+### Strong buy
 
 ```json
 "strong_buy": "Close > EMA_20 and EMA_20_slope > 0.002 and rising_2bar(EMA_20)"
 ```
 
-### Literal component breakdown
+#### Literal component breakdown
 
 `Close > EMA_20`
 
@@ -67,15 +67,15 @@ EMA is often paired with trend-strength or momentum tools such as ADX or RSI for
 * In daily data, this means EMA(20) has moved upward over the recent 2-trading-day comparison.
 * Layman’s translation: **the 20-period EMA has also been rising recently.**
 
-### Literal summary
+#### Literal summary
 
 Price is above EMA(20), EMA(20)’s slope is meaningfully positive, and EMA(20) is rising across the recent 2-bar check.
 
-### Plain-English version
+#### Plain-English version
 
 That means price must be above the 20-period EMA, the 20-period EMA must be rising meaningfully, and the 20-period EMA must also be rising recently.
 
-### Interpretation
+#### Interpretation
 
 This is a **strong bullish short-to-intermediate trend confirmation** signal.
 
@@ -85,20 +85,20 @@ It requires three layers of confirmation:
 2. the EMA(20) line is meaningfully rising;
 3. the EMA(20) line has also been rising recently.
 
-### Notes / confidence
+#### Notes / confidence
 * High confidence on the literal interpretation.
 * `0.002` is a project-calibrated raw slope threshold, not a universal EMA standard.
 * EMA(20) is more responsive than SMA(20), so strong signals may appear earlier than an SMA-based signal, but may also be more sensitive to short-term noise.
 
 ---
 
-## Buy
+### Buy
 
 ```json
 "buy": "Close > EMA_20 and EMA_20_slope > 0"
 ```
 
-### Literal component breakdown
+#### Literal component breakdown
 
 `Close > EMA_20`
 
@@ -111,33 +111,33 @@ It requires three layers of confirmation:
 * This means EMA(20) is rising, even if it is not rising strongly enough to qualify as `strong_buy`.
 * Layman’s translation: **the 20-period EMA must be rising.**
 
-### Literal summary
+#### Literal summary
 
 Price is above EMA(20), and EMA(20)’s slope is positive.
 
-### Plain-English version
+#### Plain-English version
 
 That means price must be above the 20-period EMA **and** the 20-period EMA must be rising.
 
-### Interpretation
+#### Interpretation
 
 This is a **bullish short-to-intermediate trend confirmation** signal.
 
 It is stricter than simply saying “price is above EMA(20).” It also requires the EMA(20) line itself to be moving upward.
 
-### Notes / confidence
+#### Notes / confidence
 * This avoids labeling price as bullish if price is above a flat or falling EMA(20).
 * That matters because a price sitting above a falling EMA can be a temporary bounce rather than a confirmed improving trend.
 
 ---
 
-## Neutral
+### Neutral
 
 ```json
 "neutral": "abs(Close/EMA_20 - 1) * 100 <= (0.50 * ATRP_20)"
 ```
 
-### Literal component breakdown
+#### Literal component breakdown
 
 `Close/EMA_20`
 
@@ -181,33 +181,33 @@ It is stricter than simply saying “price is above EMA(20).” It also requires
 * Price is neutral if its percent distance from EMA(20) is no more than half of ATRP(20).
 * Layman’s translation: **if price is no farther from EMA(20) than half of the stock’s typical 20-period price movement range, treat it as close enough to EMA(20) that the signal is neutral.**
 
-### Literal summary
+#### Literal summary
 
 Price is within one-half of an ATRP(20)-sized percentage distance from EMA(20).
 
-### Plain-English version
+#### Plain-English version
 
 That means price is close enough to the 20-period EMA that the rule treats the difference as noise rather than a clear bullish or bearish signal.
 
-### Interpretation
+#### Interpretation
 
 This is a **short-to-intermediate trend transition / noise-band rule**.
 
 It does not say the stock has no trend in every sense. It says that, for this EMA(20) signal, price is close enough to EMA(20) that the rule avoids calling the move clearly bullish or clearly bearish.
 
-### Notes / confidence
+#### Notes / confidence
 * The `0.50 × ATRP_20` setting fits the daily-swing / short-to-intermediate EMA use case: wide enough to avoid tiny whipsaws, but not so wide that it suppresses valid buy/sell signals.
 * The industry-consistent analogy is a moving-average envelope: a moving average is used as the baseline, and bands around it help avoid treating tiny crosses as meaningful signals. Moving-average envelopes are commonly placed above and below moving averages; similar channel indicators vary band width using volatility.
 
 ---
 
-## Sell
+### Sell
 
 ```json
 "sell": "Close < EMA_20 and EMA_20_slope < 0"
 ```
 
-### Literal component breakdown
+#### Literal component breakdown
 
 `Close < EMA_20`
 
@@ -220,32 +220,32 @@ It does not say the stock has no trend in every sense. It says that, for this EM
 * This means EMA(20) is falling.
 * Layman’s translation: **the 20-period EMA must be falling.**
 
-### Literal summary
+#### Literal summary
 
 Price is below EMA(20), and EMA(20)’s slope is negative.
 
-### Plain-English version
+#### Plain-English version
 
 That means price must be below the 20-period EMA **and** the 20-period EMA must be falling.
 
-### Interpretation
+#### Interpretation
 
 This is a **bearish short-to-intermediate trend confirmation** signal.
 
 It is stricter than simply saying “price is below EMA(20).” It also requires the EMA(20) line itself to be weakening.
 
-### Notes / confidence
+#### Notes / confidence
 * This avoids labeling price as bearish if price is below a still-rising EMA(20), which could be a short-term pullback rather than a confirmed trend deterioration.
 
 ---
 
-## Strong sell
+### Strong sell
 
 ```json
 "strong_sell": "Close < EMA_20 and EMA_20_slope < -0.002 and falling_2bar(EMA_20)"
 ```
 
-### Literal component breakdown
+#### Literal component breakdown
 
 `Close < EMA_20`
 
@@ -264,15 +264,15 @@ It is stricter than simply saying “price is below EMA(20).” It also requires
 * In daily data, this means EMA(20) has moved downward over the recent 2-trading-day comparison.
 * Layman’s translation: **the 20-period EMA has also been falling recently.**
 
-### Literal summary
+#### Literal summary
 
 Price is below EMA(20), EMA(20)’s slope is meaningfully negative, and EMA(20) is falling across the recent 2-bar check.
 
-### Plain-English version
+#### Plain-English version
 
 That means price must be below the 20-period EMA, the 20-period EMA must be falling meaningfully, and the 20-period EMA must also be falling recently.
 
-### Interpretation
+#### Interpretation
 
 This is a **strong bearish short-to-intermediate trend confirmation** signal.
 
@@ -281,13 +281,13 @@ It requires three layers of bearish confirmation:
 2. the EMA(20) line is meaningfully falling;
 3. the EMA(20) line has also been falling recently.
 
-### Notes / confidence
+#### Notes / confidence
 * `-0.002` is project-calibrated.
 * EMA(20) is more responsive than SMA(20), so strong sell signals may appear earlier than an SMA-based signal, but may also be more sensitive to short-term noise.
 
 
 ---
-# Industry-standard Baseline
+## Industry-standard Baseline
 
 Industry usage usually does **not** define a formal five-level EMA(20) scale.
 The simpler industry pattern is:
