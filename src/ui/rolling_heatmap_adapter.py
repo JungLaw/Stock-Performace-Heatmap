@@ -409,8 +409,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW_ST": {
         "display_name": "BB Bandwidth(ST)",
-        "definition": "Bollinger Bandwidth using Bollinger(10,1.5). Measures short-term band width relative to the middle band.",
-        "how_to_read": "Short-term Bollinger width measure. Higher values mean wider short-term bands; lower values mean tighter short-term bands.",
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
+        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>4.20 | Normal | Stable → relatively narrow value, but normal for this ticker; little change.<br>18.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
     },
     "BB_PCT_B": {
         "display_name": "BB %B",
@@ -419,8 +419,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW": {
         "display_name": "BB Bandwidth",
-        "definition": "Bollinger Bandwidth measures the width of the Bollinger Bands relative to the middle band.",
-        "how_to_read": "Canonical medium-term Bollinger bandwidth using Bollinger(20,2.0). Higher values mean wider bands; lower values mean tighter bands.",
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
+        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>4.20 | Normal | Stable → relatively narrow value, but normal for this ticker; little change.<br>25.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
     },
     "BB_PCT_B_LT": {
         "display_name": "BB %B(LT)",
@@ -429,9 +429,9 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW_LT": {
         "display_name": "BB Bandwidth(LT)",
-        "definition": "Bollinger Bandwidth using Bollinger(50,2.5). Measures LT band width relative to the middle band.",
-        "how_to_read": "Long-term Bollinger width measure. Higher values mean wider long-term bands; lower values mean tighter long-term bands.",
-    },    
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
+        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>8.00 | Normal | Stable → moderate value, but normal for this ticker; little change.<br>42.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
+    },
     # Volatility / risk calibration
     "ATR_5": {
         "display_name": "ATR (5)",
@@ -2461,6 +2461,16 @@ def build_plotly_heatmap_inputs(
             score_label = score_to_label(s)
 
             rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
+
+            # BB_BW no longer inherits the parent Bollinger directional rule.
+            # Its score is Neutral / 0 by upstream semantic contract, so the
+            # legacy Bollinger price-position rule must not be presented as
+            # though it caused the BB_BW score.
+            if key.startswith("BB_BW"):
+                rule_expr = ""
+                rule_notes = ""
+                rule_text = ""
+
             definition = defs.get(key, {}).get("definition", "")
             how_to_read = defs.get(key, {}).get("how_to_read", "")
 
@@ -2470,6 +2480,7 @@ def build_plotly_heatmap_inputs(
             bullbear_context_block = ""
             dpo_context_block = ""
             band_context_block = ""
+            bb_bw_context_block = ""
             ma_context_block = ""
             adx_context_block = ""
             crossover_context_block = ""
@@ -2998,6 +3009,29 @@ def build_plotly_heatmap_inputs(
                 )
                 delta_unit_suffix = ""
 
+            elif key.startswith("BB_BW"):
+                bb_bw_delta_display = (
+                    delta_abs * 100.0
+                    if delta_abs is not None
+                    else None
+                )
+
+                delta_abs_fmt = format_signed_number(
+                    bb_bw_delta_display,
+                    decimals=2,
+                )
+                delta_pct_suffix = (
+                    " ("
+                    + format_signed_percent(
+                        delta_pct,
+                        decimals=2,
+                    )
+                    + ")"
+                    if delta_pct is not None
+                    else ""
+                )
+                delta_unit_suffix = ""
+
             elif key.startswith("ROC_"):
                 roc_delta_display = (
                     delta_abs * 100.0
@@ -3254,6 +3288,34 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     band_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
+                # Standalone BB_BW semantic context comes directly from the
+                # upstream rolling payload. Do not recompute percentile/state
+                # or direction in the adapter.
+                if key.startswith("BB_BW"):
+                    semantic_parts = []
+
+                    volatility_state = extra_map.get(
+                        "volatility_state"
+                    )
+                    bandwidth_direction = extra_map.get(
+                        "bandwidth_direction"
+                    )
+
+                    if not _is_missing(volatility_state):
+                        semantic_parts.append(
+                            f"Volatility State: {volatility_state}"
+                        )
+
+                    if not _is_missing(bandwidth_direction):
+                        semantic_parts.append(
+                            f"Bandwidth Direction: {bandwidth_direction}"
+                        )
+
+                    if semantic_parts:
+                        bb_bw_context_block = (
+                            "<br>".join(semantic_parts) + "<br>"
+                        )
+
             # MVA: Custom hover content (deltas)
             if (
                 not _is_crossover_key(key)
@@ -3329,6 +3391,7 @@ def build_plotly_heatmap_inputs(
                     "delta_pct_suffix": delta_pct_suffix,
                     "delta_line": delta_line,
                     "trend_line": trend_line,
+                    "bb_bw_context_block": bb_bw_context_block,
                     "alignment_line": alignment_line,
                     "signal_line": signal_line,
                     "rule_block": rule_block,
@@ -3393,6 +3456,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
         "%{customdata.trend_line}"
+        "%{customdata.bb_bw_context_block}"
         "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"

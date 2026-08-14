@@ -828,9 +828,260 @@ class DatabaseIntegratedTechnicalCalculator:
 
         return indicators
 
+    @staticmethod
+    def _rolling_midrank_percentile(
+        series: pd.Series,
+        lookback: int,
+    ) -> pd.Series:
+        """
+        Return the rolling percentile rank of the current observation within
+        its own trailing history using the midrank convention.
+
+        Percentile =
+            (# observations below current
+             + 0.5 * # observations equal to current)
+            / lookback
+
+        A complete valid lookback is required. Incomplete or invalid windows
+        remain NaN.
+        """
+        s = pd.to_numeric(series, errors="coerce").astype("float64")
+
+        def _rank_current(values: np.ndarray) -> float:
+            arr = np.asarray(values, dtype="float64")
+
+            if arr.size != lookback or np.isnan(arr).any():
+                return np.nan
+
+            current = arr[-1]
+            lower = np.sum(arr < current)
+            equal = np.sum(arr == current)
+
+            return float((lower + 0.5 * equal) / arr.size)
+
+        return s.rolling(
+            window=lookback,
+            min_periods=lookback,
+        ).apply(
+            _rank_current,
+            raw=True,
+        )
+
+    @staticmethod
+    def _classify_bb_bw_state(
+        percentile: pd.Series,
+        boundaries: Tuple[float, float, float, float],
+    ) -> pd.Series:
+        """
+        Classify an initialized BB_BW historical percentile into the approved
+        five-state volatility vocabulary.
+
+        Boundary equality is intentional:
+          p < p1            -> Very Compressed
+          p1 <= p < p2      -> Compressed
+          p2 <= p <= p3     -> Normal
+          p3 < p <= p4      -> Expanded
+          p > p4            -> Very Expanded
+        """
+        p1, p2, p3, p4 = boundaries
+
+        out = pd.Series(
+            pd.NA,
+            index=percentile.index,
+            dtype="object",
+        )
+
+        valid = percentile.notna()
+
+        out.loc[
+            valid & (percentile < p1)
+        ] = "Very Compressed"
+
+        out.loc[
+            valid
+            & (percentile >= p1)
+            & (percentile < p2)
+        ] = "Compressed"
+
+        out.loc[
+            valid
+            & (percentile >= p2)
+            & (percentile <= p3)
+        ] = "Normal"
+
+        out.loc[
+            valid
+            & (percentile > p3)
+            & (percentile <= p4)
+        ] = "Expanded"
+
+        out.loc[
+            valid & (percentile > p4)
+        ] = "Very Expanded"
+
+        return out
+
+    @staticmethod
+    def _classify_bb_bw_direction(
+        series: pd.Series,
+        tolerance: float,
+    ) -> Tuple[pd.Series, pd.Series]:
+        """
+        Classify one-bar BB_BW direction from raw fractional Bandwidth.
+
+        Relative change =
+            current_BB_BW / prior_BB_BW - 1
+
+        Direction:
+          change > +tolerance -> Expanding
+          change < -tolerance -> Contracting
+          otherwise           -> Stable
+
+        Exact +/- tolerance is Stable. Direction remains missing when either
+        the current or prior BB_BW observation is unavailable.
+
+        Returns:
+            (relative_change, direction)
+        """
+        s = pd.to_numeric(series, errors="coerce").astype("float64")
+        prior = s.shift(1)
+
+        relative_change = (s / prior) - 1.0
+        relative_change = relative_change.replace(
+            [np.inf, -np.inf],
+            np.nan,
+        )
+
+        direction = pd.Series(
+            pd.NA,
+            index=s.index,
+            dtype="object",
+        )
+
+        valid = (
+            s.notna()
+            & prior.notna()
+            & relative_change.notna()
+        )
+
+        # Treat floating-point representations of the exact +/- tolerance
+        # boundaries as equal to the boundary. This preserves the approved
+        # semantic contract that exact threshold values are Stable.
+        at_upper_boundary = pd.Series(
+            np.isclose(
+                relative_change.to_numpy(dtype="float64"),
+                tolerance,
+                rtol=1e-12,
+                atol=1e-12,
+            ),
+            index=relative_change.index,
+        )
+
+        at_lower_boundary = pd.Series(
+            np.isclose(
+                relative_change.to_numpy(dtype="float64"),
+                -tolerance,
+                rtol=1e-12,
+                atol=1e-12,
+            ),
+            index=relative_change.index,
+        )
+
+        expanding = (
+            valid
+            & (relative_change > tolerance)
+            & ~at_upper_boundary
+        )
+
+        contracting = (
+            valid
+            & (relative_change < -tolerance)
+            & ~at_lower_boundary
+        )
+
+        stable = (
+            valid
+            & ~expanding
+            & ~contracting
+        )
+
+        direction.loc[expanding] = "Expanding"
+        direction.loc[contracting] = "Contracting"
+        direction.loc[stable] = "Stable"
+
+        return relative_change, direction
+
+    def _build_bb_bw_semantic_context(
+        self,
+        df_ind: pd.DataFrame,
+        optionc_meta: list[dict[str, Any]],
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """
+        Build full-history semantic context for configured BB_BW rows.
+
+        The returned series remain aligned to the full chronological indicator
+        dataframe. Visible-date subsetting happens later in the rolling payload
+        builder.
+
+        Context is keyed by BB_BW display key and contains:
+          - percentile
+          - relative_change
+          - volatility_state
+          - bandwidth_direction
+        """
+        context: Dict[str, Dict[str, pd.Series]] = {}
+
+        if df_ind is None or df_ind.empty:
+            return context
+
+        for meta in optionc_meta:
+            if "bb_bw_lookback" not in meta:
+                continue
+
+            display_key = meta["display_key"]
+            value_col = meta["value_col"]
+
+            if value_col not in df_ind.columns:
+                continue
+
+            lookback = int(meta["bb_bw_lookback"])
+            boundaries = tuple(meta["bb_bw_state_boundaries"])
+            tolerance = float(meta["bb_bw_direction_tolerance"])
+
+            bandwidth = pd.to_numeric(
+                df_ind[value_col],
+                errors="coerce",
+            ).astype("float64")
+
+            percentile = self._rolling_midrank_percentile(
+                bandwidth,
+                lookback=lookback,
+            )
+
+            volatility_state = self._classify_bb_bw_state(
+                percentile,
+                boundaries=boundaries,
+            )
+
+            relative_change, bandwidth_direction = (
+                self._classify_bb_bw_direction(
+                    bandwidth,
+                    tolerance=tolerance,
+                )
+            )
+
+            context[display_key] = {
+                "percentile": percentile,
+                "relative_change": relative_change,
+                "volatility_state": volatility_state,
+                "bandwidth_direction": bandwidth_direction,
+            }
+
+        return context
+
     def calculate_rule_engine_signals_optionc(
         self,
-        ticker: str,     
+        ticker: str,
         feature_scope: str = "heatmap",
         rules_path: Union[str, Path] = "master_rules_normalized.json",
         save_to_db: bool = False,
@@ -931,7 +1182,7 @@ class DatabaseIntegratedTechnicalCalculator:
         
         return scores
 
-    def _get_optionc_meta(self) -> list[dict[str, str]]:
+    def _get_optionc_meta(self) -> list[dict[str, Any]]:
         """
         Single source of truth for rolling heatmap indicator/param inclusion.
         Used by:
@@ -1066,6 +1317,15 @@ class DatabaseIntegratedTechnicalCalculator:
                     "upper": "BB_10_1.5_upper",
                     "lower": "BB_10_1.5_lower",
                 },
+                "bb_bw_lookback": 60,
+                "bb_bw_state_boundaries": (
+                    0.10,
+                    0.25,
+                    0.75,
+                    0.90,
+                ),
+                "bb_bw_direction_tolerance": 0.03,
+                "directional_score_mode": "neutral",
             },
             {
                 "engine_indicator": "Bollinger",
@@ -1088,7 +1348,16 @@ class DatabaseIntegratedTechnicalCalculator:
                     "upper": "BB_20_2_upper",
                     "lower": "BB_20_2_lower",
                 },
-            },        
+                "bb_bw_lookback": 120,
+                "bb_bw_state_boundaries": (
+                    0.05,
+                    0.15,
+                    0.85,
+                    0.95,
+                ),
+                "bb_bw_direction_tolerance": 0.02,
+                "directional_score_mode": "neutral",
+            },
             {
                 "engine_indicator": "Bollinger",
                 "param_key": "50_2.5",
@@ -1110,6 +1379,15 @@ class DatabaseIntegratedTechnicalCalculator:
                     "upper": "BB_50_2.5_upper",
                     "lower": "BB_50_2.5_lower",
                 },
+                "bb_bw_lookback": 120,
+                "bb_bw_state_boundaries": (
+                    0.05,
+                    0.15,
+                    0.85,
+                    0.95,
+                ),
+                "bb_bw_direction_tolerance": 0.005,
+                "directional_score_mode": "neutral",
             },
             # -------------------------
             # Signals — Crossover Event Signal Rows v1
@@ -1643,6 +1921,19 @@ class DatabaseIntegratedTechnicalCalculator:
 
         df_ind = df_ind.sort_index()
 
+        # Rolling metadata:
+        #   This list controls which indicator/param variants are emitted into the
+        #   rolling heatmap payload. Resolve it before presentation-window subsetting
+        #   because BB_BW semantic context requires full chronological history.
+        optionc_meta = self._get_optionc_meta()
+
+        # BB_BW semantic context must be derived on the complete chronological
+        # indicator history before any visible-date/window reduction.
+        bb_bw_context = self._build_bb_bw_semantic_context(
+            df_ind=df_ind,
+            optionc_meta=optionc_meta,
+        )
+
         # Log line for verifying 'input date' in rolling heatmap
         #  DEBUG: rolling heatmap index alignment
         try:
@@ -1725,12 +2016,6 @@ class DatabaseIntegratedTechnicalCalculator:
 
         score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
 
-        # Rolling metadata:
-        #   This list controls which indicator/param variants are emitted into the rolling
-        #   heatmap payload. The preprocessor may compute more columns than are included
-        #   here; inclusion is controlled deliberately to stage onboarding.
-        optionc_meta = self._get_optionc_meta()
-
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
@@ -1754,39 +2039,60 @@ class DatabaseIntegratedTechnicalCalculator:
                         except (TypeError, ValueError):
                             value = None
 
-                series_dict = scores.get(eng_name, {})
-                score_series = series_dict.get(param_key)
+                score_mode = meta.get("directional_score_mode")
 
-                # Default path: score-driven row (existing behavior)
-                if score_series is not None and dt in score_series.index:
-                    raw_score = score_series.loc[dt]
-                    if pd.isna(raw_score):
+                # BB_BW is explicitly nondirectional. A valid Bandwidth value
+                # always maps to Neutral / 0 and must not inherit the parent
+                # Bollinger directional score used by %B.
+                if score_mode == "neutral":
+                    if value is None:
                         continue
 
-                    try:
-                        score_int = int(raw_score)
-                    except (TypeError, ValueError):
-                        continue
-
-                    label = score_to_label.get(score_int, "neutral")
-
-                # Display-only fallback: allow rows with raw numeric values
-                # even when semantic score coverage does not exist yet.
-                #
-                # Crossover rows opt out via requires_score=True because they
-                # are event-score rows, not display-only rows. If their score
-                # coverage is missing, they must remain absent rather than
-                # appearing as false neutral cells.
-                elif value is not None and not meta.get("requires_score"):
                     score_int = 0
                     label = "neutral"
 
                 else:
-                    continue
+                    series_dict = scores.get(eng_name, {})
+                    score_series = series_dict.get(param_key)
 
-                # Optional extra numeric fields for richer hover / future UI
-                extras: Dict[str, float] = {}
-                extra_value_cols = meta.get("extra_value_cols") if isinstance(meta, dict) else None
+                    # Default path: score-driven row (existing behavior)
+                    if score_series is not None and dt in score_series.index:
+                        raw_score = score_series.loc[dt]
+                        if pd.isna(raw_score):
+                            continue
+
+                        try:
+                            score_int = int(raw_score)
+                        except (TypeError, ValueError):
+                            continue
+
+                        label = score_to_label.get(score_int, "neutral")
+
+                    # Display-only fallback: allow rows with raw numeric values
+                    # even when semantic score coverage does not exist yet.
+                    #
+                    # Crossover rows opt out via requires_score=True because they
+                    # are event-score rows, not display-only rows. If their score
+                    # coverage is missing, they must remain absent rather than
+                    # appearing as false neutral cells.
+                    elif value is not None and not meta.get("requires_score"):
+                        score_int = 0
+                        label = "neutral"
+
+                    else:
+                        continue
+
+                # Optional typed context for richer hover / downstream UI.
+                # Existing numeric extras remain numeric; BB_BW also carries
+                # upstream semantic state/direction strings.
+                extras: Dict[str, Any] = {}
+
+                extra_value_cols = (
+                    meta.get("extra_value_cols")
+                    if isinstance(meta, dict)
+                    else None
+                )
+
                 if isinstance(extra_value_cols, dict) and dt in df_ind.index:
                     for k, col in extra_value_cols.items():
                         if col in df_ind.columns:
@@ -1796,6 +2102,52 @@ class DatabaseIntegratedTechnicalCalculator:
                                     extras[k] = float(ev)
                                 except (TypeError, ValueError):
                                     pass
+
+                bw_ctx = bb_bw_context.get(display_key)
+
+                if isinstance(bw_ctx, dict):
+                    percentile_series = bw_ctx.get("percentile")
+                    relative_change_series = bw_ctx.get("relative_change")
+                    state_series = bw_ctx.get("volatility_state")
+                    direction_series = bw_ctx.get("bandwidth_direction")
+
+                    if (
+                        isinstance(percentile_series, pd.Series)
+                        and dt in percentile_series.index
+                    ):
+                        raw_percentile = percentile_series.loc[dt]
+                        if not pd.isna(raw_percentile):
+                            extras["bandwidth_percentile"] = float(
+                                raw_percentile
+                            )
+
+                    if (
+                        isinstance(relative_change_series, pd.Series)
+                        and dt in relative_change_series.index
+                    ):
+                        raw_relative_change = relative_change_series.loc[dt]
+                        if not pd.isna(raw_relative_change):
+                            extras["bandwidth_relative_change"] = float(
+                                raw_relative_change
+                            )
+
+                    if (
+                        isinstance(state_series, pd.Series)
+                        and dt in state_series.index
+                    ):
+                        raw_state = state_series.loc[dt]
+                        if not pd.isna(raw_state):
+                            extras["volatility_state"] = str(raw_state)
+
+                    if (
+                        isinstance(direction_series, pd.Series)
+                        and dt in direction_series.index
+                    ):
+                        raw_direction = direction_series.loc[dt]
+                        if not pd.isna(raw_direction):
+                            extras["bandwidth_direction"] = str(
+                                raw_direction
+                            )
 
                 # MACD-specific payload enrichment:
                 # keep histogram as the row value, but expose line/signal for hover.
@@ -1826,7 +2178,19 @@ class DatabaseIntegratedTechnicalCalculator:
 
                 # If extras exist, append them (still readable, no UI changes required)
                 if extras:
-                    extras_str = ", ".join([f"{k}={v:.2f}" for k, v in extras.items()])
+                    extras_parts = []
+
+                    for k, v in extras.items():
+                        if isinstance(v, (int, float, np.number)):
+                            extras_parts.append(
+                                f"{k}={float(v):.2f}"
+                            )
+                        else:
+                            extras_parts.append(
+                                f"{k}={v}"
+                            )
+
+                    extras_str = ", ".join(extras_parts)
                     hover = f"{hover} | {extras_str}"
 
                 cell = {

@@ -4872,6 +4872,7 @@ def _build_scd_hover_customdata(
         "delta_pct_suffix",
         "delta_line",
         "trend_line",
+        "bb_bw_context_block",
         "alignment_line",
         "adx_context_block",
         "signal_line",
@@ -4909,12 +4910,23 @@ def _build_scd_hover_customdata(
     custom["status"] = cell.get("status")
 
     payload_hover = cell.get("hover")
-    custom["scd_payload_hover_block"] = (
-        f"<br>{payload_hover}" if payload_hover else ""
-    )
+
+    # BB_BW already exposes its user-facing information through the
+    # structured adapter hover fields. Suppress the redundant raw payload
+    # summary in SCD so its long diagnostic-style line does not dominate
+    # the Plotly hover geometry.
+    if row_key in {
+        "BB_BW_ST",
+        "BB_BW",
+        "BB_BW_LT",
+    }:
+        custom["scd_payload_hover_block"] = ""
+    else:
+        custom["scd_payload_hover_block"] = (
+            f"<br>{payload_hover}" if payload_hover else ""
+        )
 
     return custom
-
 
 def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     """
@@ -4974,6 +4986,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
         "%{customdata.trend_line}"
+        "%{customdata.bb_bw_context_block}"
         "%{customdata.alignment_line}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
@@ -5298,6 +5311,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.crossover_context_block}"
             "%{customdata.single_combined_delta_line}"
             "%{customdata.single_combined_trend_line}"
+            "%{customdata.bb_bw_context_block}"
             "%{customdata.alignment_line}"
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
