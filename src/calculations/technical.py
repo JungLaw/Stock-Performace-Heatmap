@@ -1,4 +1,3 @@
-# Stamp: Tue, July 7, 2026 11:18 AM
 """
 Database-Integrated Technical Analysis Calculator
 
@@ -2103,7 +2102,49 @@ class DatabaseIntegratedTechnicalCalculator:
                                 except (TypeError, ValueError):
                                     pass
 
-                bw_ctx = bb_bw_context.get(display_key)
+                # Bollinger Bandwidth semantic context:
+                #
+                # - Standalone BB_BW rows consume their own full-history context.
+                # - %B rows consume the already-computed context from the matching
+                #   BB_BW sibling row for hover-only volatility context.
+                #
+                # No percentile/state/direction logic is recomputed here.
+                pct_b_to_bw_key = {
+                    "BB_PCT_B_ST": "BB_BW_ST",
+                    "BB_PCT_B": "BB_BW",
+                    "BB_PCT_B_LT": "BB_BW_LT",
+                }
+
+                bw_context_key = pct_b_to_bw_key.get(
+                    display_key,
+                    display_key,
+                )
+
+                bw_ctx = bb_bw_context.get(bw_context_key)
+
+                # %B hover also receives the matching raw Bandwidth value.
+                if display_key in pct_b_to_bw_key and dt in df_ind.index:
+                    bw_value_cols = {
+                        "BB_PCT_B_ST": "BB_BW_10_1_5",
+                        "BB_PCT_B": "BB_BW",
+                        "BB_PCT_B_LT": "BB_BW_50_2_5",
+                    }
+
+                    bw_value_col = bw_value_cols.get(display_key)
+
+                    if (
+                        bw_value_col is not None
+                        and bw_value_col in df_ind.columns
+                    ):
+                        raw_bandwidth = df_ind.loc[dt, bw_value_col]
+
+                        if not pd.isna(raw_bandwidth):
+                            try:
+                                extras["bandwidth_value"] = float(
+                                    raw_bandwidth
+                                )
+                            except (TypeError, ValueError):
+                                pass
 
                 if isinstance(bw_ctx, dict):
                     percentile_series = bw_ctx.get("percentile")
@@ -2111,25 +2152,29 @@ class DatabaseIntegratedTechnicalCalculator:
                     state_series = bw_ctx.get("volatility_state")
                     direction_series = bw_ctx.get("bandwidth_direction")
 
-                    if (
-                        isinstance(percentile_series, pd.Series)
-                        and dt in percentile_series.index
-                    ):
-                        raw_percentile = percentile_series.loc[dt]
-                        if not pd.isna(raw_percentile):
-                            extras["bandwidth_percentile"] = float(
-                                raw_percentile
-                            )
+                    # Percentile and one-bar relative-change remain owned by
+                    # standalone BB_BW rows. %B consumes only the user-facing
+                    # Bandwidth value/state/direction sibling context.
+                    if display_key.startswith("BB_BW"):
+                        if (
+                            isinstance(percentile_series, pd.Series)
+                            and dt in percentile_series.index
+                        ):
+                            raw_percentile = percentile_series.loc[dt]
+                            if not pd.isna(raw_percentile):
+                                extras["bandwidth_percentile"] = float(
+                                    raw_percentile
+                                )
 
-                    if (
-                        isinstance(relative_change_series, pd.Series)
-                        and dt in relative_change_series.index
-                    ):
-                        raw_relative_change = relative_change_series.loc[dt]
-                        if not pd.isna(raw_relative_change):
-                            extras["bandwidth_relative_change"] = float(
-                                raw_relative_change
-                            )
+                        if (
+                            isinstance(relative_change_series, pd.Series)
+                            and dt in relative_change_series.index
+                        ):
+                            raw_relative_change = relative_change_series.loc[dt]
+                            if not pd.isna(raw_relative_change):
+                                extras["bandwidth_relative_change"] = float(
+                                    raw_relative_change
+                                )
 
                     if (
                         isinstance(state_series, pd.Series)

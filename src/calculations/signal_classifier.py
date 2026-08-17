@@ -1,5 +1,3 @@
-# Stamp: Sun, May 10, 2026 3:11PM
-# signal_classifier.py
 """
 Signal classification and rule-engine evaluation.
 This module implements the rulebook-driven signal engine.
@@ -128,15 +126,21 @@ def _bind_bollinger_context(
     context: Dict[str, Any],
     df: pd.DataFrame,
     param_key: str,
-) -> None:
+) -> Optional[pd.Series]:
     """
     Bind Bollinger rulebook variables to existing dataframe columns.
 
     Rulebook variables:
+      - pct_b  -> parameter-specific BB_PCT_B_<period>_<sigma> series
       - close  -> already handled via Close -> close alias
       - mid    -> BB_<param>_mid
       - std    -> derived from already-computed band geometry:
                   (upper - mid) / sigma
+      - upper  -> BB_<param>_upper
+      - lower  -> BB_<param>_lower
+
+    Returns:
+        The resolved parameter-specific %B Series when available, otherwise None.
 
     This stays within Option F scope because it consumes existing numeric
     columns and only creates semantic-layer aliases for rule evaluation.
@@ -147,6 +151,18 @@ def _bind_bollinger_context(
         mid_col = f"BB_{suffix}_mid"
         upper_col = f"BB_{suffix}_upper"
         lower_col = f"BB_{suffix}_lower"
+
+        # %B column identity uses underscores in place of decimal points:
+        #   10_1.5 -> BB_PCT_B_10_1_5
+        #   20_2.0 -> BB_PCT_B_20_2
+        #   50_2.5 -> BB_PCT_B_50_2_5
+        pct_b_suffix = suffix.replace(".", "_")
+        pct_b_col = f"BB_PCT_B_{pct_b_suffix}"
+
+        pct_b_series: Optional[pd.Series] = None
+        if pct_b_col in df.columns:
+            pct_b_series = df[pct_b_col]
+            context["pct_b"] = pct_b_series
 
         if mid_col in df.columns:
             context["mid"] = df[mid_col]
@@ -161,13 +177,21 @@ def _bind_bollinger_context(
                 except Exception:
                     pass
 
-            # Optional convenience aliases for future diagnostics / hover support
+            # Optional convenience aliases for diagnostics / hover support.
             if upper_col in df.columns:
                 context["upper"] = df[upper_col]
             if lower_col in df.columns:
                 context["lower"] = df[lower_col]
 
-            return
+            return pct_b_series
+
+        # If the parameter-specific %B column resolved even though the
+        # corresponding band aliases did not, preserve the semantic binding
+        # rather than discarding the valid numeric series.
+        if pct_b_series is not None:
+            return pct_b_series
+
+    return None
 
 class SignalEngine:
     """
@@ -371,20 +395,27 @@ class SignalEngine:
                     context[var_name] = df[col_name]
 
         # ------------------------------------------------------------
-        # Option F Wave 1: Bollinger semantic binding
+        # Option F: Bollinger semantic binding
         # Rulebook variables:
-        #   - close  (already satisfied via Close -> close alias above)
+        #   - pct_b  -> parameter-specific Bollinger %B numeric series
+        #   - close  -> already satisfied via Close -> close alias above
         #   - mid
         #   - std
-        # Bind these to existing Bollinger dataframe columns without
-        # reopening numeric computation.
+        #   - upper
+        #   - lower
+        #
+        # The resolved %B series also owns Bollinger warmup validity:
+        # missing %B must remain missing rather than defaulting to Neutral / 0.
         # ------------------------------------------------------------
         if indicator_name == "Bollinger":
-            _bind_bollinger_context(
+            bollinger_pct_b = _bind_bollinger_context(
                 context=context,
                 df=df,
                 param_key=param_key,
             )
+
+            if bollinger_pct_b is not None:
+                indicator_missing_mask = bollinger_pct_b.isna()
 
 #        # ------------------------------------------------------------
 #        # Instance binding (Option D concept): bind rulebook variables

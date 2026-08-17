@@ -1,4 +1,3 @@
-# Stamp: Thu, July 9, 2026 2:25 PM
 # src/ui/rolling_heatmap_adapter.py
 from __future__ import annotations
 
@@ -404,8 +403,19 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_PCT_B_ST": {
         "display_name": "BB %B(ST)",
-        "definition": "Bollinger %B using Bollinger(10,1.5). Shows where price sits within the ST band range.",
-        "how_to_read": "Short-term Bollinger location measure. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+        "definition": (
+            "Bollinger %B shows where price sits relative to the "
+            "Bollinger(10,1.5) bands. 0 = lower band, 50 = middle band, "
+            "and 100 = upper band. Values below 0 or above 100 mean "
+            "price is outside the bands."
+        ),
+        "how_to_read": (
+            "Current-location contrarian exhaustion model.<br>"
+            "<-20: Strong Buy | -20 to <10: Buy | 10–90: Neutral | "
+            ">90 to 120: Sell | >120: Strong Sell.<br>"
+            "Extreme readings indicate price stretch; they do not guarantee "
+            "an immediate reversal."
+        ),
     },
     "BB_BW_ST": {
         "display_name": "BB Bandwidth(ST)",
@@ -414,8 +424,19 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_PCT_B": {
         "display_name": "BB %B",
-        "definition": "Bollinger %B shows where price sits within the Bollinger band range.  A 'location indicactor'. Used for measuring relative price location within the bands (oscillator value).",
-        "how_to_read": "Canonical medium-term Bollinger %B using Bollinger(20,2.0). Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+        "definition": (
+            "Bollinger %B shows where price sits relative to the "
+            "Bollinger(20,2.0) bands. 0 = lower band, 50 = middle band, "
+            "and 100 = upper band. Values below 0 or above 100 mean "
+            "price is outside the bands."
+        ),
+        "how_to_read": (
+            "Current-location contrarian exhaustion model.<br>"
+            "<-10: Strong Buy | -10 to <10: Buy | 10–90: Neutral | "
+            ">90 to 110: Sell | >110: Strong Sell.<br>"
+            "Extreme readings indicate price stretch; they do not guarantee "
+            "an immediate reversal."
+        ),
     },
     "BB_BW": {
         "display_name": "BB Bandwidth",
@@ -424,8 +445,19 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_PCT_B_LT": {
         "display_name": "BB %B(LT)",
-        "definition": "Bollinger %B using Bollinger(50,2.5). Shows where price sits within the long-term band range.",
-        "how_to_read": "Long-term Bollinger location measure. Lower values sit closer to the lower band; higher values sit closer to the upper band.",
+        "definition": (
+            "Bollinger %B shows where price sits relative to the "
+            "Bollinger(50,2.5) bands. 0 = lower band, 50 = middle band, "
+            "and 100 = upper band. Values below 0 or above 100 mean "
+            "price is outside the bands."
+        ),
+        "how_to_read": (
+            "Current-location contrarian exhaustion model.<br>"
+            "<0: Strong Buy | 0 to <10: Buy | 10–90: Neutral | "
+            ">90 to 100: Sell | >100: Strong Sell.<br>"
+            "Extreme readings indicate price stretch; they do not guarantee "
+            "an immediate reversal."
+        ),
     },
     "BB_BW_LT": {
         "display_name": "BB Bandwidth(LT)",
@@ -961,6 +993,90 @@ def should_fallback_to_raw_rule(expr: str) -> bool:
     ]
 
     return any(marker in expr for marker in complex_markers)
+
+
+def _translate_pct_b_rule(expr: str) -> str:
+    """
+    Translate canonical raw-fraction Bollinger %B rules into the same
+    display-scale units shown in heatmap cells.
+
+    Examples:
+      pct_b < -0.20
+          -> %B < -20
+
+      pct_b >= -0.20 and pct_b < 0.10
+          -> -20 <= %B < 10
+
+      pct_b >= 0.10 and pct_b <= 0.90
+          -> 10 <= %B <= 90
+
+    Presentation-only: the thresholds are read from the rulebook expression
+    and multiplied by 100 for display. No rule semantics are changed here.
+    """
+    if not expr:
+        return ""
+
+    import re
+
+    text = str(expr).strip()
+
+    def _display_threshold(raw_value: str) -> str:
+        value = float(raw_value) * 100.0
+
+        if np.isclose(value, round(value)):
+            return str(int(round(value)))
+
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
+
+    single = re.fullmatch(
+        rf"pct_b\s*(<=|>=|<|>)\s*({number})",
+        text,
+    )
+
+    if single:
+        operator, raw_value = single.groups()
+
+        display_value = _display_threshold(raw_value)
+
+        display_operator = {
+            "<": "<",
+            "<=": "<=",
+            ">": ">",
+            ">=": ">=",
+        }[operator]
+
+        return f"%B {display_operator} {display_value}"
+
+    compound = re.fullmatch(
+        rf"pct_b\s*(<=|>=|<|>)\s*({number})"
+        rf"\s+and\s+"
+        rf"pct_b\s*(<=|>=|<|>)\s*({number})",
+        text,
+    )
+
+    if compound:
+        op1, raw1, op2, raw2 = compound.groups()
+
+        value1 = _display_threshold(raw1)
+        value2 = _display_threshold(raw2)
+
+        # Canonical %B interval form:
+        # pct_b >= lower and pct_b < upper
+        # pct_b >= lower and pct_b <= upper
+        if op1 in {">", ">="} and op2 in {"<", "<="}:
+            lower_op = "<" if op1 == ">" else "<="
+            upper_op = op2
+
+            return (
+                f"{value1} {lower_op} %B "
+                f"{upper_op} {value2}"
+            )
+
+    # Fail safely: preserve the exact source expression if an unexpected
+    # future %B rule shape is introduced.
+    return text
 
 
 def translate_rule_text(expr: str) -> str:
@@ -2171,11 +2287,19 @@ def build_plotly_heatmap_inputs(
             rule_notes = str(rule_block.get("notes", "") or "")
 
             if rule_expr:
-                if should_fallback_to_raw_rule(rule_expr):
+                if indicator_key.startswith("BB_PCT_B"):
+                    # %B is stored/rule-scored in raw fractional units but
+                    # displayed to users on a ×100 scale. Translate directly
+                    # from the rulebook expression so hover thresholds match
+                    # the displayed %B value without duplicating rule truth.
+                    rule_text = _translate_pct_b_rule(rule_expr)
+
+                elif should_fallback_to_raw_rule(rule_expr):
                     # Keep complex expressions raw to preserve readability and accuracy.
                     # Token normalization / helper cleanup will still be handled in the
                     # translator path for simpler rules only.
                     rule_text = rule_expr
+
                 else:
                     rule_text = translate_rule_text(rule_expr)
             else:
@@ -3288,10 +3412,14 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     band_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-                # Standalone BB_BW semantic context comes directly from the
-                # upstream rolling payload. Do not recompute percentile/state
-                # or direction in the adapter.
-                if key.startswith("BB_BW"):
+                # Bollinger Bandwidth semantic context comes directly from the
+                # upstream rolling payload. Do not recompute Bandwidth state,
+                # percentile, or direction in the adapter.
+                #
+                # Standalone BB_BW rows show their own State/Direction.
+                # %B rows additionally show the matching sibling Bandwidth value
+                # transported upstream by technical.py.
+                if key.startswith("BB_BW") or key.startswith("BB_PCT_B"):
                     semantic_parts = []
 
                     volatility_state = extra_map.get(
@@ -3300,6 +3428,22 @@ def build_plotly_heatmap_inputs(
                     bandwidth_direction = extra_map.get(
                         "bandwidth_direction"
                     )
+
+                    if key.startswith("BB_PCT_B"):
+                        bandwidth_value = extra_map.get(
+                            "bandwidth_value"
+                        )
+
+                        if not _is_missing(bandwidth_value):
+                            try:
+                                bandwidth_display = (
+                                    float(bandwidth_value) * 100.0
+                                )
+                                semantic_parts.append(
+                                    f"Bandwidth: {bandwidth_display:.2f}"
+                                )
+                            except (TypeError, ValueError):
+                                pass
 
                     if not _is_missing(volatility_state):
                         semantic_parts.append(

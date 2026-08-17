@@ -4911,11 +4911,14 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # BB_BW already exposes its user-facing information through the
-    # structured adapter hover fields. Suppress the redundant raw payload
-    # summary in SCD so its long diagnostic-style line does not dominate
-    # the Plotly hover geometry.
+    # Bollinger %B and BB_BW already expose their user-facing information
+    # through structured adapter hover fields. Suppress the redundant raw
+    # payload summary in SCD so the diagnostic-style payload line does not
+    # duplicate Value / Bandwidth / band context or dominate hover geometry.
     if row_key in {
+        "BB_PCT_B_ST",
+        "BB_PCT_B",
+        "BB_PCT_B_LT",
         "BB_BW_ST",
         "BB_BW",
         "BB_BW_LT",
