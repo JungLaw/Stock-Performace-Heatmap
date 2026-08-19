@@ -4911,18 +4911,23 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger %B and BB_BW already expose their user-facing information
-    # through structured adapter hover fields. Suppress the redundant raw
-    # payload summary in SCD so the diagnostic-style payload line does not
-    # duplicate Value / Bandwidth / band context or dominate hover geometry.
-    if row_key in {
-        "BB_PCT_B_ST",
-        "BB_PCT_B",
-        "BB_PCT_B_LT",
-        "BB_BW_ST",
-        "BB_BW",
-        "BB_BW_LT",
-    }:
+    payload_hover = cell.get("hover")
+
+    # Bollinger and Bull/Bear Power rows already expose their user-facing
+    # information through structured adapter hover fields. Suppress the
+    # redundant raw payload summary in SCD so diagnostic-style payload text
+    # does not duplicate structured context or dominate hover geometry.
+    if (
+        row_key in {
+            "BB_PCT_B_ST",
+            "BB_PCT_B",
+            "BB_PCT_B_LT",
+            "BB_BW_ST",
+            "BB_BW",
+            "BB_BW_LT",
+        }
+        or row_key.startswith("BullBearPower_")
+    ):
         custom["scd_payload_hover_block"] = ""
     else:
         custom["scd_payload_hover_block"] = (

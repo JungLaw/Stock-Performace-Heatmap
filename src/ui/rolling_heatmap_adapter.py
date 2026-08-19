@@ -599,18 +599,57 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BullBearPower_10": {
         "display_name": "BullBear(10)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(10).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP measures buying and selling pressure relative to EMA(10). "
+            "Bull Power = High - EMA(10); Bear Power = Low - EMA(10). "
+            "The displayed value is Bull Power + Bear Power."
+        ),
+        "how_to_read": (
+            "Heatmap color represents the active Elder-Ray setup.<br>"
+            "Bullish Setup (+1): EMA(10) is rising, Bear Power is below zero, "
+            "and that bearish pressure is improving versus the prior bar.<br>"
+            "Bearish Setup (-1): EMA(10) is falling, Bull Power is above zero, "
+            "and that bullish pressure is weakening versus the prior bar.<br>"
+            "No Active Setup (0): neither setup is currently present.<br>"
+            "The combined BBP value still describes pressure magnitude; a large "
+            "positive or negative value does not by itself create a setup."
+        ),
     },
     "BullBearPower_13": {
         "display_name": "BullBear(13)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(13).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP measures buying and selling pressure relative to EMA(13). "
+            "Bull Power = High - EMA(13); Bear Power = Low - EMA(13). "
+            "The displayed value is Bull Power + Bear Power."
+        ),
+        "how_to_read": (
+            "Heatmap color represents the active Elder-Ray setup.<br>"
+            "Bullish Setup (+1): EMA(13) is rising, Bear Power is below zero, "
+            "and that bearish pressure is improving versus the prior bar.<br>"
+            "Bearish Setup (-1): EMA(13) is falling, Bull Power is above zero, "
+            "and that bullish pressure is weakening versus the prior bar.<br>"
+            "No Active Setup (0): neither setup is currently present.<br>"
+            "The combined BBP value still describes pressure magnitude; a large "
+            "positive or negative value does not by itself create a setup."
+        ),
     },
     "BullBearPower_21": {
         "display_name": "BullBear(21)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(21).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP measures buying and selling pressure relative to EMA(21). "
+            "Bull Power = High - EMA(21); Bear Power = Low - EMA(21). "
+            "The displayed value is Bull Power + Bear Power."
+        ),
+        "how_to_read": (
+            "Heatmap color represents the active Elder-Ray setup.<br>"
+            "Bullish Setup (+1): EMA(21) is rising, Bear Power is below zero, "
+            "and that bearish pressure is improving versus the prior bar.<br>"
+            "Bearish Setup (-1): EMA(21) is falling, Bull Power is above zero, "
+            "and that bullish pressure is weakening versus the prior bar.<br>"
+            "No Active Setup (0): neither setup is currently present.<br>"
+            "The combined BBP value still describes pressure magnitude; a large "
+            "positive or negative value does not by itself create a setup."
+        ),
     },
     # Volume-based
     "MFI_10": {
@@ -798,6 +837,12 @@ _SCORE_LABELS = {
      2: "Strong Buy",
 }
 
+_BBP_SETUP_LABELS = {
+    -1: "Bearish Setup",
+     0: "No Active Setup",
+     1: "Bullish Setup",
+}
+
 _SCORE_RULE_KEYS = {
     -2: "strong_sell",
     -1: "sell",
@@ -808,9 +853,17 @@ _SCORE_RULE_KEYS = {
 
 
 def score_to_label(score: Any) -> str:
-    """Map numeric score to the user-facing signal label."""
+    """Map numeric score to the canonical user-facing signal label."""
     try:
         return _SCORE_LABELS.get(int(score), "")
+    except Exception:
+        return ""
+
+
+def score_to_bbp_setup_label(score: Any) -> str:
+    """Map a BBP score to its display-only Elder-Ray setup label."""
+    try:
+        return _BBP_SETUP_LABELS.get(int(score), "")
     except Exception:
         return ""
 
@@ -2584,6 +2637,16 @@ def build_plotly_heatmap_inputs(
             formatted_value = format_hover_value(key, v)
             score_label = score_to_label(s)
 
+            # Preserve the canonical engine label in score_label. BBP uses a
+            # separate display-only vocabulary because its +/-1 scores now
+            # represent episodic Elder-Ray setups rather than literal trade
+            # commands or persistent directional states.
+            signal_display_label = (
+                score_to_bbp_setup_label(s)
+                if key.startswith("BullBearPower_")
+                else score_label
+            )
+
             rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
 
             # BB_BW no longer inherits the parent Bollinger directional rule.
@@ -2962,9 +3025,24 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     dpo_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-            # BULL BEAR: Custom hover content (deltas)
+            # BULL BEAR: Custom hover content.
+            # Setup now owns the upstream +/-1/0 score and is represented by
+            # signal_line, so only independent divergence + Bull/Bear numeric
+            # context belong in this secondary block.
             if key.startswith("BullBearPower_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
+
+                elder_ray_divergence = extra_map.get(
+                    "elder_ray_divergence"
+                )
+                if elder_ray_divergence in {
+                    "Bullish",
+                    "Bearish",
+                    "None",
+                }:
+                    parts.append(
+                        f"Elder-Ray Divergence: {elder_ray_divergence}"
+                    )
 
                 bull_val = extra_map.get("BullPower")
                 prev_bull_val = prev_extra_map.get("BullPower") if isinstance(prev_extra_map, dict) else None
@@ -3207,7 +3285,11 @@ def build_plotly_heatmap_inputs(
                 f"{delta_pct_suffix}<br>"
             )
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
-            signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
+            signal_line = (
+                f"<br>Signal: {signal_display_label}<br>"
+                if signal_display_label
+                else ""
+            )
             rule_block = _format_hover_block("Rule", rule_text, width=80)
             notes_block = _format_hover_block("Notes", rule_notes, width=72)
             definition_block = _format_hover_block("Definition", definition, width=72)
