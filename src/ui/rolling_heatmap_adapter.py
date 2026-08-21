@@ -600,55 +600,38 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "BullBearPower_10": {
         "display_name": "BullBear(10)",
         "definition": (
-            "BBP measures buying and selling pressure relative to EMA(10). "
-            "Bull Power = High - EMA(10); Bear Power = Low - EMA(10). "
-            "The displayed value is Bull Power + Bear Power."
+            "BBP = Bull Power + Bear Power vs EMA(10). "
+            "Positive = bull pressure; negative = bear pressure."
         ),
         "how_to_read": (
-            "Heatmap color represents the active Elder-Ray setup.<br>"
-            "Bullish Setup (+1): EMA(10) is rising, Bear Power is below zero, "
-            "and that bearish pressure is improving versus the prior bar.<br>"
-            "Bearish Setup (-1): EMA(10) is falling, Bull Power is above zero, "
-            "and that bullish pressure is weakening versus the prior bar.<br>"
-            "No Active Setup (0): neither setup is currently present.<br>"
-            "The combined BBP value still describes pressure magnitude; a large "
-            "positive or negative value does not by itself create a setup."
+            "Signal: Current BBP trend/pressure state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now?<br>"
+            "Divergence: Has a bullish/bearish divergence been confirmed? "
         ),
     },
     "BullBearPower_13": {
         "display_name": "BullBear(13)",
         "definition": (
             "BBP measures buying and selling pressure relative to EMA(13). "
-            "Bull Power = High - EMA(13); Bear Power = Low - EMA(13). "
-            "The displayed value is Bull Power + Bear Power."
+            "BBP = Bull Power + Bear Power vs EMA(13); or (High-EMA)+(Low-EMA). "
+            "Positive = bull pressure; negative = bear pressure."
         ),
         "how_to_read": (
-            "Heatmap color represents the active Elder-Ray setup.<br>"
-            "Bullish Setup (+1): EMA(13) is rising, Bear Power is below zero, "
-            "and that bearish pressure is improving versus the prior bar.<br>"
-            "Bearish Setup (-1): EMA(13) is falling, Bull Power is above zero, "
-            "and that bullish pressure is weakening versus the prior bar.<br>"
-            "No Active Setup (0): neither setup is currently present.<br>"
-            "The combined BBP value still describes pressure magnitude; a large "
-            "positive or negative value does not by itself create a setup."
+            "Signal: Current BBP trend/pressure/direction state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now? (EMA is ↑, BearPower is '-', but improving)<br>"
+            "Divergence: Has a bullish/bearish divergence been confirmed? "
         ),
     },
     "BullBearPower_21": {
         "display_name": "BullBear(21)",
         "definition": (
-            "BBP measures buying and selling pressure relative to EMA(21). "
-            "Bull Power = High - EMA(21); Bear Power = Low - EMA(21). "
-            "The displayed value is Bull Power + Bear Power."
+            "BBP = Bull Power + Bear Power vs EMA(21). "
+            "Positive = bull pressure; negative = bear pressure."
         ),
         "how_to_read": (
-            "Heatmap color represents the active Elder-Ray setup.<br>"
-            "Bullish Setup (+1): EMA(21) is rising, Bear Power is below zero, "
-            "and that bearish pressure is improving versus the prior bar.<br>"
-            "Bearish Setup (-1): EMA(21) is falling, Bull Power is above zero, "
-            "and that bullish pressure is weakening versus the prior bar.<br>"
-            "No Active Setup (0): neither setup is currently present.<br>"
-            "The combined BBP value still describes pressure magnitude; a large "
-            "positive or negative value does not by itself create a setup."
+            "Signal: Current BBP trend/pressure state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now? <br>"
+            "Divergence: Has a bullish/bearish price-vs-pressure divergence been confirmed? "
         ),
     },
     # Volume-based
@@ -837,10 +820,12 @@ _SCORE_LABELS = {
      2: "Strong Buy",
 }
 
-_BBP_SETUP_LABELS = {
-    -1: "Bearish Setup",
-     0: "No Active Setup",
-     1: "Bullish Setup",
+_BBP_SIGNAL_LABELS = {
+    -2: "Strong Bearish",
+    -1: "Bearish",
+     0: "Neutral",
+     1: "Bullish",
+     2: "Strong Bullish",
 }
 
 _SCORE_RULE_KEYS = {
@@ -860,10 +845,10 @@ def score_to_label(score: Any) -> str:
         return ""
 
 
-def score_to_bbp_setup_label(score: Any) -> str:
-    """Map a BBP score to its display-only Elder-Ray setup label."""
+def score_to_bbp_signal_label(score: Any) -> str:
+    """Map a BBP score to its display-only trend-confirmation label."""
     try:
-        return _BBP_SETUP_LABELS.get(int(score), "")
+        return _BBP_SIGNAL_LABELS.get(int(score), "")
     except Exception:
         return ""
 
@@ -2638,11 +2623,10 @@ def build_plotly_heatmap_inputs(
             score_label = score_to_label(s)
 
             # Preserve the canonical engine label in score_label. BBP uses a
-            # separate display-only vocabulary because its +/-1 scores now
-            # represent episodic Elder-Ray setups rather than literal trade
-            # commands or persistent directional states.
+            # separate display vocabulary because its score represents
+            # trend/pressure confirmation rather than a literal trade command.
             signal_display_label = (
-                score_to_bbp_setup_label(s)
+                score_to_bbp_signal_label(s)
                 if key.startswith("BullBearPower_")
                 else score_label
             )
@@ -2665,6 +2649,7 @@ def build_plotly_heatmap_inputs(
             stoch_context_block = ""
             cmf_context_block = ""
             bullbear_context_block = ""
+            elder_ray_divergence_value = None
             dpo_context_block = ""
             band_context_block = ""
             bb_bw_context_block = ""
@@ -3025,16 +3010,28 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     dpo_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-            # BULL BEAR: Custom hover content.
-            # Setup now owns the upstream +/-1/0 score and is represented by
-            # signal_line, so only independent divergence + Bull/Bear numeric
-            # context belong in this secondary block.
+            # BULL BEAR: Secondary Elder-Ray + component context.
+            # Primary score/color is the strict trend-confirmation state.
             if key.startswith("BullBearPower_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
+
+                elder_ray_setup = extra_map.get(
+                    "elder_ray_setup"
+                )
+                if elder_ray_setup in {
+                    "Bullish",
+                    "Bearish",
+                    "None",
+                }:
+                    parts.append(
+                        f"Elder-Ray Setup: {elder_ray_setup}"
+                    )
 
                 elder_ray_divergence = extra_map.get(
                     "elder_ray_divergence"
                 )
+                elder_ray_divergence_value = elder_ray_divergence
+
                 if elder_ray_divergence in {
                     "Bullish",
                     "Bearish",
@@ -3084,7 +3081,7 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"Bear: {format_signed_number(bear_val, decimals=2)}{bear_suffix}")
 
                 if parts:
-                    bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+                    bullbear_context_block = "<br>".join(parts) + "<br>"
 
             # ADX: Custom hover content (+DI / -DI / spread with deltas)
             if key.startswith("ADX_"):
@@ -3636,6 +3633,7 @@ def build_plotly_heatmap_inputs(
                     "stoch_context_block": stoch_context_block,
                     "cmf_context_block": cmf_context_block,
                     "dpo_context_block": dpo_context_block,
+                    "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
                     "meta": rolling_payload.get("meta", {}),
                 }
@@ -3646,6 +3644,127 @@ def build_plotly_heatmap_inputs(
         customdata.append(cd_row)
 
     return PlotlyHeatmapInputs(z=z, text=text, customdata=customdata, x=x, y=y, row_keys=row_keys)
+
+
+def apply_bbp_divergence_text_overlay(
+    fig: go.Figure,
+    *,
+    text: List[List[str]],
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Replace displayed BBP cell text at confirmed Elder-Ray divergence
+    coordinates with sparse Plotly text overlays.
+
+    Bullish divergence:
+        blue displayed value
+
+    Bearish divergence:
+        red displayed value
+
+    The underlying Heatmap cell retains its z value, background color,
+    customdata, and hover behavior. Only the visible cell text is replaced.
+    """
+    if not fig.data:
+        return
+
+    base_text = [
+        list(row)
+        for row in text
+    ]
+
+    bullish_x: List[Any] = []
+    bullish_y: List[Any] = []
+    bullish_text: List[str] = []
+
+    bearish_x: List[Any] = []
+    bearish_y: List[Any] = []
+    bearish_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(base_text) or row_idx >= len(y):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(base_text[row_idx]) or col_idx >= len(x):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            if not indicator_key.startswith("BullBearPower_"):
+                continue
+
+            divergence = cell.get(
+                "elder_ray_divergence"
+            )
+
+            if divergence not in {
+                "Bullish",
+                "Bearish",
+            }:
+                continue
+
+            value_text = base_text[row_idx][col_idx]
+
+            if value_text in {
+                None,
+                "",
+            }:
+                continue
+
+            # Suppress the Heatmap's own text at this coordinate.
+            # The sparse Scatter trace below becomes the sole visible value.
+            base_text[row_idx][col_idx] = ""
+
+            if divergence == "Bullish":
+                bullish_x.append(x[col_idx])
+                bullish_y.append(y[row_idx])
+                bullish_text.append(str(value_text))
+            else:
+                bearish_x.append(x[col_idx])
+                bearish_y.append(y[row_idx])
+                bearish_text.append(str(value_text))
+
+    fig.data[0].text = base_text
+
+    if bullish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bullish_x,
+                y=bullish_y,
+                mode="text",
+                text=bullish_text,
+                textfont=dict(
+                    size=12,
+                    color="blue",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if bearish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bearish_x,
+                y=bearish_y,
+                mode="text",
+                text=bearish_text,
+                textfont=dict(
+                    size=12,
+                    color="red",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
 
 
 # ----------------------------
@@ -3715,6 +3834,14 @@ def make_rolling_heatmap_figure(
             hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
+    )
+
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
     )
 
     # Display all row labels on ''rolling signals heatmap'

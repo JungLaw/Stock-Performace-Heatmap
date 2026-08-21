@@ -354,32 +354,32 @@ class SignalEngine:
         # still raise or follow the caller's existing skip_errors behavior.
         indicator_missing_mask: Optional[pd.Series] = None
 
-        # BullBearPower setup rules require both the current and immediately
-        # preceding EMA / Bull Power / Bear Power observations. Preserve
-        # those structurally immature rows as missing rather than allowing
+        # BullBearPower strict trend-confirmation rules require the current
+        # BBP value, three prior BBP observations, the current EMA plus its
+        # five-bar lag, and the current ATR(14) volatility reference.
+        #
+        # Preserve structurally immature rows as missing rather than allowing
         # the ordinary neutral fallback to misrepresent them as valid 0s.
         if indicator_name == "BullBearPower":
-            value_col = f"BullBearPower_{param_key}"
+            value_col = f"BBP_{param_key}"
             ema_col = f"EMA_{param_key}"
-            bull_col = f"BullPower_{param_key}"
-            bear_col = f"BearPower_{param_key}"
+            atr_col = "ATR_14"
 
             required_cols = [
                 value_col,
                 ema_col,
-                bull_col,
-                bear_col,
+                atr_col,
             ]
 
             if all(col in df.columns for col in required_cols):
                 indicator_missing_mask = (
                     df[value_col].isna()
+                    | df[value_col].shift(1).isna()
+                    | df[value_col].shift(2).isna()
+                    | df[value_col].shift(3).isna()
                     | df[ema_col].isna()
-                    | df[ema_col].shift(1).isna()
-                    | df[bull_col].isna()
-                    | df[bull_col].shift(1).isna()
-                    | df[bear_col].isna()
-                    | df[bear_col].shift(1).isna()
+                    | df[ema_col].shift(5).isna()
+                    | df[atr_col].isna()
                 )
 
         else:

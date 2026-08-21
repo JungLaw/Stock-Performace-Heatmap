@@ -57,6 +57,7 @@ from ui.rolling_heatmap_selection import (
 )
 from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
+    apply_bbp_divergence_text_overlay,
     build_plotly_heatmap_inputs,
 )
 
@@ -5031,6 +5032,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         )
     )
 
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
     row_count = max(len(y_labels), 1)
     base_height = 30 * row_count + 160
 
@@ -5354,6 +5363,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
+    )
+
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
     )
 
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)
