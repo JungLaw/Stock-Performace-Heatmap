@@ -821,11 +821,11 @@ _SCORE_LABELS = {
 }
 
 _BBP_SIGNAL_LABELS = {
-    -2: "Strong Bearish",
+    -2: "Bearish Confirmation",
     -1: "Bearish",
      0: "Neutral",
      1: "Bullish",
-     2: "Strong Bullish",
+     2: "Bullish Confirmation",
 }
 
 _SCORE_RULE_KEYS = {
@@ -846,7 +846,7 @@ def score_to_label(score: Any) -> str:
 
 
 def score_to_bbp_signal_label(score: Any) -> str:
-    """Map a BBP score to its display-only trend-confirmation label."""
+    """Map a BBP score to its display-only directional-regime label."""
     try:
         return _BBP_SIGNAL_LABELS.get(int(score), "")
     except Exception:

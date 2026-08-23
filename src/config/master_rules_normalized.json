@@ -1,5 +1,5 @@
 {
-  "version": "0.2.16",
+  "version": "0.2.17",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -1391,28 +1391,28 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and BBP_10 > 0 and rising_2bar(BBP_10, 3) and BBP_10 - lag(BBP_10, 3) > 0.5 * ATR_14",
-              "buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and lag(BBP_10, 2) <= 0 and BBP_10 > 0 and rising_2bar(BBP_10, 1) and (not_rising_2bar(BBP_10, 3) or BBP_10 - lag(BBP_10, 3) <= 0.5 * ATR_14)",
+              "strong_buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and lag(BBP_10, 2) <= 0 and BBP_10 > 0 and rising_2bar(BBP_10, 1)",
+              "buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and BBP_10 > 0 and (lag(BBP_10, 2) > 0 or not_rising_2bar(BBP_10, 1))",
               "neutral": "",
-              "sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and lag(BBP_10, 2) >= 0 and BBP_10 < 0 and falling_2bar(BBP_10, 1) and (not_falling_2bar(BBP_10, 3) or lag(BBP_10, 3) - BBP_10 <= 0.5 * ATR_14)",
-              "strong_sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and BBP_10 < 0 and falling_2bar(BBP_10, 3) and lag(BBP_10, 3) - BBP_10 > 0.5 * ATR_14",
-              "notes": "Trend confirmation. Bullish/Bearish = recent BBP 0-cross with the EMA trend. Strong = sustained BBP acceleration with the trend. Trend filter: over 5d, EMA(10) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
+              "sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and BBP_10 < 0 and (lag(BBP_10, 2) < 0 or not_falling_2bar(BBP_10, 1))",
+              "strong_sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and lag(BBP_10, 2) >= 0 and BBP_10 < 0 and falling_2bar(BBP_10, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(10) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             },
             "13": {
-              "strong_buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and BBP_13 > 0 and rising_2bar(BBP_13, 3) and BBP_13 - lag(BBP_13, 3) > 0.5 * ATR_14",
-              "buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and lag(BBP_13, 2) <= 0 and BBP_13 > 0 and rising_2bar(BBP_13, 1) and (not_rising_2bar(BBP_13, 3) or BBP_13 - lag(BBP_13, 3) <= 0.5 * ATR_14)",
+              "strong_buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and lag(BBP_13, 2) <= 0 and BBP_13 > 0 and rising_2bar(BBP_13, 1)",
+              "buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and BBP_13 > 0 and (lag(BBP_13, 2) > 0 or not_rising_2bar(BBP_13, 1))",
               "neutral": "",
-              "sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and lag(BBP_13, 2) >= 0 and BBP_13 < 0 and falling_2bar(BBP_13, 1) and (not_falling_2bar(BBP_13, 3) or lag(BBP_13, 3) - BBP_13 <= 0.5 * ATR_14)",
-              "strong_sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and BBP_13 < 0 and falling_2bar(BBP_13, 3) and lag(BBP_13, 3) - BBP_13 > 0.5 * ATR_14",
-              "notes": "Trend confirmation. Bullish/Bearish = recent BBP 0-cross with the EMA trend. Strong = sustained BBP acceleration w/ the trend. Trend filter: over 5d, EMA(13) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
+              "sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and BBP_13 < 0 and (lag(BBP_13, 2) < 0 or not_falling_2bar(BBP_13, 1))",
+              "strong_sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and lag(BBP_13, 2) >= 0 and BBP_13 < 0 and falling_2bar(BBP_13, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(13) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             },
             "21": {
-              "strong_buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and BBP_21 > 0 and rising_2bar(BBP_21, 3) and BBP_21 - lag(BBP_21, 3) > 0.5 * ATR_14",
-              "buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and lag(BBP_21, 2) <= 0 and BBP_21 > 0 and rising_2bar(BBP_21, 1) and (not_rising_2bar(BBP_21, 3) or BBP_21 - lag(BBP_21, 3) <= 0.5 * ATR_14)",
+              "strong_buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and lag(BBP_21, 2) <= 0 and BBP_21 > 0 and rising_2bar(BBP_21, 1)",
+              "buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and BBP_21 > 0 and (lag(BBP_21, 2) > 0 or not_rising_2bar(BBP_21, 1))",
               "neutral": "",
-              "sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and lag(BBP_21, 2) >= 0 and BBP_21 < 0 and falling_2bar(BBP_21, 1) and (not_falling_2bar(BBP_21, 3) or lag(BBP_21, 3) - BBP_21 <= 0.5 * ATR_14)",
-              "strong_sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and BBP_21 < 0 and falling_2bar(BBP_21, 3) and lag(BBP_21, 3) - BBP_21 > 0.5 * ATR_14",
-              "notes": "Trend confirmation. Bullish/Bearish = recent BBP 0-cross w/ the EMA trend. Strong = sustained BBP acceleration w/ the trend. Trend filter: over 5d, EMA(21) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
+              "sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and BBP_21 < 0 and (lag(BBP_21, 2) < 0 or not_falling_2bar(BBP_21, 1))",
+              "strong_sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and lag(BBP_21, 2) >= 0 and BBP_21 < 0 and falling_2bar(BBP_21, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(21) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             }
           },
           "overlay": {

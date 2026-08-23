@@ -354,9 +354,9 @@ class SignalEngine:
         # still raise or follow the caller's existing skip_errors behavior.
         indicator_missing_mask: Optional[pd.Series] = None
 
-        # BullBearPower strict trend-confirmation rules require the current
-        # BBP value, three prior BBP observations, the current EMA plus its
-        # five-bar lag, and the current ATR(14) volatility reference.
+        # BullBearPower directional-regime rules require the current BBP
+        # value, its two prior observations, the current EMA plus its five-bar
+        # lag, and the current ATR(14) volatility reference.
         #
         # Preserve structurally immature rows as missing rather than allowing
         # the ordinary neutral fallback to misrepresent them as valid 0s.
@@ -376,7 +376,6 @@ class SignalEngine:
                     df[value_col].isna()
                     | df[value_col].shift(1).isna()
                     | df[value_col].shift(2).isna()
-                    | df[value_col].shift(3).isna()
                     | df[ema_col].isna()
                     | df[ema_col].shift(5).isna()
                     | df[atr_col].isna()
