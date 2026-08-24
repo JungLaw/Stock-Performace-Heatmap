@@ -1078,6 +1078,100 @@ class DatabaseIntegratedTechnicalCalculator:
 
         return context
 
+
+    def _build_bbp_downside_exhaustion_context(
+        self,
+        df_ind: pd.DataFrame,
+        optionc_meta: list[dict[str, Any]],
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """
+        Build full-history factual context for BBP Downside Exhaustion rows.
+
+        This helper does not classify the signal. Score truth remains in the
+        rulebook / signal-classifier path.
+
+        For each configured exhaustion row it derives:
+
+          - bbp_3bar_decline
+              BBP[t-3] - BBP[t]
+
+          - bbp_3bar_decline_atr_ratio
+              (BBP[t-3] - BBP[t]) / ATR14[t]
+
+          - ema_5bar_decline
+              EMA[t-5] - EMA[t]
+
+          - ema_5bar_decline_atr_ratio
+              (EMA[t-5] - EMA[t]) / ATR14[t]
+
+        Series remain aligned to the complete chronological indicator
+        dataframe. Visible-window subsetting occurs later in the rolling
+        payload builder.
+        """
+        context: Dict[str, Dict[str, pd.Series]] = {}
+
+        if df_ind is None or df_ind.empty:
+            return context
+
+        for meta in optionc_meta:
+            period = meta.get("bbp_downside_exhaustion_period")
+
+            if period is None:
+                continue
+
+            try:
+                period_int = int(period)
+            except (TypeError, ValueError):
+                continue
+
+            display_key = meta["display_key"]
+            bbp_col = f"BBP_{period_int}"
+            ema_col = f"EMA_{period_int}"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                bbp_col,
+                ema_col,
+                atr_col,
+            ]
+
+            if not all(col in df_ind.columns for col in required_cols):
+                continue
+
+            bbp = pd.to_numeric(
+                df_ind[bbp_col],
+                errors="coerce",
+            ).astype("float64")
+
+            ema = pd.to_numeric(
+                df_ind[ema_col],
+                errors="coerce",
+            ).astype("float64")
+
+            atr = pd.to_numeric(
+                df_ind[atr_col],
+                errors="coerce",
+            ).astype("float64")
+
+            safe_atr = atr.where(atr != 0.0)
+
+            bbp_3bar_decline = bbp.shift(3) - bbp
+            ema_5bar_decline = ema.shift(5) - ema
+
+            context[display_key] = {
+                "bbp_3bar_decline": bbp_3bar_decline,
+                "bbp_3bar_decline_atr_ratio": (
+                    bbp_3bar_decline / safe_atr
+                ),
+                "ema_5bar_decline": ema_5bar_decline,
+                "ema_5bar_decline_atr_ratio": (
+                    ema_5bar_decline / safe_atr
+                ),
+            }
+
+        return context
+
+
     def calculate_rule_engine_signals_optionc(
         self,
         ticker: str,
@@ -1628,6 +1722,34 @@ class DatabaseIntegratedTechnicalCalculator:
                     "BBP": "BBP_21",
                 }
             },
+
+            # -------------------------
+            # BBP Downside Exhaustion
+            # -------------------------
+            # Independent score identity; display value deliberately reuses
+            # the corresponding existing BullBearPower numeric series.
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "10",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_10",
+                "value_col": "BullBearPower_10",
+                "bbp_downside_exhaustion_period": 10,
+            },
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "13",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_13",
+                "value_col": "BullBearPower_13",
+                "bbp_downside_exhaustion_period": 13,
+            },
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "21",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_21",
+                "value_col": "BullBearPower_21",
+                "bbp_downside_exhaustion_period": 21,
+            },
+
             # -------------------------
             # Additions for UI mock (v1 expansion)
             # -------------------------
@@ -1931,6 +2053,15 @@ class DatabaseIntegratedTechnicalCalculator:
         bb_bw_context = self._build_bb_bw_semantic_context(
             df_ind=df_ind,
             optionc_meta=optionc_meta,
+        )
+
+        # BBP Downside Exhaustion hover facts also depend on lagged full-history
+        # observations. Derive them before any presentation-window reduction.
+        bbp_downside_exhaustion_context = (
+            self._build_bbp_downside_exhaustion_context(
+                df_ind=df_ind,
+                optionc_meta=optionc_meta,
+            )
         )
 
         # Log line for verifying 'input date' in rolling heatmap
@@ -2367,6 +2498,42 @@ class DatabaseIntegratedTechnicalCalculator:
                             if not pd.isna(ev):
                                 try:
                                     extras[k] = float(ev)
+                                except (TypeError, ValueError):
+                                    pass
+
+                # BBP Downside Exhaustion factual context.
+                #
+                # These series were derived on complete chronological history
+                # before visible-window reduction. This block only transports
+                # the already-computed values into the rolling payload.
+                exhaustion_ctx = (
+                    bbp_downside_exhaustion_context.get(
+                        display_key
+                    )
+                )
+
+                if isinstance(exhaustion_ctx, dict):
+                    for context_key in (
+                        "bbp_3bar_decline",
+                        "bbp_3bar_decline_atr_ratio",
+                        "ema_5bar_decline",
+                        "ema_5bar_decline_atr_ratio",
+                    ):
+                        context_series = exhaustion_ctx.get(
+                            context_key
+                        )
+
+                        if (
+                            isinstance(context_series, pd.Series)
+                            and dt in context_series.index
+                        ):
+                            raw_context_value = context_series.loc[dt]
+
+                            if not pd.isna(raw_context_value):
+                                try:
+                                    extras[context_key] = float(
+                                        raw_context_value
+                                    )
                                 except (TypeError, ValueError):
                                     pass
 

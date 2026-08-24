@@ -634,6 +634,53 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
             "Divergence: Has a bullish/bearish price-vs-pressure divergence been confirmed? "
         ),
     },
+
+    "BBP_DOWNSIDE_EXHAUSTION_10": {
+        "display_name": "BBP Exh (10)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(10) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "This ST variant is provisional and included for observation. "
+            "It indicates elevated rebound risk, not a confirmed reversal or generic Buy signal."
+        ),
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_13": {
+        "display_name": "BBP Exh (13)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(13) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "Current production diagnostics supported elevated rebound potential "
+            "for this MT condition. It is not itself a confirmed reversal or generic Buy signal."
+        ),
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_21": {
+        "display_name": "BBP Exh (21)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(21) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "This LT variant is provisional and included for observation. "
+            "It indicates elevated rebound risk, not a confirmed reversal or generic Buy signal."
+        ),
+    },
+
     # Volume-based
     "MFI_10": {
         "display_name": "MFI(10)",
@@ -828,6 +875,11 @@ _BBP_SIGNAL_LABELS = {
      2: "Bullish Confirmation",
 }
 
+_BBP_EXHAUSTION_SIGNAL_LABELS = {
+     0: "None",
+     2: "Downside Exhaustion",
+}
+
 _SCORE_RULE_KEYS = {
     -2: "strong_sell",
     -1: "sell",
@@ -849,6 +901,14 @@ def score_to_bbp_signal_label(score: Any) -> str:
     """Map a BBP score to its display-only directional-regime label."""
     try:
         return _BBP_SIGNAL_LABELS.get(int(score), "")
+    except Exception:
+        return ""
+
+
+def score_to_bbp_exhaustion_signal_label(score: Any) -> str:
+    """Map a BBP exhaustion score to its binary display label."""
+    try:
+        return _BBP_EXHAUSTION_SIGNAL_LABELS.get(int(score), "")
     except Exception:
         return ""
 
@@ -2256,6 +2316,8 @@ def build_plotly_heatmap_inputs(
             return "CCI"
         if indicator_key.startswith("UO_"):
             return "Ultimate_Oscillator"
+        if indicator_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+            return "BBP_Downside_Exhaustion"
         if indicator_key.startswith("BullBearPower_"):
             return "BullBearPower"
         if indicator_key.startswith("VWMA_"):
@@ -2287,6 +2349,8 @@ def build_plotly_heatmap_inputs(
             return "20_2.0"
         if indicator_key == "BB_PCT_B_LT" or indicator_key == "BB_BW_LT":
             return "50_2.5"
+        if indicator_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+            return indicator_key.rsplit("_", 1)[1]
         if "_" not in indicator_key:
             return None
         return indicator_key.split("_", 1)[1]
@@ -2622,14 +2686,17 @@ def build_plotly_heatmap_inputs(
             formatted_value = format_hover_value(key, v)
             score_label = score_to_label(s)
 
-            # Preserve the canonical engine label in score_label. BBP uses a
-            # separate display vocabulary because its score represents
-            # trend/pressure confirmation rather than a literal trade command.
-            signal_display_label = (
-                score_to_bbp_signal_label(s)
-                if key.startswith("BullBearPower_")
-                else score_label
-            )
+            # Preserve the canonical engine label in score_label. Primary BBP
+            # and BBP Downside Exhaustion each use their own display vocabulary
+            # because neither score represents the generic Buy/Sell labels.
+            if key.startswith("BullBearPower_"):
+                signal_display_label = score_to_bbp_signal_label(s)
+            elif key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+                signal_display_label = (
+                    score_to_bbp_exhaustion_signal_label(s)
+                )
+            else:
+                signal_display_label = score_label
 
             rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
 
@@ -2649,6 +2716,7 @@ def build_plotly_heatmap_inputs(
             stoch_context_block = ""
             cmf_context_block = ""
             bullbear_context_block = ""
+            bbp_exhaustion_context_block = ""
             elder_ray_divergence_value = None
             dpo_context_block = ""
             band_context_block = ""
@@ -3081,7 +3149,65 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"Bear: {format_signed_number(bear_val, decimals=2)}{bear_suffix}")
 
                 if parts:
-                    bullbear_context_block = "<br>".join(parts) + "<br>"
+                    bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+            # BBP DOWNSIDE EXHAUSTION:
+            # Format upstream-derived factual context only.
+            # Do not recompute lagged BBP / EMA / ATR semantics here.
+            if (
+                key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
+                and isinstance(extra_map, dict)
+                and extra_map
+            ):
+                parts = []
+
+                bbp_3bar_decline = extra_map.get(
+                    "bbp_3bar_decline"
+                )
+                bbp_3bar_decline_atr_ratio = extra_map.get(
+                    "bbp_3bar_decline_atr_ratio"
+                )
+                ema_5bar_decline = extra_map.get(
+                    "ema_5bar_decline"
+                )
+                ema_5bar_decline_atr_ratio = extra_map.get(
+                    "ema_5bar_decline_atr_ratio"
+                )
+
+                if not _is_missing(bbp_3bar_decline):
+                    parts.append(
+                        "3-bar BBP decline: "
+                        f"{format_signed_number(bbp_3bar_decline, decimals=2)}"
+                    )
+
+                if not _is_missing(bbp_3bar_decline_atr_ratio):
+                    try:
+                        parts.append(
+                            "3-bar BBP decline / ATR14: "
+                            f"{float(bbp_3bar_decline_atr_ratio):.2f}×"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if not _is_missing(ema_5bar_decline):
+                    parts.append(
+                        "5-bar EMA decline: "
+                        f"{format_signed_number(ema_5bar_decline, decimals=2)}"
+                    )
+
+                if not _is_missing(ema_5bar_decline_atr_ratio):
+                    try:
+                        parts.append(
+                            "5-bar EMA decline / ATR14: "
+                            f"{float(ema_5bar_decline_atr_ratio):.2f}×"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if parts:
+                    bbp_exhaustion_context_block = (
+                        "<br>" + "<br>".join(parts) + "<br>"
+                    )
 
             # ADX: Custom hover content (+DI / -DI / spread with deltas)
             if key.startswith("ADX_"):
@@ -3635,6 +3761,9 @@ def build_plotly_heatmap_inputs(
                     "dpo_context_block": dpo_context_block,
                     "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
+                    "bbp_exhaustion_context_block": (
+                        bbp_exhaustion_context_block
+                    ),
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -3805,6 +3934,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"

@@ -381,6 +381,35 @@ class SignalEngine:
                     | df[atr_col].isna()
                 )
 
+        # BBP Downside Exhaustion has a separate structural-maturity contract.
+        #
+        # Its falling_2bar(BBP, 3) predicate requires:
+        #   BBP[t] < BBP[t-1] < BBP[t-2] < BBP[t-3]
+        #
+        # and its magnitude clause separately references BBP[t-3].
+        # Do not impose this stricter t-3 requirement on primary BullBearPower.
+        elif indicator_name == "BBP_Downside_Exhaustion":
+            value_col = f"BBP_{param_key}"
+            ema_col = f"EMA_{param_key}"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                value_col,
+                ema_col,
+                atr_col,
+            ]
+
+            if all(col in df.columns for col in required_cols):
+                indicator_missing_mask = (
+                    df[value_col].isna()
+                    | df[value_col].shift(1).isna()
+                    | df[value_col].shift(2).isna()
+                    | df[value_col].shift(3).isna()
+                    | df[ema_col].isna()
+                    | df[ema_col].shift(5).isna()
+                    | df[atr_col].isna()
+                )
+
         else:
             parameterized_value_prefixes = {
                 "RSI": "RSI",

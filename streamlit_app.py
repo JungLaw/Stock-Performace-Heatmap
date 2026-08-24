@@ -4877,6 +4877,7 @@ def _build_scd_hover_customdata(
         "alignment_line",
         "adx_context_block",
         "signal_line",
+        "bbp_exhaustion_context_block",
         "macd_context_block",
         "stoch_context_block",
         "dpo_context_block",
@@ -4928,6 +4929,7 @@ def _build_scd_hover_customdata(
             "BB_BW_LT",
         }
         or row_key.startswith("BullBearPower_")
+        or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5000,6 +5002,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
@@ -5333,6 +5336,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
             "%{customdata.signal_line}"
+            "%{customdata.bbp_exhaustion_context_block}"
             "%{customdata.macd_context_block}"
             "%{customdata.stoch_context_block}"
             "%{customdata.cmf_context_block}"
@@ -5439,6 +5443,9 @@ def _get_scd_single_chart_auto_mode(row_key: str) -> str:
     family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
 
     if _is_scd_crossover_event_row(row_key):
+        return "Indicator value"
+
+    if row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
         return "Indicator value"
 
     if row_key == "OBV":
