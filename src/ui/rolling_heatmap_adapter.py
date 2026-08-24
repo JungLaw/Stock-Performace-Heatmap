@@ -3175,10 +3175,21 @@ def build_plotly_heatmap_inputs(
                 )
 
                 if not _is_missing(bbp_3bar_decline):
-                    parts.append(
-                        "3-bar BBP decline: "
-                        f"{format_signed_number(bbp_3bar_decline, decimals=2)}"
-                    )
+                    try:
+                        bbp_move = float(bbp_3bar_decline)
+
+                        if bbp_move > 0.0:
+                            bbp_move_text = f"↓ {abs(bbp_move):.2f}"
+                        elif bbp_move < 0.0:
+                            bbp_move_text = f"↑ {abs(bbp_move):.2f}"
+                        else:
+                            bbp_move_text = "→ 0.00"
+
+                        parts.append(
+                            f"3-bar BBP move: {bbp_move_text}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
 
                 if not _is_missing(bbp_3bar_decline_atr_ratio):
                     try:
@@ -3190,10 +3201,21 @@ def build_plotly_heatmap_inputs(
                         pass
 
                 if not _is_missing(ema_5bar_decline):
-                    parts.append(
-                        "5-bar EMA decline: "
-                        f"{format_signed_number(ema_5bar_decline, decimals=2)}"
-                    )
+                    try:
+                        ema_move = float(ema_5bar_decline)
+
+                        if ema_move > 0.0:
+                            ema_move_text = f"↓ {abs(ema_move):.2f}"
+                        elif ema_move < 0.0:
+                            ema_move_text = f"↑ {abs(ema_move):.2f}"
+                        else:
+                            ema_move_text = "→ 0.00"
+
+                        parts.append(
+                            f"5-bar EMA move: {ema_move_text}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
 
                 if not _is_missing(ema_5bar_decline_atr_ratio):
                     try:
