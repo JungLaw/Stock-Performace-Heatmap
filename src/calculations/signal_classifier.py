@@ -354,28 +354,85 @@ class SignalEngine:
         # still raise or follow the caller's existing skip_errors behavior.
         indicator_missing_mask: Optional[pd.Series] = None
 
-        parameterized_value_prefixes = {
-            "RSI": "RSI",
-            "MFI": "MFI",
-            "ROC": "ROC",
-            "Williams_R": "WILLR",
-        }
+        # BullBearPower directional-regime rules require the current BBP
+        # value, its two prior observations, the current EMA plus its five-bar
+        # lag, and the current ATR(14) volatility reference.
+        #
+        # Preserve structurally immature rows as missing rather than allowing
+        # the ordinary neutral fallback to misrepresent them as valid 0s.
+        if indicator_name == "BullBearPower":
+            value_col = f"BBP_{param_key}"
+            ema_col = f"EMA_{param_key}"
+            atr_col = "ATR_14"
 
-        value_prefix = parameterized_value_prefixes.get(indicator_name)
-        if value_prefix is not None:
-            value_col = f"{value_prefix}_{param_key}"
-            if value_col in df.columns:
-                indicator_missing_mask = df[value_col].isna()
+            required_cols = [
+                value_col,
+                ema_col,
+                atr_col,
+            ]
 
-        elif indicator_name == "Stochastic":
-            k_col = f"STOCHK_{param_key}"
-            d_col = f"STOCHD_{param_key}"
-
-            if k_col in df.columns and d_col in df.columns:
+            if all(col in df.columns for col in required_cols):
                 indicator_missing_mask = (
-                    df[k_col].isna()
-                    | df[d_col].isna()
+                    df[value_col].isna()
+                    | df[value_col].shift(1).isna()
+                    | df[value_col].shift(2).isna()
+                    | df[ema_col].isna()
+                    | df[ema_col].shift(5).isna()
+                    | df[atr_col].isna()
                 )
+
+        # BBP Downside Exhaustion has a separate structural-maturity contract.
+        #
+        # Its falling_2bar(BBP, 3) predicate requires:
+        #   BBP[t] < BBP[t-1] < BBP[t-2] < BBP[t-3]
+        #
+        # and its magnitude clause separately references BBP[t-3].
+        # Do not impose this stricter t-3 requirement on primary BullBearPower.
+        elif indicator_name == "BBP_Downside_Exhaustion":
+            value_col = f"BBP_{param_key}"
+            ema_col = f"EMA_{param_key}"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                value_col,
+                ema_col,
+                atr_col,
+            ]
+
+            if all(col in df.columns for col in required_cols):
+                indicator_missing_mask = (
+                    df[value_col].isna()
+                    | df[value_col].shift(1).isna()
+                    | df[value_col].shift(2).isna()
+                    | df[value_col].shift(3).isna()
+                    | df[ema_col].isna()
+                    | df[ema_col].shift(5).isna()
+                    | df[atr_col].isna()
+                )
+
+        else:
+            parameterized_value_prefixes = {
+                "RSI": "RSI",
+                "MFI": "MFI",
+                "ROC": "ROC",
+                "Williams_R": "WILLR",
+            }
+
+            value_prefix = parameterized_value_prefixes.get(indicator_name)
+            if value_prefix is not None:
+                value_col = f"{value_prefix}_{param_key}"
+                if value_col in df.columns:
+                    indicator_missing_mask = df[value_col].isna()
+
+            elif indicator_name == "Stochastic":
+                k_col = f"STOCHK_{param_key}"
+                d_col = f"STOCHD_{param_key}"
+
+                if k_col in df.columns and d_col in df.columns:
+                    indicator_missing_mask = (
+                        df[k_col].isna()
+                        | df[d_col].isna()
+                    )
 
         # Build context from df columns
         context = {col: df[col] for col in df.columns}

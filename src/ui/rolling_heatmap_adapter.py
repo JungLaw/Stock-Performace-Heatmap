@@ -599,19 +599,88 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BullBearPower_10": {
         "display_name": "BullBear(10)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(10).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP = Bull Power + Bear Power vs EMA(10). "
+            "Positive = bull pressure; negative = bear pressure."
+        ),
+        "how_to_read": (
+            "Signal: Current BBP trend/pressure state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now?<br>"
+            "Divergence: Has a bullish/bearish divergence been confirmed? "
+        ),
     },
     "BullBearPower_13": {
         "display_name": "BullBear(13)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(13).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP measures buying and selling pressure relative to EMA(13). "
+            "BBP = Bull Power + Bear Power vs EMA(13); or (High-EMA)+(Low-EMA). "
+            "Positive = bull pressure; negative = bear pressure."
+        ),
+        "how_to_read": (
+            "Signal: Current BBP trend/pressure/direction state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now? (EMA is ↑, BearPower is '-', but improving)<br>"
+            "Divergence: Has a bullish/bearish divergence been confirmed? "
+        ),
     },
     "BullBearPower_21": {
         "display_name": "BullBear(21)",
-        "definition": "Bull/Bear Power measures buying vs selling pressure around EMA(21).",
-        "how_to_read": "Displayed value is the combined BullBearPower series. Positive values suggest bullish pressure; negative values suggest bearish pressure.",
+        "definition": (
+            "BBP = Bull Power + Bear Power vs EMA(21). "
+            "Positive = bull pressure; negative = bear pressure."
+        ),
+        "how_to_read": (
+            "Signal: Current BBP trend/pressure state.<br>"
+            "Setup: Is a classic Elder-Ray bullish/bearish setup active now? <br>"
+            "Divergence: Has a bullish/bearish price-vs-pressure divergence been confirmed? "
+        ),
     },
+
+    "BBP_DOWNSIDE_EXHAUSTION_10": {
+        "display_name": "BBP Exh (10)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(10) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "This ST variant is provisional and included for observation. "
+            "It indicates elevated rebound risk, not a confirmed reversal or generic Buy signal."
+        ),
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_13": {
+        "display_name": "BBP Exh (13)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(13) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "Current production diagnostics supported elevated rebound potential "
+            "for this MT condition. It is not itself a confirmed reversal or generic Buy signal."
+        ),
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_21": {
+        "display_name": "BBP Exh (21)",
+        "definition": (
+            "Flags unusually persistent and large negative BBP pressure "
+            "inside a qualified bearish EMA(21) trend."
+        ),
+        "how_to_read": (
+            "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
+            "and has fallen for 3 consecutive intervals, and its 3-bar decline "
+            "exceeds 0.50 × ATR(14).<br>"
+            "None (0): valid observation without the complete exhaustion condition.<br>"
+            "This LT variant is provisional and included for observation. "
+            "It indicates elevated rebound risk, not a confirmed reversal or generic Buy signal."
+        ),
+    },
+
     # Volume-based
     "MFI_10": {
         "display_name": "MFI(10)",
@@ -798,6 +867,19 @@ _SCORE_LABELS = {
      2: "Strong Buy",
 }
 
+_BBP_SIGNAL_LABELS = {
+    -2: "Bearish Confirmation",
+    -1: "Bearish",
+     0: "Neutral",
+     1: "Bullish",
+     2: "Bullish Confirmation",
+}
+
+_BBP_EXHAUSTION_SIGNAL_LABELS = {
+     0: "None",
+     2: "Downside Exhaustion",
+}
+
 _SCORE_RULE_KEYS = {
     -2: "strong_sell",
     -1: "sell",
@@ -808,9 +890,25 @@ _SCORE_RULE_KEYS = {
 
 
 def score_to_label(score: Any) -> str:
-    """Map numeric score to the user-facing signal label."""
+    """Map numeric score to the canonical user-facing signal label."""
     try:
         return _SCORE_LABELS.get(int(score), "")
+    except Exception:
+        return ""
+
+
+def score_to_bbp_signal_label(score: Any) -> str:
+    """Map a BBP score to its display-only directional-regime label."""
+    try:
+        return _BBP_SIGNAL_LABELS.get(int(score), "")
+    except Exception:
+        return ""
+
+
+def score_to_bbp_exhaustion_signal_label(score: Any) -> str:
+    """Map a BBP exhaustion score to its binary display label."""
+    try:
+        return _BBP_EXHAUSTION_SIGNAL_LABELS.get(int(score), "")
     except Exception:
         return ""
 
@@ -1279,10 +1377,14 @@ def get_indicator_doc_slug(row_key: str) -> str:
     """
     Resolve the markdown documentation slug for a row key.
 
-    Initially this matches the indicator family, but it is intentionally
-    separated so documentation structure can diverge later without changing
-    UI call sites.
+    Usually this matches the indicator family, but specialized semantic rows
+    may route to their own long-form documentation.
     """
+    row_key = str(row_key).strip()
+
+    if row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+        return "BBP_DownsideExhaustion"
+
     return get_indicator_family(row_key)
 
 # ----------------------------
@@ -2218,6 +2320,8 @@ def build_plotly_heatmap_inputs(
             return "CCI"
         if indicator_key.startswith("UO_"):
             return "Ultimate_Oscillator"
+        if indicator_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+            return "BBP_Downside_Exhaustion"
         if indicator_key.startswith("BullBearPower_"):
             return "BullBearPower"
         if indicator_key.startswith("VWMA_"):
@@ -2249,6 +2353,8 @@ def build_plotly_heatmap_inputs(
             return "20_2.0"
         if indicator_key == "BB_PCT_B_LT" or indicator_key == "BB_BW_LT":
             return "50_2.5"
+        if indicator_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+            return indicator_key.rsplit("_", 1)[1]
         if "_" not in indicator_key:
             return None
         return indicator_key.split("_", 1)[1]
@@ -2584,6 +2690,18 @@ def build_plotly_heatmap_inputs(
             formatted_value = format_hover_value(key, v)
             score_label = score_to_label(s)
 
+            # Preserve the canonical engine label in score_label. Primary BBP
+            # and BBP Downside Exhaustion each use their own display vocabulary
+            # because neither score represents the generic Buy/Sell labels.
+            if key.startswith("BullBearPower_"):
+                signal_display_label = score_to_bbp_signal_label(s)
+            elif key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+                signal_display_label = (
+                    score_to_bbp_exhaustion_signal_label(s)
+                )
+            else:
+                signal_display_label = score_label
+
             rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
 
             # BB_BW no longer inherits the parent Bollinger directional rule.
@@ -2602,6 +2720,8 @@ def build_plotly_heatmap_inputs(
             stoch_context_block = ""
             cmf_context_block = ""
             bullbear_context_block = ""
+            bbp_exhaustion_context_block = ""
+            elder_ray_divergence_value = None
             dpo_context_block = ""
             band_context_block = ""
             bb_bw_context_block = ""
@@ -2962,9 +3082,36 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     dpo_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-            # BULL BEAR: Custom hover content (deltas)
+            # BULL BEAR: Secondary Elder-Ray + component context.
+            # Primary score/color is the strict trend-confirmation state.
             if key.startswith("BullBearPower_") and isinstance(extra_map, dict) and extra_map:
                 parts = []
+
+                elder_ray_setup = extra_map.get(
+                    "elder_ray_setup"
+                )
+                if elder_ray_setup in {
+                    "Bullish",
+                    "Bearish",
+                    "None",
+                }:
+                    parts.append(
+                        f"Elder-Ray Setup: {elder_ray_setup}"
+                    )
+
+                elder_ray_divergence = extra_map.get(
+                    "elder_ray_divergence"
+                )
+                elder_ray_divergence_value = elder_ray_divergence
+
+                if elder_ray_divergence in {
+                    "Bullish",
+                    "Bearish",
+                    "None",
+                }:
+                    parts.append(
+                        f"Elder-Ray Divergence: {elder_ray_divergence}"
+                    )
 
                 bull_val = extra_map.get("BullPower")
                 prev_bull_val = prev_extra_map.get("BullPower") if isinstance(prev_extra_map, dict) else None
@@ -3007,6 +3154,86 @@ def build_plotly_heatmap_inputs(
 
                 if parts:
                     bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+            # BBP DOWNSIDE EXHAUSTION:
+            # Format upstream-derived factual context only.
+            # Do not recompute lagged BBP / EMA / ATR semantics here.
+            if (
+                key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
+                and isinstance(extra_map, dict)
+                and extra_map
+            ):
+                parts = []
+
+                bbp_3bar_decline = extra_map.get(
+                    "bbp_3bar_decline"
+                )
+                bbp_3bar_decline_atr_ratio = extra_map.get(
+                    "bbp_3bar_decline_atr_ratio"
+                )
+                ema_5bar_decline = extra_map.get(
+                    "ema_5bar_decline"
+                )
+                ema_5bar_decline_atr_ratio = extra_map.get(
+                    "ema_5bar_decline_atr_ratio"
+                )
+
+                if not _is_missing(bbp_3bar_decline):
+                    try:
+                        bbp_move = float(bbp_3bar_decline)
+
+                        if bbp_move > 0.0:
+                            bbp_move_text = f"↓ {abs(bbp_move):.2f}"
+                        elif bbp_move < 0.0:
+                            bbp_move_text = f"↑ {abs(bbp_move):.2f}"
+                        else:
+                            bbp_move_text = "→ 0.00"
+
+                        parts.append(
+                            f"3-bar BBP move: {bbp_move_text}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if not _is_missing(bbp_3bar_decline_atr_ratio):
+                    try:
+                        parts.append(
+                            "3-bar BBP decline / ATR14: "
+                            f"{float(bbp_3bar_decline_atr_ratio):.2f}×"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if not _is_missing(ema_5bar_decline):
+                    try:
+                        ema_move = float(ema_5bar_decline)
+
+                        if ema_move > 0.0:
+                            ema_move_text = f"↓ {abs(ema_move):.2f}"
+                        elif ema_move < 0.0:
+                            ema_move_text = f"↑ {abs(ema_move):.2f}"
+                        else:
+                            ema_move_text = "→ 0.00"
+
+                        parts.append(
+                            f"5-bar EMA move: {ema_move_text}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if not _is_missing(ema_5bar_decline_atr_ratio):
+                    try:
+                        parts.append(
+                            "5-bar EMA decline / ATR14: "
+                            f"{float(ema_5bar_decline_atr_ratio):.2f}×"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if parts:
+                    bbp_exhaustion_context_block = (
+                        "<br>" + "<br>".join(parts) + "<br>"
+                    )
 
             # ADX: Custom hover content (+DI / -DI / spread with deltas)
             if key.startswith("ADX_"):
@@ -3207,7 +3434,11 @@ def build_plotly_heatmap_inputs(
                 f"{delta_pct_suffix}<br>"
             )
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
-            signal_line = f"<br>Signal: {score_label}<br>" if score_label else ""
+            signal_line = (
+                f"<br>Signal: {signal_display_label}<br>"
+                if signal_display_label
+                else ""
+            )
             rule_block = _format_hover_block("Rule", rule_text, width=80)
             notes_block = _format_hover_block("Notes", rule_notes, width=72)
             definition_block = _format_hover_block("Definition", definition, width=72)
@@ -3554,7 +3785,11 @@ def build_plotly_heatmap_inputs(
                     "stoch_context_block": stoch_context_block,
                     "cmf_context_block": cmf_context_block,
                     "dpo_context_block": dpo_context_block,
+                    "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
+                    "bbp_exhaustion_context_block": (
+                        bbp_exhaustion_context_block
+                    ),
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -3564,6 +3799,127 @@ def build_plotly_heatmap_inputs(
         customdata.append(cd_row)
 
     return PlotlyHeatmapInputs(z=z, text=text, customdata=customdata, x=x, y=y, row_keys=row_keys)
+
+
+def apply_bbp_divergence_text_overlay(
+    fig: go.Figure,
+    *,
+    text: List[List[str]],
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Replace displayed BBP cell text at confirmed Elder-Ray divergence
+    coordinates with sparse Plotly text overlays.
+
+    Bullish divergence:
+        blue displayed value
+
+    Bearish divergence:
+        red displayed value
+
+    The underlying Heatmap cell retains its z value, background color,
+    customdata, and hover behavior. Only the visible cell text is replaced.
+    """
+    if not fig.data:
+        return
+
+    base_text = [
+        list(row)
+        for row in text
+    ]
+
+    bullish_x: List[Any] = []
+    bullish_y: List[Any] = []
+    bullish_text: List[str] = []
+
+    bearish_x: List[Any] = []
+    bearish_y: List[Any] = []
+    bearish_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(base_text) or row_idx >= len(y):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(base_text[row_idx]) or col_idx >= len(x):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            if not indicator_key.startswith("BullBearPower_"):
+                continue
+
+            divergence = cell.get(
+                "elder_ray_divergence"
+            )
+
+            if divergence not in {
+                "Bullish",
+                "Bearish",
+            }:
+                continue
+
+            value_text = base_text[row_idx][col_idx]
+
+            if value_text in {
+                None,
+                "",
+            }:
+                continue
+
+            # Suppress the Heatmap's own text at this coordinate.
+            # The sparse Scatter trace below becomes the sole visible value.
+            base_text[row_idx][col_idx] = ""
+
+            if divergence == "Bullish":
+                bullish_x.append(x[col_idx])
+                bullish_y.append(y[row_idx])
+                bullish_text.append(str(value_text))
+            else:
+                bearish_x.append(x[col_idx])
+                bearish_y.append(y[row_idx])
+                bearish_text.append(str(value_text))
+
+    fig.data[0].text = base_text
+
+    if bullish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bullish_x,
+                y=bullish_y,
+                mode="text",
+                text=bullish_text,
+                textfont=dict(
+                    size=12,
+                    color="blue",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if bearish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bearish_x,
+                y=bearish_y,
+                mode="text",
+                text=bearish_text,
+                textfont=dict(
+                    size=12,
+                    color="red",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
 
 
 # ----------------------------
@@ -3604,6 +3960,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
@@ -3633,6 +3990,14 @@ def make_rolling_heatmap_figure(
             hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
+    )
+
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
     )
 
     # Display all row labels on ''rolling signals heatmap'

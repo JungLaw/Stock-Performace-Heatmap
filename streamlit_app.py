@@ -57,6 +57,7 @@ from ui.rolling_heatmap_selection import (
 )
 from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
+    apply_bbp_divergence_text_overlay,
     build_plotly_heatmap_inputs,
 )
 
@@ -4876,6 +4877,7 @@ def _build_scd_hover_customdata(
         "alignment_line",
         "adx_context_block",
         "signal_line",
+        "bbp_exhaustion_context_block",
         "macd_context_block",
         "stoch_context_block",
         "dpo_context_block",
@@ -4911,18 +4913,24 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger %B and BB_BW already expose their user-facing information
-    # through structured adapter hover fields. Suppress the redundant raw
-    # payload summary in SCD so the diagnostic-style payload line does not
-    # duplicate Value / Bandwidth / band context or dominate hover geometry.
-    if row_key in {
-        "BB_PCT_B_ST",
-        "BB_PCT_B",
-        "BB_PCT_B_LT",
-        "BB_BW_ST",
-        "BB_BW",
-        "BB_BW_LT",
-    }:
+    payload_hover = cell.get("hover")
+
+    # Bollinger and Bull/Bear Power rows already expose their user-facing
+    # information through structured adapter hover fields. Suppress the
+    # redundant raw payload summary in SCD so diagnostic-style payload text
+    # does not duplicate structured context or dominate hover geometry.
+    if (
+        row_key in {
+            "BB_PCT_B_ST",
+            "BB_PCT_B",
+            "BB_PCT_B_LT",
+            "BB_BW_ST",
+            "BB_BW",
+            "BB_BW_LT",
+        }
+        or row_key.startswith("BullBearPower_")
+        or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
+    ):
         custom["scd_payload_hover_block"] = ""
     else:
         custom["scd_payload_hover_block"] = (
@@ -4994,6 +5002,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
@@ -5024,6 +5033,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
             hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
+    )
+
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
     )
 
     row_count = max(len(y_labels), 1)
@@ -5319,6 +5336,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
             "%{customdata.signal_line}"
+            "%{customdata.bbp_exhaustion_context_block}"
             "%{customdata.macd_context_block}"
             "%{customdata.stoch_context_block}"
             "%{customdata.cmf_context_block}"
@@ -5349,6 +5367,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             hovertemplate=hovertemplate,
             colorbar=dict(title="Score"),
         )
+    )
+
+    apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
     )
 
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)
@@ -5417,6 +5443,9 @@ def _get_scd_single_chart_auto_mode(row_key: str) -> str:
     family = ROW_CLASSIFICATION.get(row_key, {}).get("family", "")
 
     if _is_scd_crossover_event_row(row_key):
+        return "Indicator value"
+
+    if row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
         return "Indicator value"
 
     if row_key == "OBV":

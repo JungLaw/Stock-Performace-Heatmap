@@ -1078,6 +1078,100 @@ class DatabaseIntegratedTechnicalCalculator:
 
         return context
 
+
+    def _build_bbp_downside_exhaustion_context(
+        self,
+        df_ind: pd.DataFrame,
+        optionc_meta: list[dict[str, Any]],
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """
+        Build full-history factual context for BBP Downside Exhaustion rows.
+
+        This helper does not classify the signal. Score truth remains in the
+        rulebook / signal-classifier path.
+
+        For each configured exhaustion row it derives:
+
+          - bbp_3bar_decline
+              BBP[t-3] - BBP[t]
+
+          - bbp_3bar_decline_atr_ratio
+              (BBP[t-3] - BBP[t]) / ATR14[t]
+
+          - ema_5bar_decline
+              EMA[t-5] - EMA[t]
+
+          - ema_5bar_decline_atr_ratio
+              (EMA[t-5] - EMA[t]) / ATR14[t]
+
+        Series remain aligned to the complete chronological indicator
+        dataframe. Visible-window subsetting occurs later in the rolling
+        payload builder.
+        """
+        context: Dict[str, Dict[str, pd.Series]] = {}
+
+        if df_ind is None or df_ind.empty:
+            return context
+
+        for meta in optionc_meta:
+            period = meta.get("bbp_downside_exhaustion_period")
+
+            if period is None:
+                continue
+
+            try:
+                period_int = int(period)
+            except (TypeError, ValueError):
+                continue
+
+            display_key = meta["display_key"]
+            bbp_col = f"BBP_{period_int}"
+            ema_col = f"EMA_{period_int}"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                bbp_col,
+                ema_col,
+                atr_col,
+            ]
+
+            if not all(col in df_ind.columns for col in required_cols):
+                continue
+
+            bbp = pd.to_numeric(
+                df_ind[bbp_col],
+                errors="coerce",
+            ).astype("float64")
+
+            ema = pd.to_numeric(
+                df_ind[ema_col],
+                errors="coerce",
+            ).astype("float64")
+
+            atr = pd.to_numeric(
+                df_ind[atr_col],
+                errors="coerce",
+            ).astype("float64")
+
+            safe_atr = atr.where(atr != 0.0)
+
+            bbp_3bar_decline = bbp.shift(3) - bbp
+            ema_5bar_decline = ema.shift(5) - ema
+
+            context[display_key] = {
+                "bbp_3bar_decline": bbp_3bar_decline,
+                "bbp_3bar_decline_atr_ratio": (
+                    bbp_3bar_decline / safe_atr
+                ),
+                "ema_5bar_decline": ema_5bar_decline,
+                "ema_5bar_decline_atr_ratio": (
+                    ema_5bar_decline / safe_atr
+                ),
+            }
+
+        return context
+
+
     def calculate_rule_engine_signals_optionc(
         self,
         ticker: str,
@@ -1628,6 +1722,34 @@ class DatabaseIntegratedTechnicalCalculator:
                     "BBP": "BBP_21",
                 }
             },
+
+            # -------------------------
+            # BBP Downside Exhaustion
+            # -------------------------
+            # Independent score identity; display value deliberately reuses
+            # the corresponding existing BullBearPower numeric series.
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "10",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_10",
+                "value_col": "BullBearPower_10",
+                "bbp_downside_exhaustion_period": 10,
+            },
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "13",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_13",
+                "value_col": "BullBearPower_13",
+                "bbp_downside_exhaustion_period": 13,
+            },
+            {
+                "engine_indicator": "BBP_Downside_Exhaustion",
+                "param_key": "21",
+                "display_key": "BBP_DOWNSIDE_EXHAUSTION_21",
+                "value_col": "BullBearPower_21",
+                "bbp_downside_exhaustion_period": 21,
+            },
+
             # -------------------------
             # Additions for UI mock (v1 expansion)
             # -------------------------
@@ -1933,6 +2055,15 @@ class DatabaseIntegratedTechnicalCalculator:
             optionc_meta=optionc_meta,
         )
 
+        # BBP Downside Exhaustion hover facts also depend on lagged full-history
+        # observations. Derive them before any presentation-window reduction.
+        bbp_downside_exhaustion_context = (
+            self._build_bbp_downside_exhaustion_context(
+                df_ind=df_ind,
+                optionc_meta=optionc_meta,
+            )
+        )
+
         # Log line for verifying 'input date' in rolling heatmap
         #  DEBUG: rolling heatmap index alignment
         try:
@@ -2014,6 +2145,274 @@ class DatabaseIntegratedTechnicalCalculator:
         ]
 
         score_to_label = {v: k for k, v in DEFAULT_SIGNAL_SCORES.items()}
+
+        # Bull/Bear Power — Elder-Ray setup context.
+        #
+        # Context only: this does not alter the primary BullBearPower
+        # Buy / Neutral / Sell score.
+        #
+        # Derive from full df_ind history before iterating over the visible
+        # rolling window so the first displayed date can still use its
+        # immediately preceding trading row.
+        elder_ray_setup_by_display_key: Dict[str, pd.Series] = {}
+        elder_ray_divergence_by_display_key: Dict[str, pd.Series] = {}
+
+        def _confirmed_swing_low_5bar(series: pd.Series) -> pd.Series:
+            """
+            Identify 5-bar structural swing lows on the actual pivot date.
+
+            A pivot at t is lower than the two lows before and two lows after.
+            Because two future trading bars are required, the pivot becomes
+            knowable only at t+2. Divergence emission is shifted accordingly
+            below so no future information is back-painted onto t.
+            """
+            s = pd.to_numeric(series, errors="coerce")
+
+            valid = (
+                s.notna()
+                & s.shift(1).notna()
+                & s.shift(2).notna()
+                & s.shift(-1).notna()
+                & s.shift(-2).notna()
+            )
+
+            return (
+                valid
+                & (s < s.shift(1))
+                & (s < s.shift(2))
+                & (s < s.shift(-1))
+                & (s < s.shift(-2))
+            )
+
+        def _confirmed_swing_high_5bar(series: pd.Series) -> pd.Series:
+            """
+            Identify 5-bar structural swing highs on the actual pivot date.
+
+            A pivot at t is higher than the two highs before and two highs after.
+            The corresponding divergence event is exposed only at t+2.
+            """
+            s = pd.to_numeric(series, errors="coerce")
+
+            valid = (
+                s.notna()
+                & s.shift(1).notna()
+                & s.shift(2).notna()
+                & s.shift(-1).notna()
+                & s.shift(-2).notna()
+            )
+
+            return (
+                valid
+                & (s > s.shift(1))
+                & (s > s.shift(2))
+                & (s > s.shift(-1))
+                & (s > s.shift(-2))
+            )
+
+        for period in (10, 13, 21):
+            ema_col = f"EMA_{period}"
+            bull_col = f"BullPower_{period}"
+            bear_col = f"BearPower_{period}"
+
+            required_cols = {ema_col, bull_col, bear_col}
+            if not required_cols.issubset(df_ind.columns):
+                continue
+
+            ema = pd.to_numeric(df_ind[ema_col], errors="coerce")
+            bull_power = pd.to_numeric(
+                df_ind[bull_col],
+                errors="coerce",
+            )
+            bear_power = pd.to_numeric(
+                df_ind[bear_col],
+                errors="coerce",
+            )
+
+            prior_ema = ema.shift(1)
+            prior_bull_power = bull_power.shift(1)
+            prior_bear_power = bear_power.shift(1)
+
+            valid = (
+                ema.notna()
+                & prior_ema.notna()
+                & bull_power.notna()
+                & prior_bull_power.notna()
+                & bear_power.notna()
+                & prior_bear_power.notna()
+            )
+
+            bullish_setup = (
+                valid
+                & (ema > prior_ema)
+                & (bear_power < 0)
+                & (bear_power > prior_bear_power)
+            )
+
+            bearish_setup = (
+                valid
+                & (ema < prior_ema)
+                & (bull_power > 0)
+                & (bull_power < prior_bull_power)
+            )
+
+            setup = pd.Series(pd.NA, index=df_ind.index, dtype="object")
+            setup.loc[valid] = "None"
+            setup.loc[bullish_setup] = "Bullish"
+            setup.loc[bearish_setup] = "Bearish"
+
+            display_key = f"BullBearPower_{period}"
+
+            elder_ray_setup_by_display_key[
+                display_key
+            ] = setup
+
+            # Elder-Ray divergence is structural/event context only.
+            #
+            # Price owns the pivot dates:
+            # - bullish divergence compares consecutive 5-bar PRICE swing lows
+            #   and samples Bear Power on those exact pivot dates;
+            # - bearish divergence compares consecutive 5-bar PRICE swing highs
+            #   and samples Bull Power on those exact pivot dates.
+            #
+            # A pivot at t becomes confirmed at t+2 trading bars. Therefore the
+            # event is emitted at t+2 and is never back-painted onto t.
+            low_pivots = _confirmed_swing_low_5bar(df_ind["Low"])
+            high_pivots = _confirmed_swing_high_5bar(df_ind["High"])
+
+            low_positions = np.flatnonzero(low_pivots.to_numpy())
+            high_positions = np.flatnonzero(high_pivots.to_numpy())
+
+            bullish_confirmation_positions: set[int] = set()
+            bearish_confirmation_positions: set[int] = set()
+
+            first_bullish_evaluable_position: int | None = None
+            first_bearish_evaluable_position: int | None = None
+
+            # Bullish divergence:
+            # lower PRICE swing low + higher Bear Power.
+            for previous_pos, current_pos in zip(
+                low_positions[:-1],
+                low_positions[1:],
+            ):
+                previous_price = df_ind["Low"].iloc[previous_pos]
+                current_price = df_ind["Low"].iloc[current_pos]
+                previous_power = df_ind[bear_col].iloc[previous_pos]
+                current_power = df_ind[bear_col].iloc[current_pos]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_power,
+                        current_power,
+                    )
+                ):
+                    continue
+
+                confirmation_pos = current_pos + 2
+                if confirmation_pos >= len(df_ind):
+                    continue
+
+                if first_bullish_evaluable_position is None:
+                    first_bullish_evaluable_position = confirmation_pos
+
+                if (
+                    current_price < previous_price
+                    and current_power > previous_power
+                ):
+                    bullish_confirmation_positions.add(
+                        confirmation_pos
+                    )
+
+            # Bearish divergence:
+            # higher PRICE swing high + lower Bull Power.
+            for previous_pos, current_pos in zip(
+                high_positions[:-1],
+                high_positions[1:],
+            ):
+                previous_price = df_ind["High"].iloc[previous_pos]
+                current_price = df_ind["High"].iloc[current_pos]
+                previous_power = df_ind[bull_col].iloc[previous_pos]
+                current_power = df_ind[bull_col].iloc[current_pos]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_power,
+                        current_power,
+                    )
+                ):
+                    continue
+
+                confirmation_pos = current_pos + 2
+                if confirmation_pos >= len(df_ind):
+                    continue
+
+                if first_bearish_evaluable_position is None:
+                    first_bearish_evaluable_position = confirmation_pos
+
+                if (
+                    current_price > previous_price
+                    and current_power < previous_power
+                ):
+                    bearish_confirmation_positions.add(
+                        confirmation_pos
+                    )
+
+            divergence = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            # "None" means both bullish and bearish divergence directions are
+            # operational for the date, but neither confirms an event.
+            #
+            # Before enough confirmed swing history exists for both sides,
+            # absence is not asserted and the field remains missing.
+            evaluable_positions = [
+                position
+                for position in (
+                    first_bullish_evaluable_position,
+                    first_bearish_evaluable_position,
+                )
+                if position is not None
+            ]
+
+            if len(evaluable_positions) == 2:
+                first_fully_evaluable_position = max(
+                    evaluable_positions
+                )
+                divergence.iloc[
+                    first_fully_evaluable_position:
+                ] = "None"
+
+            # A directional event can still be valid before both directions
+            # become fully evaluable, so event dates are applied after the
+            # general None initialization.
+            for confirmation_pos in bullish_confirmation_positions:
+                divergence.iloc[confirmation_pos] = "Bullish"
+
+            for confirmation_pos in bearish_confirmation_positions:
+                divergence.iloc[confirmation_pos] = "Bearish"
+
+            # Production diagnostics across the approved Custom-bucket sample
+            # found no same-date bullish/bearish collisions. Defensively avoid
+            # asserting either direction if one ever occurs rather than invent
+            # an unsupported precedence rule.
+            collision_positions = (
+                bullish_confirmation_positions
+                & bearish_confirmation_positions
+            )
+            for confirmation_pos in collision_positions:
+                divergence.iloc[confirmation_pos] = pd.NA
+
+            elder_ray_divergence_by_display_key[
+                display_key
+            ] = divergence
 
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
@@ -2099,6 +2498,42 @@ class DatabaseIntegratedTechnicalCalculator:
                             if not pd.isna(ev):
                                 try:
                                     extras[k] = float(ev)
+                                except (TypeError, ValueError):
+                                    pass
+
+                # BBP Downside Exhaustion factual context.
+                #
+                # These series were derived on complete chronological history
+                # before visible-window reduction. This block only transports
+                # the already-computed values into the rolling payload.
+                exhaustion_ctx = (
+                    bbp_downside_exhaustion_context.get(
+                        display_key
+                    )
+                )
+
+                if isinstance(exhaustion_ctx, dict):
+                    for context_key in (
+                        "bbp_3bar_decline",
+                        "bbp_3bar_decline_atr_ratio",
+                        "ema_5bar_decline",
+                        "ema_5bar_decline_atr_ratio",
+                    ):
+                        context_series = exhaustion_ctx.get(
+                            context_key
+                        )
+
+                        if (
+                            isinstance(context_series, pd.Series)
+                            and dt in context_series.index
+                        ):
+                            raw_context_value = context_series.loc[dt]
+
+                            if not pd.isna(raw_context_value):
+                                try:
+                                    extras[context_key] = float(
+                                        raw_context_value
+                                    )
                                 except (TypeError, ValueError):
                                     pass
 
@@ -2192,6 +2627,41 @@ class DatabaseIntegratedTechnicalCalculator:
                         if not pd.isna(raw_direction):
                             extras["bandwidth_direction"] = str(
                                 raw_direction
+                            )
+
+                # Bull/Bear Power — carry the upstream Elder-Ray setup
+                # label as typed context only. This does not alter score truth.
+                if eng_name == "BullBearPower":
+                    setup_series = elder_ray_setup_by_display_key.get(
+                        display_key
+                    )
+
+                    if (
+                        isinstance(setup_series, pd.Series)
+                        and dt in setup_series.index
+                    ):
+                        raw_setup = setup_series.loc[dt]
+
+                        if not pd.isna(raw_setup):
+                            extras["elder_ray_setup"] = str(
+                                raw_setup
+                            )
+
+                    divergence_series = (
+                        elder_ray_divergence_by_display_key.get(
+                            display_key
+                        )
+                    )
+
+                    if (
+                        isinstance(divergence_series, pd.Series)
+                        and dt in divergence_series.index
+                    ):
+                        raw_divergence = divergence_series.loc[dt]
+
+                        if not pd.isna(raw_divergence):
+                            extras["elder_ray_divergence"] = str(
+                                raw_divergence
                             )
 
                 # MACD-specific payload enrichment:

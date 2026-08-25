@@ -1,5 +1,5 @@
 {
-  "version": "0.2.13",
+  "version": "0.2.18",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -1391,28 +1391,28 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "(High - EMA_10_10) > 0.75*ATR_10 and rising_2bar(EMA_10, 2)",
-              "buy": "(High - EMA_10_10) > 0",
-              "neutral": "abs(Close - EMA_10) <= 0.5 * ATR_10",
-              "sell": "(Low - EMA_10_10) < 0",
-              "strong_sell": "(Low - EMA_10_10) < -0.75*ATR_10 and falling_2bar(EMA_10, 2)",
-              "notes": "Uses EMA baseline; strong signals require deviation AND slope confirmation."
+              "strong_buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and lag(BBP_10, 2) <= 0 and BBP_10 > 0 and rising_2bar(BBP_10, 1)",
+              "buy": "EMA_10 - lag(EMA_10, 5) > 0.25 * ATR_14 and BBP_10 > 0 and (lag(BBP_10, 2) > 0 or not_rising_2bar(BBP_10, 1))",
+              "neutral": "",
+              "sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and BBP_10 < 0 and (lag(BBP_10, 2) < 0 or not_falling_2bar(BBP_10, 1))",
+              "strong_sell": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and lag(BBP_10, 2) >= 0 and BBP_10 < 0 and falling_2bar(BBP_10, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(10) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             },
             "13": {
-              "strong_buy": "(High - EMA_13_13) > 0.75*ATR_13 and rising_2bar(EMA_13, 2)",
-              "buy": "(High - EMA_13_13) > 0",
-              "neutral": "abs(Close - EMA_13) <= 0.5 * ATR_13",
-              "sell": "(Low - EMA_13_13) < 0",
-              "strong_sell": "(Low - EMA_13_13) < -0.75*ATR_13 and falling_2bar(EMA_13, 2)",
-              "notes": "Intermediate = classic ERI(13). Neutral zone derived from ATR%."
+              "strong_buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and lag(BBP_13, 2) <= 0 and BBP_13 > 0 and rising_2bar(BBP_13, 1)",
+              "buy": "EMA_13 - lag(EMA_13, 5) > 0.25 * ATR_14 and BBP_13 > 0 and (lag(BBP_13, 2) > 0 or not_rising_2bar(BBP_13, 1))",
+              "neutral": "",
+              "sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and BBP_13 < 0 and (lag(BBP_13, 2) < 0 or not_falling_2bar(BBP_13, 1))",
+              "strong_sell": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and lag(BBP_13, 2) >= 0 and BBP_13 < 0 and falling_2bar(BBP_13, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(13) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             },
             "21": {
-              "strong_buy": "(High - EMA_21_21) > 0.75*ATR_21 and rising_2bar(EMA_21, 2)",
-              "buy": "(High - EMA_21_21) > 0",
-              "neutral": "abs(Close - EMA_21) <= 0.5 * ATR_21",
-              "sell": "(Low - EMA_21_21) < 0",
-              "strong_sell": "(Low - EMA_21_21) < -0.75*ATR_21 and falling_2bar(EMA_21, 2)",
-              "notes": "Long-term baseline smooths volatility; deviations still ATR-based."
+              "strong_buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and lag(BBP_21, 2) <= 0 and BBP_21 > 0 and rising_2bar(BBP_21, 1)",
+              "buy": "EMA_21 - lag(EMA_21, 5) > 0.25 * ATR_14 and BBP_21 > 0 and (lag(BBP_21, 2) > 0 or not_rising_2bar(BBP_21, 1))",
+              "neutral": "",
+              "sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and BBP_21 < 0 and (lag(BBP_21, 2) < 0 or not_falling_2bar(BBP_21, 1))",
+              "strong_sell": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and lag(BBP_21, 2) >= 0 and BBP_21 < 0 and falling_2bar(BBP_21, 1)",
+              "notes": "Directional regime with recent confirmation. Bullish/Bearish = BBP pressure agrees with a qualified EMA trend. Bullish/Bearish Confirmation = BBP recently crossed 0 into the trend direction and is still moving that way. Trend filter: over 5d, EMA(21) must move >25% of ATR(14) in the trend direction (ATR=$4 → EMA move >$1)."
             }
           },
           "overlay": {
@@ -1437,6 +1437,52 @@
         "metadata": {
           "type": "volume",
           "description": "Bull/Bear Power (ERIs)",
+          "source": "internal_spec"
+        }
+      },
+      "BBP_Downside_Exhaustion": {
+        "params": [
+          [
+            10
+          ],
+          [
+            13
+          ],
+          [
+            21
+          ]
+        ],
+        "feature_scopes": {
+          "heatmap": {
+            "10": {
+              "strong_buy": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and BBP_10 < 0 and falling_2bar(BBP_10, 3) and lag(BBP_10, 3) - BBP_10 > 0.50 * ATR_14",
+              "neutral": "",
+              "type": "downside_exhaustion",
+              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(10) trend, negative BBP(10), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This ST variant is provisional and included for observation."
+            },
+            "13": {
+              "strong_buy": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and BBP_13 < 0 and falling_2bar(BBP_13, 3) and lag(BBP_13, 3) - BBP_13 > 0.50 * ATR_14",
+              "neutral": "",
+              "type": "downside_exhaustion",
+              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(13) trend, negative BBP(13), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This MT variant is the empirically supported candidate from the current production diagnostics."
+            },
+            "21": {
+              "strong_buy": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and BBP_21 < 0 and falling_2bar(BBP_21, 3) and lag(BBP_21, 3) - BBP_21 > 0.50 * ATR_14",
+              "neutral": "",
+              "type": "downside_exhaustion",
+              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(21) trend, negative BBP(21), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This LT variant is provisional and included for observation."
+            }
+          },
+          "overlay": {},
+          "alerts": {},
+          "custom": {},
+          "tiles": {},
+          "MVA": {},
+          "basic_signals": {}
+        },
+        "metadata": {
+          "type": "derived_signal",
+          "description": "BBP downside-exhaustion / rebound-risk condition",
           "source": "internal_spec"
         }
       },

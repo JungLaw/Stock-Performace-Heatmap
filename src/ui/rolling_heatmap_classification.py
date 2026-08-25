@@ -345,6 +345,40 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
     },
 
     # -----------------------------------------------------------------
+    # Momentum / BBP downside exhaustion
+    # -----------------------------------------------------------------
+    "BBP_DOWNSIDE_EXHAUSTION_10": {
+        "family": "BullBearPower",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
+        "window": "ST",
+        "tags": [
+            "Downside Exhaustion",
+            "Rebound Risk",
+        ],
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_13": {
+        "family": "BullBearPower",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
+        "window": "MT",
+        "tags": [
+            "Downside Exhaustion",
+            "Rebound Risk",
+        ],
+    },
+    "BBP_DOWNSIDE_EXHAUSTION_21": {
+        "family": "BullBearPower",
+        "category": "Momentum",
+        "scope": "Exhaustion Signals",
+        "window": "LT",
+        "tags": [
+            "Downside Exhaustion",
+            "Rebound Risk",
+        ],
+    },
+
+    # -----------------------------------------------------------------
     # Momentum / oscillators
     # -----------------------------------------------------------------
     "RSI_10": {

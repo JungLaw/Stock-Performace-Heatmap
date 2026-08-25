@@ -1,4 +1,3 @@
-# Stamp: Thu, May 14, 2026 6:22PM
 # src/ui/rolling_heatmap_presets.py
 """
 Rolling Heatmap curated preset and Custom membership catalog.
@@ -73,6 +72,7 @@ CUSTOM_DEFAULT: List[str] = [
     "BullBearPower_13",
 
     # Momentum / exhaustion
+    "BBP_DOWNSIDE_EXHAUSTION_13",
     "STOCH_14_3_3",
     "WILLR_14",
     "CCI_20",
@@ -126,6 +126,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "CCI_10",
         "UO_5_10_15",
         "DPO_11",
+        "BBP_DOWNSIDE_EXHAUSTION_10",
 
         # Short-term momentum / thrust
         "MACD_8_17_5",
@@ -163,6 +164,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "CCI_14",
         "UO_7_14_28",
         "DPO_21",
+        "BBP_DOWNSIDE_EXHAUSTION_13",
 
         # Medium-term momentum / thrust
         "MACD_12_26_9",
@@ -202,6 +204,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "CCI_20",
         "UO_10_20_40",
         "DPO_40",
+        "BBP_DOWNSIDE_EXHAUSTION_21",
 
         # Long-term momentum / thrust
         "MACD_20_50_10",

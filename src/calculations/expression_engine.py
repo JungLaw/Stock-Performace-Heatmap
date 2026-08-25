@@ -171,6 +171,20 @@ def falling_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
     return result
 
 
+def lag(series: pd.Series, bars: int = 1) -> pd.Series:
+    """
+    Return `series` shifted backward by `bars` observations.
+
+    This provides rulebook expressions with safe, read-only access to prior
+    observations without permitting arbitrary attribute or subscript access
+    inside the expression DSL.
+    """
+    bars = int(bars)
+    if bars < 0:
+        raise ValueError("bars must be >= 0")
+    return series.shift(bars)
+
+
 def not_rising_2bar(series: pd.Series, bars: int = 2) -> pd.Series:
     """
     True where `series` is not strictly rising across the requested bars.
@@ -250,6 +264,7 @@ class ExpressionEngine:
         base_funcs = {
             "rising_2bar": rising_2bar,
             "falling_2bar": falling_2bar,
+            "lag": lag,
             "not_rising_2bar": not_rising_2bar,
             "not_falling_2bar": not_falling_2bar,
             "count_below": count_below,

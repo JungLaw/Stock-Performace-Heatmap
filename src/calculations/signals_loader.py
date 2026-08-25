@@ -1,4 +1,3 @@
-# Stamp: Sun, May 10, 2026 3:11PM 
 # signals_loader.py
 
 import json
@@ -153,8 +152,15 @@ _RULEBOOK_TO_PREPROCESSOR_KEYS = {
     "MFI": "MFI",
     "CMF": "CMF",
     "OBV": "OBV",
-    # BullBearPower is a derived family computed off EMA + High/Low
+    # BullBearPower is a derived family computed off EMA + High/Low.
     "BullBearPower": None,
+
+    # BBP Downside Exhaustion is a semantic derivative of already-computed
+    # BBP / EMA / ATR columns. It is rule-evaluated independently from the
+    # primary BullBearPower regime, but it must not trigger a new numeric
+    # preprocessor family.
+    "BBP_Downside_Exhaustion": None,
+
     # Crossover rows are derived event primitives computed from existing
     # dataframe-backed EMA/SMA columns. They are rule-evaluated, but they
     # must not be treated as a standalone preprocessor indicator family.
