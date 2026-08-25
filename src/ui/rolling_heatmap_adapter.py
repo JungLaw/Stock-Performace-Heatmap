@@ -1377,10 +1377,14 @@ def get_indicator_doc_slug(row_key: str) -> str:
     """
     Resolve the markdown documentation slug for a row key.
 
-    Initially this matches the indicator family, but it is intentionally
-    separated so documentation structure can diverge later without changing
-    UI call sites.
+    Usually this matches the indicator family, but specialized semantic rows
+    may route to their own long-form documentation.
     """
+    row_key = str(row_key).strip()
+
+    if row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_"):
+        return "BBP_DownsideExhaustion"
+
     return get_indicator_family(row_key)
 
 # ----------------------------
