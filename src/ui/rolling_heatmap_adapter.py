@@ -2729,6 +2729,7 @@ def build_plotly_heatmap_inputs(
             cmf_context_block = ""
             bullbear_context_block = ""
             bbp_exhaustion_context_block = ""
+            elder_ray_setup_value = None
             elder_ray_divergence_value = None
 
             cci_context_block = ""
@@ -3159,6 +3160,7 @@ def build_plotly_heatmap_inputs(
                     "Bearish",
                     "None",
                 }:
+                    elder_ray_setup_value = elder_ray_setup
                     parts.append(
                         f"Elder-Ray Setup: {elder_ray_setup}"
                     )
@@ -3217,7 +3219,7 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"Bear: {format_signed_number(bear_val, decimals=2)}{bear_suffix}")
 
                 if parts:
-                    bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+                    bullbear_context_block = "<br>".join(parts) + "<br>"
 
             # BBP DOWNSIDE EXHAUSTION:
             # Format upstream-derived factual context only.
@@ -3822,6 +3824,12 @@ def build_plotly_heatmap_inputs(
                 ):
                     cell_text = f"{cell_text} ▼"
 
+            if key.startswith("BullBearPower_") and cell_text:
+                if elder_ray_setup_value == "Bullish":
+                    cell_text = f"{cell_text} ▲"
+                elif elder_ray_setup_value == "Bearish":
+                    cell_text = f"{cell_text} ▼"
+
             text_row.append(cell_text)
 
             cd_row.append(
@@ -3873,6 +3881,7 @@ def build_plotly_heatmap_inputs(
                         cci_zero_line_crossover_value
                     ),
 
+                    "elder_ray_setup": elder_ray_setup_value,
                     "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
                     "bbp_exhaustion_context_block": (

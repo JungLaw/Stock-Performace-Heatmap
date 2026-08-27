@@ -6107,18 +6107,77 @@ def _build_scd_single_price_chart_figure(
     for ticker in visible_tickers:
         y_values = display_series.get(ticker, [])
         actual_prices = actual_price_series.get(ticker, [])
+        matrix_cells = matrix.get("cells", {})
 
-        customdata = [
-            [
-                str(date_key),
-                (
-                    actual_prices[index]
-                    if index < len(actual_prices)
+        customdata = []
+
+        for index, date_key in enumerate(dates):
+            cell = (
+                matrix_cells
+                .get(date_key, {})
+                .get(ticker, {})
+            )
+
+            adapter_cd = (
+                cell.get("adapter_customdata")
+                if isinstance(cell, dict)
+                else None
+            )
+
+            indicator_value = ""
+
+            if isinstance(adapter_cd, dict):
+                formatted_value = adapter_cd.get(
+                    "formatted_value"
+                )
+                if formatted_value not in {
+                    None,
+                    "",
+                }:
+                    indicator_value = str(formatted_value)
+
+            if not indicator_value:
+                raw_indicator_value = (
+                    _coerce_scd_chart_numeric_value(
+                        cell.get("value")
+                    )
+                    if isinstance(cell, dict)
                     else None
-                ),
-            ]
-            for index, date_key in enumerate(dates)
-        ]
+                )
+
+                indicator_value = (
+                    f"{raw_indicator_value:,.2f}"
+                    if raw_indicator_value is not None
+                    else "N/A"
+                )
+
+            signal = (
+                cell.get("signal")
+                if isinstance(cell, dict)
+                else None
+            )
+
+            signal_text = (
+                str(signal)
+                if signal not in {
+                    None,
+                    "",
+                }
+                else "N/A"
+            )
+
+            customdata.append(
+                [
+                    str(date_key),
+                    (
+                        actual_prices[index]
+                        if index < len(actual_prices)
+                        else None
+                    ),
+                    indicator_value,
+                    signal_text,
+                ]
+            )
 
         if resolved_mode == "Stock price":
             chart_value_line = (
@@ -6142,6 +6201,8 @@ def _build_scd_single_price_chart_figure(
                     "<b>%{fullData.name}</b><br>"
                     "Date: %{customdata[0]}<br>"
                     f"{chart_value_line}"
+                    "Indicator value: %{customdata[2]}<br>"
+                    "Signal: %{customdata[3]}<br>"
                     "<extra></extra>"
                 ),
             )
