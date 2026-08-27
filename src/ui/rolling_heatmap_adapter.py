@@ -347,18 +347,26 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "CCI_10": {
         "display_name": "CCI (10)",
-        "definition": "Commodity Channel Index measures how far price has deviated from its statistical mean.",
-        "how_to_read": "Above +100 often indicates strength; below -100 often indicates weakness.",
+        "definition": "CCI measures how far price has deviated from its statistical mean.",
+        "how_to_read": "Above +150 often indicates strength; below -150 often indicates weakness.",
     },
     "CCI_14": {
         "display_name": "CCI (14)",
-        "definition": "Commodity Channel Index measures how far price is from its recent average.",
-        "how_to_read": "Bigger positive = price unusually strong; bigger negative = unusually weak.",
+        "definition": "Tells you if the price is unusually high/low relative to its recent normal behavior. Measures how far price is from its recent average.",
+        "how_to_read": (
+            "'Divergence'= price/indicator disagreement; Is price saying one story, but CCI a different one?<br>"
+            "⟶ Bearish= Price ⬆️ + CCI ⬇️  | Bullish= Price ⬇️ + CCI ⬆️<br>"
+            "'Zero-line'= Has the immediate momentum bias just shifted? (crossed '0')"
+        ),
     },
     "CCI_20": {
         "display_name": "CCI (20)",
-        "definition": "Commodity Channel Index measures how far price has deviated from its statistical mean.",
-        "how_to_read": "Longer length smooths swings; +100/-100 remain common reference levels.",
+        "definition": "CCI measures how far price has deviated from its statistical mean.",
+        "how_to_read": (
+            "'Divergence'= price/indicator disagreement; Is price saying one story, but CCI a different one?<br>"
+            "⟶ Bearish= Price ⬆️ + CCI ⬇️  | Bullish= Price ⬇️ + CCI ⬆️<br>"
+            "'Zero-line'= Has the immediate momentum bias just shifted? (crossed '0')"
+        ),
     },
     "ROC_9": {
         "display_name": "ROC(9)",
@@ -2721,7 +2729,13 @@ def build_plotly_heatmap_inputs(
             cmf_context_block = ""
             bullbear_context_block = ""
             bbp_exhaustion_context_block = ""
+            elder_ray_setup_value = None
             elder_ray_divergence_value = None
+
+            cci_context_block = ""
+            cci_divergence_value = None
+            cci_zero_line_crossover_value = None
+
             dpo_context_block = ""
             band_context_block = ""
             bb_bw_context_block = ""
@@ -2731,6 +2745,57 @@ def build_plotly_heatmap_inputs(
             crossover_summary_block = ""
             crossover_cell_text = ""
             crossover_spread = None
+
+            # CCI:
+            # Consume upstream-derived context only. Divergence and zero-line
+            # crossover truth are computed in technical.py and transported through
+            # the rolling payload extras. The adapter owns display formatting only.
+            if (
+                key.startswith("CCI_")
+                and isinstance(extra_map, dict)
+            ):
+                cci_divergence = extra_map.get(
+                    "cci_divergence"
+                )
+                cci_zero_line_crossover = extra_map.get(
+                    "cci_zero_line_crossover"
+                )
+
+                if cci_divergence in {
+                    "Bullish",
+                    "Bearish",
+                    "None",
+                }:
+                    cci_divergence_value = cci_divergence
+
+                if cci_zero_line_crossover in {
+                    "Uptrend Bias",
+                    "Downtrend Bias",
+                    "None",
+                }:
+                    cci_zero_line_crossover_value = (
+                        cci_zero_line_crossover
+                    )
+
+                cci_context_lines = []
+
+                if cci_divergence_value is not None:
+                    cci_context_lines.append(
+                        f"CCI Divergence: "
+                        f"{cci_divergence_value}"
+                    )
+
+                if cci_zero_line_crossover_value is not None:
+                    cci_context_lines.append(
+                        f"CCI Zero-Line Crossover: "
+                        f"{cci_zero_line_crossover_value}"
+                    )
+
+                if cci_context_lines:
+                    cci_context_block = (
+                        "<br>".join(cci_context_lines)
+                        + "<br>"
+                    )
 
             # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
@@ -3095,6 +3160,7 @@ def build_plotly_heatmap_inputs(
                     "Bearish",
                     "None",
                 }:
+                    elder_ray_setup_value = elder_ray_setup
                     parts.append(
                         f"Elder-Ray Setup: {elder_ray_setup}"
                     )
@@ -3153,7 +3219,7 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"Bear: {format_signed_number(bear_val, decimals=2)}{bear_suffix}")
 
                 if parts:
-                    bullbear_context_block = "<br>" + "<br>".join(parts) + "<br>"
+                    bullbear_context_block = "<br>".join(parts) + "<br>"
 
             # BBP DOWNSIDE EXHAUSTION:
             # Format upstream-derived factual context only.
@@ -3737,12 +3803,35 @@ def build_plotly_heatmap_inputs(
             # For crossover event rows, keep z score-driven but show spread
             # as the cell text because the event code is lower information-value
             # and remains available in hover as Event value.
-            z_row.append(float(s) if s is not None else float("nan"))
-            text_row.append(
+            z_row.append(
+                float(s)
+                if s is not None
+                else float("nan")
+            )
+
+            cell_text = (
                 crossover_cell_text
                 if _is_crossover_key(key) and crossover_cell_text
                 else format_cell_value(key, v)
             )
+
+            if key.startswith("CCI_") and cell_text:
+                if cci_zero_line_crossover_value == "Uptrend Bias":
+                    cell_text = f"{cell_text} ▲"
+                elif (
+                    cci_zero_line_crossover_value
+                    == "Downtrend Bias"
+                ):
+                    cell_text = f"{cell_text} ▼"
+
+            if key.startswith("BullBearPower_") and cell_text:
+                if elder_ray_setup_value == "Bullish":
+                    cell_text = f"{cell_text} ▲"
+                elif elder_ray_setup_value == "Bearish":
+                    cell_text = f"{cell_text} ▼"
+
+            text_row.append(cell_text)
+
             cd_row.append(
                 {
                     "indicator_key": key,
@@ -3785,6 +3874,14 @@ def build_plotly_heatmap_inputs(
                     "stoch_context_block": stoch_context_block,
                     "cmf_context_block": cmf_context_block,
                     "dpo_context_block": dpo_context_block,
+
+                    "cci_context_block": cci_context_block,
+                    "cci_divergence": cci_divergence_value,
+                    "cci_zero_line_crossover": (
+                        cci_zero_line_crossover_value
+                    ),
+
+                    "elder_ray_setup": elder_ray_setup_value,
                     "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
                     "bbp_exhaustion_context_block": (
@@ -3922,6 +4019,140 @@ def apply_bbp_divergence_text_overlay(
         )
 
 
+def apply_cci_divergence_text_overlay(
+    fig: go.Figure,
+    *,
+    text: List[List[str]],
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Replace displayed CCI cell text at confirmed divergence
+    coordinates with sparse Plotly text overlays.
+
+    Bullish divergence:
+        blue displayed value
+
+    Bearish divergence:
+        red displayed value
+
+    Divergence truth is supplied through adapter customdata.
+    This helper performs no CCI or price-series calculation.
+
+    The underlying Heatmap cell retains its score, background
+    color, customdata, hover behavior, and any zero-line
+    crossover glyph already appended to the cell text.
+    """
+    if not fig.data:
+        return
+
+    # Start from the Heatmap's CURRENT text, rather than the
+    # original input text. This preserves any text suppression
+    # already performed by an earlier overlay such as BBP.
+    base_text = [
+        list(row)
+        for row in fig.data[0].text
+    ]
+
+    bullish_x: List[Any] = []
+    bullish_y: List[Any] = []
+    bullish_text: List[str] = []
+
+    bearish_x: List[Any] = []
+    bearish_y: List[Any] = []
+    bearish_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if (
+            row_idx >= len(base_text)
+            or row_idx >= len(y)
+        ):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if (
+                col_idx >= len(base_text[row_idx])
+                or col_idx >= len(x)
+            ):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            if not indicator_key.startswith("CCI_"):
+                continue
+
+            divergence = cell.get(
+                "cci_divergence"
+            )
+
+            if divergence not in {
+                "Bullish",
+                "Bearish",
+            }:
+                continue
+
+            value_text = base_text[row_idx][col_idx]
+
+            if value_text in {
+                None,
+                "",
+            }:
+                continue
+
+            # Suppress the Heatmap's own text at this coordinate.
+            # The sparse Scatter trace becomes the sole visible
+            # value while preserving the underlying heatmap cell.
+            base_text[row_idx][col_idx] = ""
+
+            if divergence == "Bullish":
+                bullish_x.append(x[col_idx])
+                bullish_y.append(y[row_idx])
+                bullish_text.append(str(value_text))
+            else:
+                bearish_x.append(x[col_idx])
+                bearish_y.append(y[row_idx])
+                bearish_text.append(str(value_text))
+
+    fig.data[0].text = base_text
+
+    if bullish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bullish_x,
+                y=bullish_y,
+                mode="text",
+                text=bullish_text,
+                textfont=dict(
+                    size=12,
+                    color="blue",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if bearish_text:
+        fig.add_trace(
+            go.Scatter(
+                x=bearish_x,
+                y=bearish_y,
+                mode="text",
+                text=bearish_text,
+                textfont=dict(
+                    size=12,
+                    color="red",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
 # ----------------------------
 # Plotly figure (pure)
 # ----------------------------
@@ -3960,6 +4191,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
@@ -3993,6 +4225,14 @@ def make_rolling_heatmap_figure(
     )
 
     apply_bbp_divergence_text_overlay(
+        fig,
+        text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_cci_divergence_text_overlay(
         fig,
         text=hm.text,
         customdata=hm.customdata,

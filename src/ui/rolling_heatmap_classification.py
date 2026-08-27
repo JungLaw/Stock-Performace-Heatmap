@@ -1,4 +1,3 @@
-# Stamp: Thu, May 14, 2026 6:22PM
 # src/ui/rolling_heatmap_classification.py
 """
 Rolling Heatmap row-classification catalog.
@@ -459,21 +458,37 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "category": "Momentum",
         "scope": "Exhaustion Signals",
         "window": "ST",
-        "tags": [],
+        "tags": [
+            "Mean Reversion",
+            "Overextension",
+            "Divergence",
+            "Zero-Line Crossover",
+        ],
+
     },
     "CCI_14": {
         "family": "CCI",
         "category": "Momentum",
         "scope": "Exhaustion Signals",
         "window": "MT",
-        "tags": [],
+        "tags": [
+            "Mean Reversion",
+            "Overextension",
+            "Divergence",
+            "Zero-Line Crossover",
+        ],
     },
     "CCI_20": {
         "family": "CCI",
         "category": "Momentum",
         "scope": "Exhaustion Signals",
         "window": "LT",
-        "tags": [],
+        "tags": [
+            "Mean Reversion",
+            "Overextension",
+            "Divergence",
+            "Zero-Line Crossover",
+        ],
     },
 
     "UO_5_10_15": {

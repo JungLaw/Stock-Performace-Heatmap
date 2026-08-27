@@ -344,7 +344,7 @@ class SignalEngine:
         else:
             signal_series = pd.Series("neutral", index=df.index, dtype="object")
 
-        # RSI, MFI, ROC and Williams %R are classified only where their
+        # RSI, MFI, ROC, CCI and Williams %R are classified only where their
         # parameter-specific numeric values are initialized. Capture that
         # validity state before evaluating the rule block, then restore
         # missing observations before returning.
@@ -415,6 +415,7 @@ class SignalEngine:
                 "RSI": "RSI",
                 "MFI": "MFI",
                 "ROC": "ROC",
+                "CCI": "CCI",
                 "Williams_R": "WILLR",
             }
 
