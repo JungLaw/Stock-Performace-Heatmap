@@ -2157,6 +2157,19 @@ class DatabaseIntegratedTechnicalCalculator:
         elder_ray_setup_by_display_key: Dict[str, pd.Series] = {}
         elder_ray_divergence_by_display_key: Dict[str, pd.Series] = {}
 
+        # CCI context-only event truth.
+        #
+        # These series are derived from full df_ind history before the
+        # visible rolling window is sliced:
+        #
+        # - divergence uses the same confirmed five-bar PRICE pivots as BBP,
+        #   while sampling the applicable CCI series on the pivot dates;
+        # - zero-line crossover is an event-only transition in CCI itself.
+        #
+        # Neither context changes CCI rule-engine scores.
+        cci_divergence_by_display_key: Dict[str, pd.Series] = {}
+        cci_zero_line_crossover_by_display_key: Dict[str, pd.Series] = {}
+
         def _confirmed_swing_low_5bar(series: pd.Series) -> pd.Series:
             """
             Identify 5-bar structural swing lows on the actual pivot date.
@@ -2414,6 +2427,242 @@ class DatabaseIntegratedTechnicalCalculator:
                 display_key
             ] = divergence
 
+        # CCI — confirmed price/oscillator divergence and zero-line crossover.
+        #
+        # Context only:
+        # - no score changes;
+        # - no rulebook changes;
+        # - no back-painting.
+        #
+        # Reuse the same confirmed five-bar PRICE pivot helpers already used
+        # above by Elder-Ray divergence. CCI-specific semantics differ only in
+        # the sampled oscillator series and comparison.
+        for period in (10, 14, 20):
+            display_key = f"CCI_{period}"
+            cci_col = display_key
+
+            if cci_col not in df_ind.columns:
+                continue
+
+            cci = pd.to_numeric(
+                df_ind[cci_col],
+                errors="coerce",
+            )
+
+            # ----------------------------------------------------------
+            # CCI zero-line crossover
+            # ----------------------------------------------------------
+            prior_cci = cci.shift(1)
+            zero_cross_valid = (
+                cci.notna()
+                & prior_cci.notna()
+            )
+
+            zero_line_crossover = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            zero_line_crossover.loc[
+                zero_cross_valid
+            ] = "None"
+
+            uptrend_bias = (
+                zero_cross_valid
+                & (prior_cci <= 0)
+                & (cci > 0)
+            )
+
+            downtrend_bias = (
+                zero_cross_valid
+                & (prior_cci >= 0)
+                & (cci < 0)
+            )
+
+            zero_line_crossover.loc[
+                uptrend_bias
+            ] = "Uptrend Bias"
+
+            zero_line_crossover.loc[
+                downtrend_bias
+            ] = "Downtrend Bias"
+
+            cci_zero_line_crossover_by_display_key[
+                display_key
+            ] = zero_line_crossover
+
+            # ----------------------------------------------------------
+            # CCI divergence
+            # ----------------------------------------------------------
+            # Price owns the pivot dates.
+            #
+            # Bullish:
+            # lower PRICE swing low + higher CCI at the newer pivot.
+            #
+            # Bearish:
+            # higher PRICE swing high + lower CCI at the newer pivot.
+            #
+            # A pivot at t becomes knowable only at t+2, so any divergence
+            # event is emitted at t+2 rather than back-painted onto t.
+            low_pivots = _confirmed_swing_low_5bar(
+                df_ind["Low"]
+            )
+            high_pivots = _confirmed_swing_high_5bar(
+                df_ind["High"]
+            )
+
+            low_positions = np.flatnonzero(
+                low_pivots.to_numpy()
+            )
+            high_positions = np.flatnonzero(
+                high_pivots.to_numpy()
+            )
+
+            bullish_confirmation_positions: set[int] = set()
+            bearish_confirmation_positions: set[int] = set()
+
+            first_bullish_evaluable_position: int | None = None
+            first_bearish_evaluable_position: int | None = None
+
+            for previous_pos, current_pos in zip(
+                low_positions[:-1],
+                low_positions[1:],
+            ):
+                previous_price = df_ind["Low"].iloc[
+                    previous_pos
+                ]
+                current_price = df_ind["Low"].iloc[
+                    current_pos
+                ]
+                previous_cci = cci.iloc[previous_pos]
+                current_cci = cci.iloc[current_pos]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_cci,
+                        current_cci,
+                    )
+                ):
+                    continue
+
+                confirmation_pos = current_pos + 2
+
+                if confirmation_pos >= len(df_ind):
+                    continue
+
+                if first_bullish_evaluable_position is None:
+                    first_bullish_evaluable_position = (
+                        confirmation_pos
+                    )
+
+                if (
+                    current_price < previous_price
+                    and current_cci > previous_cci
+                ):
+                    bullish_confirmation_positions.add(
+                        confirmation_pos
+                    )
+
+            for previous_pos, current_pos in zip(
+                high_positions[:-1],
+                high_positions[1:],
+            ):
+                previous_price = df_ind["High"].iloc[
+                    previous_pos
+                ]
+                current_price = df_ind["High"].iloc[
+                    current_pos
+                ]
+                previous_cci = cci.iloc[previous_pos]
+                current_cci = cci.iloc[current_pos]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_cci,
+                        current_cci,
+                    )
+                ):
+                    continue
+
+                confirmation_pos = current_pos + 2
+
+                if confirmation_pos >= len(df_ind):
+                    continue
+
+                if first_bearish_evaluable_position is None:
+                    first_bearish_evaluable_position = (
+                        confirmation_pos
+                    )
+
+                if (
+                    current_price > previous_price
+                    and current_cci < previous_cci
+                ):
+                    bearish_confirmation_positions.add(
+                        confirmation_pos
+                    )
+
+            cci_divergence = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            # Match the existing BBP evaluability contract:
+            # "None" means both divergence directions are operational
+            # for this date and neither direction confirms today.
+            evaluable_positions = [
+                position
+                for position in (
+                    first_bullish_evaluable_position,
+                    first_bearish_evaluable_position,
+                )
+                if position is not None
+            ]
+
+            if len(evaluable_positions) == 2:
+                first_fully_evaluable_position = max(
+                    evaluable_positions
+                )
+                cci_divergence.iloc[
+                    first_fully_evaluable_position:
+                ] = "None"
+
+            # Directional events may validly occur before both directions
+            # become fully evaluable, so apply them after None initialization.
+            for confirmation_pos in bullish_confirmation_positions:
+                cci_divergence.iloc[
+                    confirmation_pos
+                ] = "Bullish"
+
+            for confirmation_pos in bearish_confirmation_positions:
+                cci_divergence.iloc[
+                    confirmation_pos
+                ] = "Bearish"
+
+            # Do not invent event precedence if a pathological same-date
+            # bullish/bearish collision ever occurs.
+            collision_positions = (
+                bullish_confirmation_positions
+                & bearish_confirmation_positions
+            )
+
+            for confirmation_pos in collision_positions:
+                cci_divergence.iloc[
+                    confirmation_pos
+                ] = pd.NA
+
+            cci_divergence_by_display_key[
+                display_key
+            ] = cci_divergence
+
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
@@ -2662,6 +2911,47 @@ class DatabaseIntegratedTechnicalCalculator:
                         if not pd.isna(raw_divergence):
                             extras["elder_ray_divergence"] = str(
                                 raw_divergence
+                            )
+
+                # CCI context-only transport.
+                #
+                # Divergence and zero-line crossover truth are derived above
+                # from full chronological history. The payload carries only
+                # the already-resolved labels; downstream adapter/UI layers
+                # must not recalculate either event.
+                if eng_name == "CCI":
+                    divergence_series = (
+                        cci_divergence_by_display_key.get(
+                            display_key
+                        )
+                    )
+
+                    if (
+                        isinstance(divergence_series, pd.Series)
+                        and dt in divergence_series.index
+                    ):
+                        raw_divergence = divergence_series.loc[dt]
+
+                        if not pd.isna(raw_divergence):
+                            extras["cci_divergence"] = str(
+                                raw_divergence
+                            )
+
+                    zero_cross_series = (
+                        cci_zero_line_crossover_by_display_key.get(
+                            display_key
+                        )
+                    )
+
+                    if (
+                        isinstance(zero_cross_series, pd.Series)
+                        and dt in zero_cross_series.index
+                    ):
+                        raw_zero_cross = zero_cross_series.loc[dt]
+
+                        if not pd.isna(raw_zero_cross):
+                            extras["cci_zero_line_crossover"] = str(
+                                raw_zero_cross
                             )
 
                 # MACD-specific payload enrichment:

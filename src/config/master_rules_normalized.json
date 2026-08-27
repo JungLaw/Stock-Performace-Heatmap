@@ -1,5 +1,5 @@
 {
-  "version": "0.2.18",
+  "version": "0.2.19",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -901,31 +901,31 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "CCI_10 > 150",
-              "buy": "CCI_10 > 100",
-              "neutral": "-100 <= CCI_10 <= 100",
-              "sell": "CCI_10 < -100",
-              "strong_sell": "CCI_10 < -150",
+              "strong_buy": "CCI_10 <= -200",
+              "buy": "CCI_10 <= -150 and CCI_10 > -200",
+              "neutral": "",
+              "sell": "CCI_10 > 150 and CCI_10 < 200",
+              "strong_sell": "CCI_10 >= 200",
               "normalization": "tanh(CCI/100)",
-              "notes": "Loose slope logic not used; CCI already measures deviation. \u00c2\u00b1150 = strong trending extremes."
+              "notes": "`<= -150`: material downside exhaustion (Buy), `<= -200`: severe downside exhaustion (Strong Buy), `> +150`:  material upside overextension (Sell), `>= +200`: severe upside overextension (Strong Sell)."
             },
             "14": {
-              "strong_buy": "CCI_14 > 150",
-              "buy": "CCI_14 > 100",
-              "neutral": "-100 <= CCI_14 <= 100",
-              "sell": "CCI_14 < -100",
-              "strong_sell": "CCI_14 < -150",
+              "strong_buy": "CCI_14 <= -200",
+              "buy": "CCI_14 <= -150 and CCI_14 > -200",
+              "neutral": "",
+              "sell": "CCI_14 > 150 and CCI_14 < 200",
+              "strong_sell": "CCI_14 >= 200",
               "normalization": "tanh(CCI/100)",
-              "notes": "Classic CCI(14) definitions."
+              "notes": "`<= -150`: material downside exhaustion (Buy), `<= -200`: severe downside exhaustion (Strong Buy), `> +150`:  material upside overextension (Sell), `>= +200`: severe upside overextension (Strong Sell)."
             },
             "20": {
-              "strong_buy": "CCI_20 > 150",
-              "buy": "CCI_20 > 100",
-              "neutral": "-100 <= CCI_20 <= 100",
-              "sell": "CCI_20 < -100",
-              "strong_sell": "CCI_20 < -150",
+              "strong_buy": "CCI_20 <= -200",
+              "buy": "CCI_20 <= -150 and CCI_20 > -200",
+              "neutral": "",
+              "sell": "CCI_20 > 150 and CCI_20 < 200",
+              "strong_sell": "CCI_20 >= 200",
               "normalization": "tanh(CCI/100)",
-              "notes": "Longer period reduces whipsaws (smoother) but uses same levels for comparability (threshold logic)."
+              "notes": "`<= -150`: material downside exhaustion (Buy), `<= -200`: severe downside exhaustion (Strong Buy), `> +150`:  material upside overextension (Sell), `>= +200`: severe upside overextension (Strong Sell)."
             }
           },
           "overlay": {

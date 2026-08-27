@@ -58,6 +58,7 @@ from ui.rolling_heatmap_selection import (
 from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     apply_bbp_divergence_text_overlay,
+    apply_cci_divergence_text_overlay,
     build_plotly_heatmap_inputs,
 )
 
@@ -4882,6 +4883,7 @@ def _build_scd_hover_customdata(
         "stoch_context_block",
         "dpo_context_block",
         "bullbear_context_block",
+        "cci_context_block",
         "rule_block",
         "notes_block",
         "definition_block",
@@ -5002,6 +5004,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
@@ -5036,6 +5039,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_cci_divergence_text_overlay(
         fig,
         text=text,
         customdata=customdata,
@@ -5336,6 +5347,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
             "%{customdata.signal_line}"
+            "%{customdata.cci_context_block}"
             "%{customdata.bbp_exhaustion_context_block}"
             "%{customdata.macd_context_block}"
             "%{customdata.stoch_context_block}"
@@ -5370,6 +5382,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_bbp_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
+    apply_cci_divergence_text_overlay(
         fig,
         text=text,
         customdata=customdata,
