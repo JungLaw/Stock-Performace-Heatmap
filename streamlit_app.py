@@ -5275,22 +5275,24 @@ def _build_scd_single_indicator_hover_customdata(
         )
     )
 
-    is_vwma = row_key.startswith("VWMA_")
+    is_crossover = _is_scd_crossover_event_row(
+        row_key
+    )
 
     volume_formatted = ""
     volume_delta_formatted = ""
 
-    if is_vwma:
+    if not is_crossover:
         volume_formatted = _format_compact_volume(
-            custom.get("vwma_volume_value")
+            custom.get("volume_value")
         )
 
         volume_delta_abs = custom.get(
-            "vwma_volume_delta"
+            "volume_delta"
         )
 
         volume_delta_pct = custom.get(
-            "vwma_volume_delta_pct"
+            "volume_delta_pct"
         )
 
         compact_volume_delta = (
@@ -5316,61 +5318,38 @@ def _build_scd_single_indicator_hover_customdata(
     custom["single_price_value_suffix"] = (
         f" | Price: {price_formatted}"
         if price_formatted
+        and not is_crossover
         else ""
     )
 
     custom["single_volume_value_suffix"] = (
         f" | Vol: {volume_formatted}"
         if volume_formatted
+        and not is_crossover
         else ""
     )
 
     custom["single_price_delta_suffix"] = (
-        (
-            f" | $: {price_delta}"
-            if is_vwma
-            else f" | Price: {price_delta}"
-        )
+        f" | $: {price_delta}"
         if price_delta
+        and not is_crossover
         else ""
     )
 
     custom["single_volume_delta_suffix"] = (
         f" | Vol: {volume_delta_formatted}"
         if volume_delta_formatted
+        and not is_crossover
         else ""
     )
 
-    if is_vwma:
-        indicator_delta_abs = custom.get(
-            "delta_abs"
-        )
-
-        indicator_delta_pct = custom.get(
-            "delta_pct"
-        )
-
-        try:
-            indicator_delta_line = (
-                "Δ vs prior day: "
-                f"{float(indicator_delta_abs):+.2f}"
-            )
-
-            if indicator_delta_pct is not None:
-                indicator_delta_line += (
-                    " "
-                    f"({float(indicator_delta_pct):+.1f}%)"
-                )
-        except (TypeError, ValueError):
-            indicator_delta_line = (
-                custom.get("delta_line", "")
-                .removesuffix("<br>")
-            )
-    else:
-        indicator_delta_line = (
-            custom.get("delta_line", "")
-            .removesuffix("<br>")
-        )
+    # Preserve the adapter-owned indicator delta formatting.
+    # This retains family-specific semantics such as ROC "pps",
+    # CMF zero-line handling, and BB Bandwidth display scaling.
+    indicator_delta_line = (
+        custom.get("delta_line", "")
+        .removesuffix("<br>")
+    )
 
     custom["single_combined_delta_line"] = (
         f"{indicator_delta_line}"
@@ -5378,11 +5357,12 @@ def _build_scd_single_indicator_hover_customdata(
         f"{custom.get('single_volume_delta_suffix', '')}"
         "<br>"
         if indicator_delta_line
+        and not is_crossover
         else ""
     )
 
     if (
-        _is_scd_crossover_event_row(row_key)
+        is_crossover
         and custom.get(
             "crossover_summary_block"
         )

@@ -3482,7 +3482,7 @@ def build_plotly_heatmap_inputs(
                     " ("
                     + format_signed_percent(
                         delta_pct,
-                        decimals=2,
+                        decimals=1,
                     )
                     + ")"
                     if delta_pct is not None
@@ -3526,7 +3526,7 @@ def build_plotly_heatmap_inputs(
                     " ("
                     + format_signed_percent(
                         delta_pct,
-                        decimals=2,
+                        decimals=1,
                     )
                     + ")"
                     if delta_pct is not None
@@ -3798,9 +3798,92 @@ def build_plotly_heatmap_inputs(
                             "<br>".join(semantic_parts) + "<br>"
                         )
 
-            vwma_volume_value = None
-            vwma_volume_delta = None
-            vwma_volume_delta_pct = None
+            volume_value = None
+            volume_delta = None
+            volume_delta_pct = None
+
+            # Generic SCD Single Indicator volume context.
+            #
+            # Consume already-loaded OHLCV only. These values are factual
+            # display context and do not affect indicator computation,
+            # signal truth, scores, or rule semantics.
+            #
+            # Crossover event rows intentionally retain their specialized
+            # hover and do not consume this generic two-line header.
+            if not _is_crossover_key(key):
+                current_volume_row = _lookup_hover_mapping(
+                    ohlcv_by_date,
+                    d_raw,
+                    {},
+                )
+
+                prev_volume_date = (
+                    raw_dates[idx - 1]
+                    if idx > 0
+                    else None
+                )
+
+                prev_volume_row = (
+                    _lookup_hover_mapping(
+                        ohlcv_by_date,
+                        prev_volume_date,
+                        {},
+                    )
+                    if prev_volume_date is not None
+                    else {}
+                )
+
+                volume_value = _to_float_or_none(
+                    current_volume_row.get("Volume")
+                    if isinstance(
+                        current_volume_row,
+                        dict,
+                    )
+                    else None
+                )
+
+                prev_volume_value = _to_float_or_none(
+                    prev_volume_row.get("Volume")
+                    if isinstance(
+                        prev_volume_row,
+                        dict,
+                    )
+                    else None
+                )
+
+                if (
+                    volume_value is not None
+                    and prev_volume_value is not None
+                ):
+                    volume_delta = (
+                        volume_value
+                        - prev_volume_value
+                    )
+
+                    if prev_volume_value != 0:
+                        volume_delta_pct = (
+                            volume_delta
+                            / prev_volume_value
+                            * 100.0
+                        )
+
+            # Preserve the existing VWMA-specific aliases for compatibility
+            # with the already-verified VWMA hover implementation.
+            vwma_volume_value = (
+                volume_value
+                if key.startswith("VWMA_")
+                else None
+            )
+            vwma_volume_delta = (
+                volume_delta
+                if key.startswith("VWMA_")
+                else None
+            )
+            vwma_volume_delta_pct = (
+                volume_delta_pct
+                if key.startswith("VWMA_")
+                else None
+            )
 
             # MVA: Custom hover content.
             #
@@ -3822,56 +3905,6 @@ def build_plotly_heatmap_inputs(
                     )
                 except Exception:
                     current_price = None
-
-                current_row = _lookup_hover_mapping(
-                    ohlcv_by_date,
-                    d_raw,
-                    {},
-                )
-
-                prev_date = (
-                    raw_dates[idx - 1]
-                    if idx > 0
-                    else None
-                )
-
-                prev_row = (
-                    _lookup_hover_mapping(
-                        ohlcv_by_date,
-                        prev_date,
-                        {},
-                    )
-                    if prev_date is not None
-                    else {}
-                )
-
-                vwma_volume_value = _to_float_or_none(
-                    current_row.get("Volume")
-                    if isinstance(current_row, dict)
-                    else None
-                )
-
-                prev_volume_value = _to_float_or_none(
-                    prev_row.get("Volume")
-                    if isinstance(prev_row, dict)
-                    else None
-                )
-
-                if (
-                    vwma_volume_value is not None
-                    and prev_volume_value is not None
-                ):
-                    vwma_volume_delta = (
-                        vwma_volume_value
-                        - prev_volume_value
-                    )
-
-                    if prev_volume_value != 0:
-                        vwma_volume_delta_pct = (
-                            vwma_volume_delta
-                            / prev_volume_value
-                            * 100.0
-                        )
 
                 try:
                     ma_value = (
@@ -4267,6 +4300,21 @@ def build_plotly_heatmap_inputs(
                     "vwma_volume_delta_pct": (
                         vwma_volume_delta_pct
                         if key.startswith("VWMA_")
+                        else None
+                    ),
+                    "volume_value": (
+                        volume_value
+                        if not _is_crossover_key(key)
+                        else None
+                    ),
+                    "volume_delta": (
+                        volume_delta
+                        if not _is_crossover_key(key)
+                        else None
+                    ),
+                    "volume_delta_pct": (
+                        volume_delta_pct
+                        if not _is_crossover_key(key)
                         else None
                     ),
                     "crossover_context_block": crossover_context_block,
@@ -4739,6 +4787,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.alignment_line}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
