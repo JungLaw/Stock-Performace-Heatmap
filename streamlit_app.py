@@ -59,6 +59,7 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     apply_bbp_divergence_text_overlay,
     apply_cci_divergence_text_overlay,
+    apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
 )
 
@@ -3607,19 +3608,21 @@ def _build_scd_moving_average_compute_config(
     if family == "HMA" and length == 55 and 50 not in atrp_lengths:
         atrp_lengths.append(50)
 
-    # VWMA rules use VWMA_slope, which the preprocessor resolves from vwma_anchor.
-    # The broad reference path anchors VWMA_slope to VWMA_20. Include VWMA_20
-    # whenever testing a non-20 VWMA row so the diagnostic candidate can match
-    # the broad path's alias behavior.
-    if family == "VWMA" and 20 not in base_lengths:
-        base_lengths.append(20)
+    # VWMA rules use the matching parameter-specific canonical slope and
+    # compare VWMA(n) with SMA(n). The selected-row refresh therefore needs
+    # the requested VWMA plus the matching SMA period; it no longer depends
+    # on the compatibility VWMA_slope alias anchored to VWMA(20).
+    matching_sma_lengths: list[int] = []
+
+    if family == "VWMA":
+        matching_sma_lengths.append(length)
 
     base_lengths = sorted(set(base_lengths))
     atrp_lengths = sorted(set(atrp_lengths))
 
-    return {
+    config: Dict[str, Any] = {
         family: base_lengths,
-        "ATR": atrp_lengths,
+        "ATR": sorted(set([*atrp_lengths, 14])),
         "ATRP": atrp_lengths,
         "SLOPE": {
             "window": 14,
@@ -3637,6 +3640,11 @@ def _build_scd_moving_average_compute_config(
             ],
         },
     }
+
+    if matching_sma_lengths:
+        config["SMA"] = sorted(set(matching_sma_lengths))
+
+    return config
 
 
 def _build_scd_selected_row_compute_config(row_key: str) -> Dict[str, Any]:
@@ -4868,6 +4876,7 @@ def _build_scd_hover_customdata(
 
     for key in [
         "ma_context_block",
+        "vwma_post_signal_block",
         "crossover_context_block",
         "crossover_summary_block",
         "delta_abs_fmt",
@@ -4917,10 +4926,11 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger and Bull/Bear Power rows already expose their user-facing
-    # information through structured adapter hover fields. Suppress the
-    # redundant raw payload summary in SCD so diagnostic-style payload text
-    # does not duplicate structured context or dominate hover geometry.
+    # Bollinger, Bull/Bear Power, and VWMA rows already expose their
+    # user-facing information through structured adapter hover fields.
+    # Suppress the redundant raw payload summary in SCD so diagnostic-style
+    # payload text does not duplicate structured context or dominate hover
+    # geometry.
     if (
         row_key in {
             "BB_PCT_B_ST",
@@ -4932,6 +4942,7 @@ def _build_scd_hover_customdata(
         }
         or row_key.startswith("BullBearPower_")
         or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
+        or row_key.startswith("VWMA_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5004,6 +5015,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
         "%{customdata.macd_context_block}"
@@ -5047,6 +5059,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_vwma_volume_extreme_text_overlay(
         fig,
         text=text,
         customdata=customdata,
@@ -5168,50 +5188,217 @@ def _build_scd_single_indicator_hover_customdata(
         try:
             delta_abs_txt = f"{float(delta_abs):+.2f}"
         except (TypeError, ValueError):
-            delta_abs_txt = str(price_customdata.get("delta_abs_fmt", "") or "").strip()
+            delta_abs_txt = str(
+                price_customdata.get(
+                    "delta_abs_fmt",
+                    "",
+                )
+                or ""
+            ).strip()
 
         delta_pct_txt = ""
         try:
-            delta_pct_txt = f" ({float(delta_pct):+.2f}%)"
+            delta_pct_txt = (
+                f" ({float(delta_pct):+.1f}%)"
+            )
         except (TypeError, ValueError):
-            delta_pct_txt = str(price_customdata.get("delta_pct_suffix", "") or "").strip()
+            delta_pct_txt = str(
+                price_customdata.get(
+                    "delta_pct_suffix",
+                    "",
+                )
+                or ""
+            ).strip()
 
-        combined = f"{delta_abs_txt}{delta_pct_txt}".strip()
+        combined = (
+            f"{delta_abs_txt}"
+            f"{delta_pct_txt}"
+        ).strip()
+
         return "" if combined == "-" else combined
 
-    price_formatted = _format_price_value_for_single_hover()
-    price_delta = _format_price_delta_for_single_hover()
-    price_trend = _derive_scd_price_trend_label(price_customdata)
+    def _format_compact_volume(
+        value: Any,
+        *,
+        signed: bool = False,
+    ) -> str:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return ""
+
+        if pd.isna(numeric):
+            return ""
+
+        sign = (
+            "+"
+            if signed and numeric > 0
+            else ""
+        )
+
+        magnitude = abs(numeric)
+
+        if magnitude >= 1_000_000_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000_000_000:.1f}B"
+            )
+
+        if magnitude >= 1_000_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000_000:.1f}M"
+            )
+
+        if magnitude >= 1_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000:.0f}K"
+            )
+
+        return (
+            f"{sign}"
+            f"{numeric:,.0f}"
+        )
+
+    price_formatted = (
+        _format_price_value_for_single_hover()
+    )
+
+    price_delta = (
+        _format_price_delta_for_single_hover()
+    )
+
+    price_trend = (
+        _derive_scd_price_trend_label(
+            price_customdata
+        )
+    )
+
+    is_vwma = row_key.startswith("VWMA_")
+
+    volume_formatted = ""
+    volume_delta_formatted = ""
+
+    if is_vwma:
+        volume_formatted = _format_compact_volume(
+            custom.get("vwma_volume_value")
+        )
+
+        volume_delta_abs = custom.get(
+            "vwma_volume_delta"
+        )
+
+        volume_delta_pct = custom.get(
+            "vwma_volume_delta_pct"
+        )
+
+        compact_volume_delta = (
+            _format_compact_volume(
+                volume_delta_abs,
+                signed=True,
+            )
+        )
+
+        if compact_volume_delta:
+            volume_delta_formatted = (
+                compact_volume_delta
+            )
+
+            try:
+                volume_delta_formatted += (
+                    " "
+                    f"({float(volume_delta_pct):+.1f}%)"
+                )
+            except (TypeError, ValueError):
+                pass
 
     custom["single_price_value_suffix"] = (
-        f" | Price: {price_formatted}" if price_formatted else ""
-    )
-    custom["single_price_delta_suffix"] = (
-        f" | Price: {price_delta}" if price_delta else ""
+        f" | Price: {price_formatted}"
+        if price_formatted
+        else ""
     )
 
-    indicator_delta_line = (
-        custom.get("delta_line", "")
-        .removesuffix("<br>")
+    custom["single_volume_value_suffix"] = (
+        f" | Vol: {volume_formatted}"
+        if volume_formatted
+        else ""
     )
+
+    custom["single_price_delta_suffix"] = (
+        (
+            f" | $: {price_delta}"
+            if is_vwma
+            else f" | Price: {price_delta}"
+        )
+        if price_delta
+        else ""
+    )
+
+    custom["single_volume_delta_suffix"] = (
+        f" | Vol: {volume_delta_formatted}"
+        if volume_delta_formatted
+        else ""
+    )
+
+    if is_vwma:
+        indicator_delta_abs = custom.get(
+            "delta_abs"
+        )
+
+        indicator_delta_pct = custom.get(
+            "delta_pct"
+        )
+
+        try:
+            indicator_delta_line = (
+                "Δ vs prior day: "
+                f"{float(indicator_delta_abs):+.2f}"
+            )
+
+            if indicator_delta_pct is not None:
+                indicator_delta_line += (
+                    " "
+                    f"({float(indicator_delta_pct):+.1f}%)"
+                )
+        except (TypeError, ValueError):
+            indicator_delta_line = (
+                custom.get("delta_line", "")
+                .removesuffix("<br>")
+            )
+    else:
+        indicator_delta_line = (
+            custom.get("delta_line", "")
+            .removesuffix("<br>")
+        )
 
     custom["single_combined_delta_line"] = (
         f"{indicator_delta_line}"
-        f"{custom.get('single_price_delta_suffix', '')}<br>"
+        f"{custom.get('single_price_delta_suffix', '')}"
+        f"{custom.get('single_volume_delta_suffix', '')}"
+        "<br>"
         if indicator_delta_line
         else ""
     )
 
-    if _is_scd_crossover_event_row(row_key) and custom.get("crossover_summary_block"):
+    if (
+        _is_scd_crossover_event_row(row_key)
+        and custom.get(
+            "crossover_summary_block"
+        )
+    ):
         custom["single_price_value_suffix"] = ""
+        custom["single_volume_value_suffix"] = ""
         custom["single_price_delta_suffix"] = ""
+        custom["single_volume_delta_suffix"] = ""
         custom["single_combined_delta_line"] = ""
         custom["scd_single_value_line"] = ""
     else:
         custom["scd_single_value_line"] = (
             f"{custom.get('value_label', 'Value')}: "
             f"{custom.get('formatted_value', '')}"
-            f"{custom.get('single_price_value_suffix', '')}<br>"
+            f"{custom.get('single_price_value_suffix', '')}"
+            f"{custom.get('single_volume_value_suffix', '')}<br>"
         )
 
     indicator_trend = custom.get("trend") or ""
@@ -5331,6 +5518,24 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.scd_payload_hover_block}"
             "<extra></extra>"
         )
+    elif row_key.startswith("VWMA_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.ma_context_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.vwma_post_signal_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
     else:
         hovertemplate = (
             "<b>%{customdata.display_name}</b><br>"
@@ -5397,6 +5602,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         y=date_labels,
     )
 
+    apply_vwma_volume_extreme_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)
 
     fig.update_layout(
@@ -5406,9 +5619,16 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         hoverlabel=dict(align="left"),
     )
 
-    fig.update_xaxes(side="top", type="category")
+    fig.update_xaxes(
+        side="top",
+        type="category",
+    )
+
     fig.update_yaxes(
-        autorange="reversed",
+        range=[
+            len(date_labels) - 0.5,
+            -0.5,
+        ],
         automargin=True,
         tickmode="array",
         tickvals=date_labels,

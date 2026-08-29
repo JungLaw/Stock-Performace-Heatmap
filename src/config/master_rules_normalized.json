@@ -1,5 +1,5 @@
 {
-  "version": "0.2.19",
+  "version": "0.2.20",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -323,31 +323,37 @@
         "feature_scopes": {
           "heatmap": {
             "10": {
-              "strong_buy": "Close > VWMA_10 and VWMA_slope > 0.002 and rising_2bar(VWMA_10)",
-              "buy": "Close > VWMA_10 and VWMA_slope > 0",
-              "neutral": "abs(Close/VWMA_10 - 1) <= 0.25 * ATRP_10",
-              "sell": "Close < VWMA_10 and VWMA_slope < 0",
-              "strong_sell": "Close < VWMA_10 and VWMA_slope < -0.002 and falling_2bar(VWMA_10)",
+              "strong_buy": "(Close - VWMA_10) / ATR_14 > 0.25 and (VWMA_10_slope__linreg_14 / VWMA_10) * 100 > 0.05 and (VWMA_10 - SMA_10) / ATR_14 >= 0.15 and (VWMA_10 / SMA_10 - 1) > lag(VWMA_10 / SMA_10 - 1, 1)",
+              "buy": "(Close - VWMA_10) / ATR_14 > 0.25 and (VWMA_10_slope__linreg_14 / VWMA_10) * 100 > 0.05 and ((VWMA_10 - SMA_10) / ATR_14 < 0.15 or (VWMA_10 / SMA_10 - 1) <= lag(VWMA_10 / SMA_10 - 1, 1))",
+              "neutral": "",
+              "sell": "(Close - VWMA_10) / ATR_14 < -0.25 and (VWMA_10_slope__linreg_14 / VWMA_10) * 100 < -0.05 and ((VWMA_10 - SMA_10) / ATR_14 > -0.15 or (VWMA_10 / SMA_10 - 1) >= lag(VWMA_10 / SMA_10 - 1, 1))",
+              "strong_sell": "(Close - VWMA_10) / ATR_14 < -0.25 and (VWMA_10_slope__linreg_14 / VWMA_10) * 100 < -0.05 and (VWMA_10 - SMA_10) / ATR_14 <= -0.15 and (VWMA_10 / SMA_10 - 1) < lag(VWMA_10 / SMA_10 - 1, 1)",
               "k": 0.25,
-              "notes": "VWMA uses 0.25 ATR% band (k-value). Volume-weighted slope gives cleaner trend view."
+              "slope_deadband_pct_per_bar": 0.05,
+              "strong_spread_atr": 0.15,
+              "notes": "VWMA(10) uses a 0.25 ATR(14) price-distance gate and its own normalized 14-bar regression slope. Strong states require the matching VWMA-SMA spread to exceed 0.15 ATR(14) in the signal direction and continue widening."
             },
             "20": {
-              "strong_buy": "Close > VWMA_20 and VWMA_slope > 0.0015 and rising_2bar(VWMA_20)",
-              "buy": "Close > VWMA_20 and VWMA_slope > 0",
-              "neutral": "abs(Close/VWMA_20 - 1) <= 0.5 * ATRP_20",
-              "sell": "Close < VWMA_20 and VWMA_slope < 0",
-              "strong_sell": "Close < VWMA_20 and VWMA_slope < -0.0015 and falling_2bar(VWMA_20)",
-              "k": 0.5,
-              "notes": "VWMA uses 0.50 ATR% band (k-value)."
+              "strong_buy": "(Close - VWMA_20) / ATR_14 > 0.50 and (VWMA_20_slope__linreg_14 / VWMA_20) * 100 > 0.05 and (VWMA_20 - SMA_20) / ATR_14 >= 0.15 and (VWMA_20 / SMA_20 - 1) > lag(VWMA_20 / SMA_20 - 1, 1)",
+              "buy": "(Close - VWMA_20) / ATR_14 > 0.50 and (VWMA_20_slope__linreg_14 / VWMA_20) * 100 > 0.05 and ((VWMA_20 - SMA_20) / ATR_14 < 0.15 or (VWMA_20 / SMA_20 - 1) <= lag(VWMA_20 / SMA_20 - 1, 1))",
+              "neutral": "",
+              "sell": "(Close - VWMA_20) / ATR_14 < -0.50 and (VWMA_20_slope__linreg_14 / VWMA_20) * 100 < -0.05 and ((VWMA_20 - SMA_20) / ATR_14 > -0.15 or (VWMA_20 / SMA_20 - 1) >= lag(VWMA_20 / SMA_20 - 1, 1))",
+              "strong_sell": "(Close - VWMA_20) / ATR_14 < -0.50 and (VWMA_20_slope__linreg_14 / VWMA_20) * 100 < -0.05 and (VWMA_20 - SMA_20) / ATR_14 <= -0.15 and (VWMA_20 / SMA_20 - 1) < lag(VWMA_20 / SMA_20 - 1, 1)",
+              "k": 0.50,
+              "slope_deadband_pct_per_bar": 0.05,
+              "strong_spread_atr": 0.15,
+              "notes": "Buy/Sell: Price sufficiently above/below VWMA + VWMA's normalized 14-bar slope sufficiently rising/falling\nStrong Buy: Buy conditions + VWMA sufficiently above SMA + VWMA moving further above SMA\nStrong Sell: Sell conditions + VWMA sufficiently below SMA + VWMA moving further below SMA"
             },
             "50": {
-              "strong_buy": "Close > VWMA_50 and VWMA_slope > 0.001 and rising_2bar(VWMA_50)",
-              "buy": "Close > VWMA_50 and VWMA_slope > 0",
-              "neutral": "abs(Close/VWMA_50 - 1) <= 1.0 * ATRP_50",
-              "sell": "Close < VWMA_50 and VWMA_slope < 0",
-              "strong_sell": "Close < VWMA_50 and VWMA_slope < -0.001 and falling_2bar(VWMA_50)",
-              "k": 1.0,
-              "notes": "Neutral band: 1.0 ATR% band (k-value); slope threshold scaled for long-term."
+              "strong_buy": "(Close - VWMA_50) / ATR_14 > 1.00 and (VWMA_50_slope__linreg_14 / VWMA_50) * 100 > 0.05 and (VWMA_50 - SMA_50) / ATR_14 >= 0.15 and (VWMA_50 / SMA_50 - 1) > lag(VWMA_50 / SMA_50 - 1, 1)",
+              "buy": "(Close - VWMA_50) / ATR_14 > 1.00 and (VWMA_50_slope__linreg_14 / VWMA_50) * 100 > 0.05 and ((VWMA_50 - SMA_50) / ATR_14 < 0.15 or (VWMA_50 / SMA_50 - 1) <= lag(VWMA_50 / SMA_50 - 1, 1))",
+              "neutral": "",
+              "sell": "(Close - VWMA_50) / ATR_14 < -1.00 and (VWMA_50_slope__linreg_14 / VWMA_50) * 100 < -0.05 and ((VWMA_50 - SMA_50) / ATR_14 > -0.15 or (VWMA_50 / SMA_50 - 1) >= lag(VWMA_50 / SMA_50 - 1, 1))",
+              "strong_sell": "(Close - VWMA_50) / ATR_14 < -1.00 and (VWMA_50_slope__linreg_14 / VWMA_50) * 100 < -0.05 and (VWMA_50 - SMA_50) / ATR_14 <= -0.15 and (VWMA_50 / SMA_50 - 1) < lag(VWMA_50 / SMA_50 - 1, 1)",
+              "k": 1.00,
+              "slope_deadband_pct_per_bar": 0.05,
+              "strong_spread_atr": 0.15,
+              "notes": "VWMA(50) uses a 1.00 ATR(14) price-distance gate and its own normalized 14-bar regression slope. Strong states require the matching VWMA-SMA spread to exceed 0.15 ATR(14) in the signal direction and continue widening."
             }
           },
           "overlay": {

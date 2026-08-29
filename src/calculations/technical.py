@@ -2663,6 +2663,280 @@ class DatabaseIntegratedTechnicalCalculator:
                 display_key
             ] = cci_divergence
 
+        # VWMA context-only hover truth.
+        #
+        # Derive these series once from full chronological history before
+        # presentation-window reduction. They do not alter VWMA score truth.
+        #
+        # Per VWMA horizon:
+        # - price distance is normalized by ATR(14)
+        # - VWMA/SMA spread is shown as a percentage difference
+        # - spread direction compares the current spread with the prior bar
+        # - VWMA/SMA trends are simple day-over-day directions
+        # - volume activity compares current volume with that VWMA horizon's
+        #   average volume
+        #
+        # The 120-session volume percentile is shared by VWMA(10/20/50)
+        # because it answers a stock-relative anomaly question rather than
+        # a horizon-relative participation question.
+        vwma_context_by_display_key: Dict[
+            str,
+            Dict[str, pd.Series],
+        ] = {}
+
+        volume_series = None
+        volume_percentile_120 = None
+        vwma_volume_extreme_event = None
+
+        if "Volume" in df_ind.columns:
+            volume_series = pd.to_numeric(
+                df_ind["Volume"],
+                errors="coerce",
+            )
+
+            volume_percentile_120 = (
+                volume_series
+                .rolling(
+                    window=120,
+                    min_periods=120,
+                )
+                .rank(pct=True)
+                * 100.0
+            )
+
+            if "Close" in df_ind.columns:
+                close_for_volume_event = pd.to_numeric(
+                    df_ind["Close"],
+                    errors="coerce",
+                )
+
+                price_delta = close_for_volume_event.diff()
+
+                vwma_volume_extreme_event = pd.Series(
+                    pd.NA,
+                    index=df_ind.index,
+                    dtype="object",
+                )
+
+                high_volume = (
+                    volume_percentile_120 >= 95.0
+                )
+
+                low_volume = (
+                    volume_percentile_120 <= 5.0
+                )
+
+                price_up = price_delta > 0.0
+                price_down = price_delta < 0.0
+
+                vwma_volume_extreme_event.loc[
+                    high_volume & price_up
+                ] = "high_up"
+
+                vwma_volume_extreme_event.loc[
+                    high_volume & price_down
+                ] = "high_down"
+
+                vwma_volume_extreme_event.loc[
+                    low_volume & price_up
+                ] = "low_up"
+
+                vwma_volume_extreme_event.loc[
+                    low_volume & price_down
+                ] = "low_down"
+
+        for meta in optionc_meta:
+            if meta.get("engine_indicator") != "VWMA":
+                continue
+
+            display_key = str(
+                meta.get("display_key", "")
+            )
+
+            param_key = str(
+                meta.get("param_key", "")
+            )
+
+            try:
+                period = int(param_key)
+            except (TypeError, ValueError):
+                continue
+
+            vwma_col = f"VWMA_{period}"
+            sma_col = f"SMA_{period}"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                "Close",
+                vwma_col,
+                sma_col,
+                atr_col,
+            ]
+
+            if not all(
+                col in df_ind.columns
+                for col in required_cols
+            ):
+                continue
+
+            close = pd.to_numeric(
+                df_ind["Close"],
+                errors="coerce",
+            )
+
+            vwma = pd.to_numeric(
+                df_ind[vwma_col],
+                errors="coerce",
+            )
+
+            sma = pd.to_numeric(
+                df_ind[sma_col],
+                errors="coerce",
+            )
+
+            atr = (
+                pd.to_numeric(
+                    df_ind[atr_col],
+                    errors="coerce",
+                )
+                .replace(0.0, np.nan)
+            )
+
+            safe_sma = sma.replace(
+                0.0,
+                np.nan,
+            )
+
+            price_distance_atr = (
+                close - vwma
+            ) / atr
+
+            vwma_sma_spread_abs = (
+                vwma - sma
+            )
+
+            vwma_sma_spread_pct = (
+                (vwma / safe_sma) - 1.0
+            ) * 100.0
+
+            spread_delta = (
+                vwma_sma_spread_pct.diff()
+            )
+
+            spread_direction = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            spread_direction.loc[
+                spread_delta > 0
+            ] = "Rising"
+
+            spread_direction.loc[
+                spread_delta < 0
+            ] = "Falling"
+
+            spread_direction.loc[
+                spread_delta == 0
+            ] = "Unchanged"
+
+            vwma_delta = vwma.diff()
+
+            vwma_direction = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            vwma_direction.loc[
+                vwma_delta > 0
+            ] = "Rising"
+
+            vwma_direction.loc[
+                vwma_delta < 0
+            ] = "Falling"
+
+            vwma_direction.loc[
+                vwma_delta == 0
+            ] = "Unchanged"
+
+            sma_delta = sma.diff()
+
+            sma_direction = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            sma_direction.loc[
+                sma_delta > 0
+            ] = "Rising"
+
+            sma_direction.loc[
+                sma_delta < 0
+            ] = "Falling"
+
+            sma_direction.loc[
+                sma_delta == 0
+            ] = "Unchanged"
+
+            volume_ratio = None
+
+            if isinstance(
+                volume_series,
+                pd.Series,
+            ):
+                average_volume = (
+                    volume_series
+                    .rolling(
+                        window=period,
+                        min_periods=period,
+                    )
+                    .mean()
+                    .replace(0.0, np.nan)
+                )
+
+                volume_ratio = (
+                    volume_series
+                    / average_volume
+                ).replace(
+                    [np.inf, -np.inf],
+                    np.nan,
+                )
+
+            vwma_context_by_display_key[
+                display_key
+            ] = {
+                "price_distance_atr": (
+                    price_distance_atr
+                ),
+                "vwma_sma_spread_abs": (
+                    vwma_sma_spread_abs
+                ),
+                "vwma_sma_spread_pct": (
+                    vwma_sma_spread_pct
+                ),
+                "spread_direction": (
+                    spread_direction
+                ),
+                "vwma_direction": (
+                    vwma_direction
+                ),
+                "sma_direction": (
+                    sma_direction
+                ),
+                "volume_ratio": (
+                    volume_ratio
+                ),
+                "volume_percentile_120": (
+                    volume_percentile_120
+                ),
+                "volume_extreme_event": (
+                    vwma_volume_extreme_event
+                ),
+            }
+
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
@@ -2953,6 +3227,109 @@ class DatabaseIntegratedTechnicalCalculator:
                             extras["cci_zero_line_crossover"] = str(
                                 raw_zero_cross
                             )
+
+                # VWMA context-only transport.
+                #
+                # All numeric/directional truth is derived once above from
+                # full chronological history. Downstream adapter/UI code owns
+                # formatting only and must not recalculate these values.
+                if eng_name == "VWMA":
+                    vwma_context = (
+                        vwma_context_by_display_key.get(
+                            display_key,
+                            {}
+                        )
+                    )
+
+                    numeric_context_keys = {
+                        "price_distance_atr": (
+                            "vwma_price_distance_atr"
+                        ),
+                        "vwma_sma_spread_abs": (
+                            "vwma_sma_spread_abs"
+                        ),
+                        "vwma_sma_spread_pct": (
+                            "vwma_sma_spread_pct"
+                        ),
+                        "volume_ratio": (
+                            "vwma_volume_ratio"
+                        ),
+                        "volume_percentile_120": (
+                            "volume_percentile_120"
+                        ),
+                    }
+
+                    for (
+                        source_key,
+                        extras_key,
+                    ) in numeric_context_keys.items():
+                        series = vwma_context.get(
+                            source_key
+                        )
+
+                        if (
+                            isinstance(series, pd.Series)
+                            and dt in series.index
+                        ):
+                            raw_context_value = (
+                                series.loc[dt]
+                            )
+
+                            if not pd.isna(
+                                raw_context_value
+                            ):
+                                extras[
+                                    extras_key
+                                ] = float(
+                                    raw_context_value
+                                )
+
+                    text_context_keys = {
+                        "spread_direction": (
+                            "vwma_sma_spread_direction"
+                        ),
+                        "vwma_direction": (
+                            "vwma_direction"
+                        ),
+                        "sma_direction": (
+                            "sma_direction"
+                        ),
+                        "volume_extreme_event": (
+                            "vwma_volume_extreme_event"
+                        ),
+                    }
+
+                    for (
+                        source_key,
+                        extras_key,
+                    ) in text_context_keys.items():
+                        series = vwma_context.get(
+                            source_key
+                        )
+
+                        if (
+                            isinstance(series, pd.Series)
+                            and dt in series.index
+                        ):
+                            raw_context_value = (
+                                series.loc[dt]
+                            )
+
+                            if not pd.isna(
+                                raw_context_value
+                            ):
+                                extras[
+                                    extras_key
+                                ] = str(
+                                    raw_context_value
+                                )
+
+                    try:
+                        extras["vwma_volume_avg_period"] = int(
+                            param_key
+                        )
+                    except (TypeError, ValueError):
+                        pass
 
                 # MACD-specific payload enrichment:
                 # keep histogram as the row value, but expose line/signal for hover.

@@ -242,19 +242,58 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "VWMA_10": {
         "display_name": "VWMA (10)",
-        "definition": "Volume Weighted Moving Average weights price by volume over the last 10 periods.",
-        "how_to_read": "Short-term trend reference. Because it is volume-weighted, heavier-volume sessions influence the average more than low-volume sessions.",
+        "definition": (
+            "VWMA weights price by volume "
+            "over the last 10 periods."
+        ),
+        "how_to_read": (
+            "VWMA vs SMA: shows how far the volume-wtd average sits "
+            "above/below the matching simple average.<br>"
+            "Spread Rising/Falling: if the spread increased or decreased today.<br>"
+            "1D Direction: compares today's VWMA and SMA with their respective prior-day values.<br>"
+            "Volume Activity: compares today's volume vs 10-day average "
+            "and also shows its percentile w/n the trailing 120 sessions.<br>"
+            "Ex: 1.42× 10D avg means today's volume is 42% above the "
+            "10-day average; 93rd pct means today's volume is higher than "
+            "about 93% of observations in the 120-session comparison window."
+        ),
     },
     "VWMA_20": {
         "display_name": "VWMA (20)",
-        "definition": "Volume Weighted Moving Average weights price by volume over the last 20 periods.",
-        "how_to_read": "Medium-term trend reference. In Wave 1, shading should reflect engine-native VWMA rule scores while the displayed value remains the raw VWMA numeric value.",
+        "definition": (
+            "VVWMA weights price by volume "
+            "over the last 20 periods."
+        ),
+        "how_to_read": (
+            "VWMA vs SMA: how far the VWMA sits "
+            "above/below the matching SMA.<br>"
+            "Spread Rising/Falling: if the spread increased or decreased today.<br>"
+            "1D Direction: how VWMA and SMA compares vs prior day.<br>"
+            "Volume Activity: compares today's volume vs 20-day average "
+            "and also shows its percentile w/n the trailing 120 sessions.<br>"
+            "Ex: `0.56×20D avg | 2nd pct`: if today's volume is 8.7M shares, then the 20D avg "
+            "is 15.6M (8.7/0.56); 2nd pct means only 2.4 days (120x.02) had "
+            "lower volume and 117.6 days (120*.98) had higher in last 120 sessions."
+        ),
     },
     "VWMA_50": {
         "display_name": "VWMA (50)",
-        "definition": "Volume Weighted Moving Average weights price by volume over the last 50 periods.",
-        "how_to_read": "Longer-term trend reference. Smoother than VWMA(10) and VWMA(20), with more emphasis on persistent, volume-backed trend direction.",
-    },    
+        "definition": (
+            "VWMA weights price by volume "
+            "over the last 50 periods."
+        ),
+        "how_to_read": (
+            "VWMA vs SMA: shows how far the volume-wtd average sits "
+            "above/below the matching simple average.<br>"
+            "Spread Rising/Falling: if the spread increased or decreased today.<br>"
+            "1D Direction: compares today's VWMA and SMA with their respective prior-day values.<br>"
+            "Volume Activity: compares today's volume vs 50-day average "
+            "and also shows its percentile w/n the trailing 120 sessions.<br>"
+            "Ex: 1.42× 50D avg means today's volume is 42% above the "
+            "50-day average; 93rd pct means today's volume is higher than "
+            "about 93% of observations in the 120-session comparison window."
+        ),
+    },
     # Momentum / oscillators
     "RSI_10": {
         "display_name": "RSI(10)",
@@ -2740,6 +2779,8 @@ def build_plotly_heatmap_inputs(
             band_context_block = ""
             bb_bw_context_block = ""
             ma_context_block = ""
+            vwma_post_signal_block = ""
+            vwma_volume_extreme_event_value = None
             adx_context_block = ""
             crossover_context_block = ""
             crossover_summary_block = ""
@@ -3757,46 +3798,387 @@ def build_plotly_heatmap_inputs(
                             "<br>".join(semantic_parts) + "<br>"
                         )
 
-            # MVA: Custom hover content (deltas)
+            vwma_volume_value = None
+            vwma_volume_delta = None
+            vwma_volume_delta_pct = None
+
+            # MVA: Custom hover content.
+            #
+            # VWMA consumes upstream-derived semantic context from technical.py.
+            # Keep Price vs VWMA before Signal. The remaining VWMA context is
+            # carried separately so the UI can place it immediately after Signal.
+            # SMA / EMA / HMA retain the existing generic price-vs-MA display.
             if (
-                not _is_crossover_key(key)
-                and (
-                    key.startswith("SMA_")
-                    or key.startswith("EMA_")
-                    or key.startswith("VWMA_")
-                    or key.startswith("HMA_")
-                )
+                key.startswith("VWMA_")
+                and isinstance(extra_map, dict)
             ):
                 current_price = price_by_date.get(d_raw)
 
                 try:
-                    current_price = float(current_price) if not _is_missing(current_price) else None
+                    current_price = (
+                        float(current_price)
+                        if not _is_missing(current_price)
+                        else None
+                    )
                 except Exception:
                     current_price = None
 
+                current_row = _lookup_hover_mapping(
+                    ohlcv_by_date,
+                    d_raw,
+                    {},
+                )
+
+                prev_date = (
+                    raw_dates[idx - 1]
+                    if idx > 0
+                    else None
+                )
+
+                prev_row = (
+                    _lookup_hover_mapping(
+                        ohlcv_by_date,
+                        prev_date,
+                        {},
+                    )
+                    if prev_date is not None
+                    else {}
+                )
+
+                vwma_volume_value = _to_float_or_none(
+                    current_row.get("Volume")
+                    if isinstance(current_row, dict)
+                    else None
+                )
+
+                prev_volume_value = _to_float_or_none(
+                    prev_row.get("Volume")
+                    if isinstance(prev_row, dict)
+                    else None
+                )
+
+                if (
+                    vwma_volume_value is not None
+                    and prev_volume_value is not None
+                ):
+                    vwma_volume_delta = (
+                        vwma_volume_value
+                        - prev_volume_value
+                    )
+
+                    if prev_volume_value != 0:
+                        vwma_volume_delta_pct = (
+                            vwma_volume_delta
+                            / prev_volume_value
+                            * 100.0
+                        )
+
                 try:
-                    ma_value = float(v) if not _is_missing(v) else None
+                    ma_value = (
+                        float(v)
+                        if not _is_missing(v)
+                        else None
+                    )
                 except Exception:
                     ma_value = None
 
                 diff_abs = None
                 diff_pct = None
 
-                if current_price is not None and ma_value not in (None, 0):
+                if (
+                    current_price is not None
+                    and ma_value not in (
+                        None,
+                        0,
+                    )
+                ):
                     try:
-                        diff_abs = current_price - ma_value
+                        diff_abs = (
+                            current_price
+                            - ma_value
+                        )
                     except Exception:
                         diff_abs = None
 
                     try:
-                        diff_pct = ((current_price / ma_value) - 1.0) * 100.0
+                        diff_pct = (
+                            (
+                                current_price
+                                / ma_value
+                            )
+                            - 1.0
+                        ) * 100.0
                     except Exception:
                         diff_pct = None
 
                 if diff_abs is not None:
-                    pct_suffix = f" ({diff_pct:+.1f}%)" if diff_pct is not None else ""
+                    pct_suffix = (
+                        f" ({diff_pct:+.1f}%)"
+                        if diff_pct is not None
+                        else ""
+                    )
+
                     ma_context_block = (
-                        f"<br>Price vs. MA: {diff_abs:+.2f}{pct_suffix}<br>"
+                        "Price vs. MA: "
+                        f"{diff_abs:+.2f}"
+                        f"{pct_suffix}"
+                        "<br>"
+                    )
+
+                vwma_post_signal_lines = []
+
+                spread_abs = extra_map.get(
+                    "vwma_sma_spread_abs"
+                )
+
+                spread_pct = extra_map.get(
+                    "vwma_sma_spread_pct"
+                )
+
+                spread_direction = extra_map.get(
+                    "vwma_sma_spread_direction"
+                )
+
+                if not _is_missing(spread_pct):
+                    try:
+                        spread_line = (
+                            "VWMA vs SMA: "
+                        )
+
+                        if not _is_missing(
+                            spread_abs
+                        ):
+                            spread_line += (
+                                f"{float(spread_abs):+.2f} "
+                                f"({float(spread_pct):+.2f}%)"
+                            )
+                        else:
+                            spread_line += (
+                                f"{float(spread_pct):+.2f}%"
+                            )
+
+                        if spread_direction in {
+                            "Rising",
+                            "Falling",
+                            "Unchanged",
+                        }:
+                            spread_line += (
+                                f" | Spread {spread_direction}"
+                            )
+
+                        vwma_post_signal_lines.append(
+                            spread_line
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                vwma_direction = extra_map.get(
+                    "vwma_direction"
+                )
+
+                sma_direction = extra_map.get(
+                    "sma_direction"
+                )
+
+                if (
+                    vwma_direction in {
+                        "Rising",
+                        "Falling",
+                        "Unchanged",
+                    }
+                    and sma_direction in {
+                        "Rising",
+                        "Falling",
+                        "Unchanged",
+                    }
+                ):
+                    vwma_post_signal_lines.append(
+                        "1D Direction: "
+                        f"VWMA {vwma_direction} | "
+                        f"SMA {sma_direction}"
+                    )
+
+                volume_ratio = extra_map.get(
+                    "vwma_volume_ratio"
+                )
+
+                volume_percentile = extra_map.get(
+                    "volume_percentile_120"
+                )
+
+                volume_avg_period = extra_map.get(
+                    "vwma_volume_avg_period"
+                )
+
+                vwma_volume_extreme_event_value = extra_map.get(
+                    "vwma_volume_extreme_event"
+                )
+
+                if vwma_volume_extreme_event_value not in {
+                    "high_up",
+                    "high_down",
+                    "low_up",
+                    "low_down",
+                }:
+                    vwma_volume_extreme_event_value = None
+
+                if not _is_missing(volume_ratio):
+                    try:
+                        volume_line = (
+                            "Volume Activity: "
+                            f"{float(volume_ratio):.2f}×"
+                        )
+
+                        if not _is_missing(
+                            volume_avg_period
+                        ):
+                            try:
+                                volume_line += (
+                                    f" {int(volume_avg_period)}D avg"
+                                )
+                            except (
+                                TypeError,
+                                ValueError,
+                            ):
+                                pass
+
+                        if not _is_missing(
+                            volume_percentile
+                        ):
+                            try:
+                                percentile_int = int(
+                                    round(
+                                        float(
+                                            volume_percentile
+                                        )
+                                    )
+                                )
+
+                                if (
+                                    10
+                                    <= percentile_int % 100
+                                    <= 20
+                                ):
+                                    ordinal_suffix = "th"
+                                else:
+                                    ordinal_suffix = {
+                                        1: "st",
+                                        2: "nd",
+                                        3: "rd",
+                                    }.get(
+                                        percentile_int % 10,
+                                        "th",
+                                    )
+
+                                volume_line += (
+                                    " | "
+                                    f"{percentile_int}"
+                                    f"{ordinal_suffix} pct"
+                                )
+                            except (
+                                TypeError,
+                                ValueError,
+                            ):
+                                pass
+
+                        volume_event_display = {
+                            "high_up": "High ▲ | Price Up",
+                            "high_down": "High ▲ | Price Down",
+                            "low_up": "Low ▼ | Price Up",
+                            "low_down": "Low ▼ | Price Down",
+                        }.get(
+                            vwma_volume_extreme_event_value
+                        )
+
+                        if volume_event_display:
+                            volume_line += (
+                                f" | {volume_event_display}"
+                            )
+
+                        vwma_post_signal_lines.append(
+                            volume_line
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if vwma_post_signal_lines:
+                    vwma_post_signal_block = (
+                        "<br>".join(
+                            vwma_post_signal_lines
+                        )
+                        + "<br>"
+                    )
+
+            elif (
+                not _is_crossover_key(key)
+                and (
+                    key.startswith("SMA_")
+                    or key.startswith("EMA_")
+                    or key.startswith("HMA_")
+                )
+            ):
+                current_price = price_by_date.get(d_raw)
+
+                try:
+                    current_price = (
+                        float(current_price)
+                        if not _is_missing(current_price)
+                        else None
+                    )
+                except Exception:
+                    current_price = None
+
+                try:
+                    ma_value = (
+                        float(v)
+                        if not _is_missing(v)
+                        else None
+                    )
+                except Exception:
+                    ma_value = None
+
+                diff_abs = None
+                diff_pct = None
+
+                if (
+                    current_price is not None
+                    and ma_value not in (
+                        None,
+                        0,
+                    )
+                ):
+                    try:
+                        diff_abs = (
+                            current_price
+                            - ma_value
+                        )
+                    except Exception:
+                        diff_abs = None
+
+                    try:
+                        diff_pct = (
+                            (
+                                current_price
+                                / ma_value
+                            )
+                            - 1.0
+                        ) * 100.0
+                    except Exception:
+                        diff_pct = None
+
+                if diff_abs is not None:
+                    pct_suffix = (
+                        f" ({diff_pct:+.1f}%)"
+                        if diff_pct is not None
+                        else ""
+                    )
+
+                    ma_context_block = (
+                        "<br>"
+                        "Price vs. MA: "
+                        f"{diff_abs:+.2f}"
+                        f"{pct_suffix}"
+                        "<br>"
                     )
 
             # z must be numeric; use NaN for missing.
@@ -3866,6 +4248,27 @@ def build_plotly_heatmap_inputs(
                     "volume_vs_avg_block": volume_vs_avg_block,
                     "band_context_block": band_context_block,
                     "ma_context_block": ma_context_block,
+                    "vwma_post_signal_block": vwma_post_signal_block,
+                    "vwma_volume_extreme_event": (
+                        vwma_volume_extreme_event_value
+                        if key.startswith("VWMA_")
+                        else None
+                    ),
+                    "vwma_volume_value": (
+                        vwma_volume_value
+                        if key.startswith("VWMA_")
+                        else None
+                    ),
+                    "vwma_volume_delta": (
+                        vwma_volume_delta
+                        if key.startswith("VWMA_")
+                        else None
+                    ),
+                    "vwma_volume_delta_pct": (
+                        vwma_volume_delta_pct
+                        if key.startswith("VWMA_")
+                        else None
+                    ),
                     "crossover_context_block": crossover_context_block,
                     "crossover_summary_block": crossover_summary_block,
                     "crossover_spread": crossover_spread,
@@ -4153,6 +4556,151 @@ def apply_cci_divergence_text_overlay(
             )
         )
 
+
+def apply_vwma_volume_extreme_text_overlay(
+    fig: go.Figure,
+    *,
+    text: List[List[str]],
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Render VWMA volume-extreme context as a sparse text overlay.
+
+    Arrow meaning:
+        ▲ = volume percentile >= 95
+        ▼ = volume percentile <= 5
+
+    Font color meaning:
+        blue = price closed above the prior Close
+        red  = price closed below the prior Close
+
+    Event truth is supplied through adapter customdata.
+    This helper performs no price, volume, percentile, or signal
+    calculation and does not alter score/background semantics.
+    """
+    if not fig.data:
+        return
+
+    # Start from the Heatmap's CURRENT text so this helper composes safely
+    # with any previously applied sparse text overlays.
+    base_text = [
+        list(row)
+        for row in fig.data[0].text
+    ]
+
+    blue_x: List[Any] = []
+    blue_y: List[Any] = []
+    blue_text: List[str] = []
+
+    red_x: List[Any] = []
+    red_y: List[Any] = []
+    red_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if (
+            row_idx >= len(base_text)
+            or row_idx >= len(y)
+        ):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if (
+                col_idx >= len(base_text[row_idx])
+                or col_idx >= len(x)
+            ):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            if not indicator_key.startswith("VWMA_"):
+                continue
+
+            event = cell.get(
+                "vwma_volume_extreme_event"
+            )
+
+            if event not in {
+                "high_up",
+                "high_down",
+                "low_up",
+                "low_down",
+            }:
+                continue
+
+            value_text = base_text[row_idx][col_idx]
+
+            if value_text in {
+                None,
+                "",
+            }:
+                continue
+
+            arrow = (
+                "▲"
+                if event.startswith("high_")
+                else "▼"
+            )
+
+            overlay_text = (
+                f"{value_text} {arrow}"
+            )
+
+            # Suppress the Heatmap's own text at this coordinate.
+            # The sparse Scatter trace becomes the sole visible text while
+            # the underlying cell retains score, background and hover.
+            base_text[row_idx][col_idx] = ""
+
+            if event.endswith("_up"):
+                blue_x.append(x[col_idx])
+                blue_y.append(y[row_idx])
+                blue_text.append(overlay_text)
+            else:
+                red_x.append(x[col_idx])
+                red_y.append(y[row_idx])
+                red_text.append(overlay_text)
+
+    fig.data[0].text = base_text
+
+    if blue_text:
+        fig.add_trace(
+            go.Scatter(
+                x=blue_x,
+                y=blue_y,
+                mode="text",
+                text=blue_text,
+                textfont=dict(
+                    size=12,
+                    color="blue",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if red_text:
+        fig.add_trace(
+            go.Scatter(
+                x=red_x,
+                y=red_y,
+                mode="text",
+                text=red_text,
+                textfont=dict(
+                    size=12,
+                    color="red",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+
 # ----------------------------
 # Plotly figure (pure)
 # ----------------------------
@@ -4233,6 +4781,14 @@ def make_rolling_heatmap_figure(
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_vwma_volume_extreme_text_overlay(
         fig,
         text=hm.text,
         customdata=hm.customdata,
