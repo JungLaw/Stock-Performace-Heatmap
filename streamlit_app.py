@@ -9465,7 +9465,10 @@ def show_technical_analysis_dashboard():
 
                         if markdown_text:
                             with st.expander(f"Learn more about {doc_slug}", expanded=False):
-                                st.markdown(markdown_text)
+                                st.markdown(
+                                    markdown_text,
+                                    unsafe_allow_html=True,
+                                )
 
                         st.markdown("---")
 
