@@ -5163,6 +5163,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         autorange="reversed",
         automargin=True,
         tickfont=dict(size=11),
+        showgrid=False,
     )
 
     return fig

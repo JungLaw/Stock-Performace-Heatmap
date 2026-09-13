@@ -5338,6 +5338,7 @@ def make_rolling_heatmap_figure(
         autorange="reversed",
         automargin=True,
         tickfont=dict(size=11),
+        showgrid=False,
     )
 
     return fig
