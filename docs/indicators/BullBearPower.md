@@ -90,9 +90,9 @@ BBP < 30 = oversold
 The indicator is unbounded, and its raw magnitude is tied to the instrument's price and volatility.
 
 Consequently:
-* `+10` is not automatically extremely bullish;
-* `-10` is not automatically extremely bearish;
-* `+10` on one stock is not directly equivalent to `+10` on another stock;
+* :gray-background[+10] is not automatically extremely bullish;
+* :gray-background[-10] is not automatically extremely bearish;
+* :gray-background[+10] on one stock is not directly equivalent to :gray-badge[+10] on another stock;
 * raw BBP magnitude should not be treated as a universal overbought/oversold scale.
 
 That is one reason the primary project model uses **BBP's relationship to zero together with a volatility-qualified EMA trend**, rather than fixed high/low BBP thresholds.
@@ -177,9 +177,6 @@ A simple price change can make both stocks look “up.”
 BBP helps distinguish the pressure structure underneath those moves.
 
 > **Price tells you what happened to the stock. BBP asks whether buying or selling pressure around the EMA supports that move.**
-
-
-
 
 
 ---
@@ -361,7 +358,7 @@ or the current BBP movement does not satisfy the one-step rising condition requi
 
 The BBP rulebook does not define Neutral as a fixed numerical zone.
 
-The explicit `neutral` expression is blank, so Neutral serves as the fallback when none of the four directional expressions applies. The active rules reflect that structure.
+The explicit :gray-background[neutral] expression is blank, so Neutral serves as the fallback when none of the four directional expressions applies. The active rules reflect that structure.
 
 Neutral can therefore occur because:
 
@@ -499,7 +496,7 @@ These fields answer:
 
 One subtle but important distinction:
 
-> **Hover `Trend` is a one-bar description of the displayed BBP value. It is not the five-bar EMA trend test used by the primary Signal.**
+> **Hover 'Trend' is a one-bar description of the displayed BBP value. It is not the five-bar EMA trend test used by the primary Signal.**
 
 ---
 
@@ -591,7 +588,7 @@ They are answering different questions.
 
 ### Signal — who has directional control now?
 
-The primary `Signal` can be:
+The primary "Signal" can be:
 
 ```text
 Bullish Confirmation
@@ -628,7 +625,7 @@ Those last two questions belong to the next two hover fields.
 
 ### Elder-Ray Setup: "*Is the weaker side losing influence inside the trend?*"
 
-`Elder-Ray Setup` is a separate contextual field.
+Elder-Ray Setup is a separate contextual field.
 
 It can display:
 
@@ -772,9 +769,9 @@ Buyers can still push the high above the EMA.
 
 So buyers have not disappeared.
 
-#### What does `Elder-Ray Setup: None` mean?
+#### What does 'Elder-Ray Setup: None' mean?
 
-`None` means neither the bullish nor bearish Elder-Ray Setup is currently active.
+:gray-background[None] means neither the bullish nor bearish Elder-Ray Setup is currently active.
 
 It does **not** mean:
 
@@ -796,7 +793,7 @@ It means only:
 
 ### Elder-Ray Divergence: "*Is price telling one story while pressure tells another?*"
 
-`Elder-Ray Divergence` is another independent layer.
+**Elder-Ray Divergence** is another independent layer.
 
 It can display:
 
@@ -917,7 +914,7 @@ That is a bearish warning—not proof that a decline must begin.
 
 A price swing cannot be known with certainty at the instant the candidate high or low occurs.
 
-The project uses a five-bar pivot structure. A candidate pivot at bar `t` becomes confirmed only after the next two trading bars exist.
+The project uses a five-bar pivot structure. A candidate pivot at bar :gray-background[t] becomes confirmed only after the next two trading bars exist.
 
 Therefore:
 
@@ -934,7 +931,7 @@ That delay is intentional.
 
 > **The app waits until the swing was actually knowable rather than using future information to make the historical chart look smarter than it really was.**
 
-#### `None` versus no value
+#### 'None' versus no value
 
 Once enough confirmed swing history exists for both divergence directions to be evaluated:
 
@@ -1069,9 +1066,9 @@ A 13-period EMA is the conventional/default reference in widely used implementat
 
 This dashboard extends that foundation by:
 
-* displaying `Bull Power + Bear Power` as combined BBP;
+* displaying :gray-background[Bull Power + Bear Power] as combined BBP;
 * supporting 10-, 13-, and 21-period versions;
-* requiring a five-bar EMA move greater than `0.25 × ATR(14)` before assigning the primary Bullish/Bearish regime;
+* requiring a five-bar EMA move greater than :gray-badge[0.25 × ATR(14)] before assigning the primary Bullish/Bearish regime;
 * distinguishing recent BBP zero-cross Confirmation from the ongoing directional regime;
 * preserving Elder-Ray Setup as separate context;
 * preserving confirmed Elder-Ray Divergence as separate context.
@@ -1117,7 +1114,7 @@ A value of:
 +8
 ```
 
-on one security is not necessarily equivalent to `+8` on another.
+on one security is not necessarily equivalent to :gray-background[+8] on another.
 
 ### Positive BBP does not automatically mean Bullish
 
@@ -1155,7 +1152,7 @@ That delay is a tradeoff for avoiding hindsight/back-painting.
 
 ## Relationship to BBP Downside Exhaustion
 
-`BBP Downside Exhaustion` is a separate indicator.
+**BBP Downside Exhaustion** is a separate indicator.
 
 Primary BBP asks:
 
@@ -1185,7 +1182,7 @@ The first describes **directional control**.
 
 The second describes **potential exhaustion/rebound risk**.
 
-The separate `BBP_DOWNSIDEEXHAUSTION.md` document covers that model in detail.
+The separate 'BBP_DOWNSIDEEXHAUSTION.md' document covers that model in detail.
 
 ---
 
@@ -1238,7 +1235,7 @@ with configured periods:
 -2  Bearish Confirmation
 ```
 
-**Trend qualification:** Five-bar EMA movement must exceed `0.25 × ATR(14)` in the applicable direction.
+**Trend qualification:** Five-bar EMA movement must exceed :gray-badge[0.25 × ATR(14)] in the applicable direction.
 
 **Confirmation meaning:** Recent BBP zero-line transition into the qualified EMA trend direction plus current BBP follow-through.
 
@@ -1261,10 +1258,10 @@ with configured periods:
 
 ### Project references
 
-* `src/config/master_rules_normalized.json` — primary BBP directional-regime rules.
-* `src/calculations/technical.py` — BBP component transport and confirmed Elder-Ray divergence.
-* `src/calculations/signal_classifier.py` — rule classification and maturity handling.
-* `src/ui/rolling_heatmap_adapter.py` — displayed BBP value, Signal vocabulary, Elder-Ray Setup/Divergence, and Bull/Bear component hover presentation.
+* :gray[src/config/master_rules_normalized.json] — primary BBP directional-regime rules.
+* :gray[src/calculations/technical.py] — BBP component transport and confirmed Elder-Ray divergence.
+* :gray[src/calculations/signal_classifier.py] — rule classification and maturity handling.
+* :gray[src/ui/rolling_heatmap_adapter.py] — displayed BBP value, Signal vocabulary, Elder-Ray Setup/Divergence, and Bull/Bear component hover presentation.
 
 
 
