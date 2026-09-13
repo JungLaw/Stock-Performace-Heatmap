@@ -52,6 +52,7 @@ from ui.rolling_heatmap_selection import (
     get_preset_names,
     get_scope_names,
     get_selection_modes,
+    get_tag_names,
     get_window_names,
     resolve_row_selection,
 )
@@ -290,6 +291,10 @@ def initialize_session_state():
     if 'scd_selected_family' not in st.session_state:
         st.session_state.scd_selected_family = 'All'
 
+    if 'scd_selected_tag' not in st.session_state:
+        tag_names = get_tag_names()
+        st.session_state.scd_selected_tag = tag_names[0] if tag_names else None
+
     if 'scd_selected_preset' not in st.session_state:
         preset_names = get_preset_names()
         st.session_state.scd_selected_preset = preset_names[0] if preset_names else None
@@ -408,6 +413,10 @@ def initialize_session_state():
 
     if 'rh_selected_family' not in st.session_state:
         st.session_state.rh_selected_family = 'All'
+
+    if 'rh_selected_tag' not in st.session_state:
+        tag_names = get_tag_names()
+        st.session_state.rh_selected_tag = tag_names[0] if tag_names else None
 
     if 'rh_selected_preset' not in st.session_state:
         preset_names = get_preset_names()
@@ -1046,7 +1055,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
 
     mode_options = get_selection_modes()
     if not mode_options:
-        mode_options = ["Custom", "Category", "Preset"]
+        mode_options = ["Custom", "Category", "Preset", "Tag"]
 
     current_mode = st.session_state.get("scd_selection_mode", "Custom")
     if current_mode not in mode_options:
@@ -1214,6 +1223,46 @@ def _render_scd_indicator_selection_controls() -> list[str]:
                 f"{window_key_part}__{family_key_part}"
             )
 
+    elif selection_mode == "Tag":
+        tag_options = get_tag_names()
+
+        if not tag_options:
+            st.warning("No Rolling Heatmap tags are available.")
+            selected_tag = None
+            resolved_row_keys = []
+            multiselect_key = "scd_tag_selected_row_keys__none"
+        else:
+            stored_tag = st.session_state.get("scd_selected_tag")
+            if stored_tag not in tag_options:
+                st.session_state.scd_selected_tag = tag_options[0]
+                stored_tag = tag_options[0]
+
+            selected_tag = st.selectbox(
+                "Tag",
+                options=tag_options,
+                index=tag_options.index(stored_tag),
+                key="scd_selected_tag",
+                help=(
+                    "Tags are cross-category secondary descriptors from the "
+                    "Rolling Heatmap classification catalog."
+                ),
+            )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Tag",
+                tag=selected_tag,
+            )
+
+            tag_key_part = (
+                str(selected_tag)
+                .replace(" ", "_")
+                .replace("/", "_")
+                .replace(":", "_")
+            )
+            multiselect_key = (
+                f"scd_tag_selected_row_keys__{tag_key_part}"
+            )
+
     else:
         st.warning(f"Unsupported SCD selection mode: {selection_mode!r}")
         resolved_row_keys = []
@@ -1228,6 +1277,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
             scope=st.session_state.get("scd_selected_scope"),
             window=st.session_state.get("scd_selected_window"),
             family=st.session_state.get("scd_selected_family"),
+            tag=st.session_state.get("scd_selected_tag"),
             preset_name=st.session_state.get("scd_selected_preset"),
         )
         st.info(empty_message)
@@ -8994,7 +9044,7 @@ def show_technical_analysis_dashboard():
 
                 mode_options = get_selection_modes()
                 if not mode_options:
-                    mode_options = ["Custom", "Category", "Preset"]
+                    mode_options = ["Custom", "Category", "Preset", "Tag"]
 
                 current_mode = st.session_state.get("rh_selection_mode", "Custom")
                 if current_mode not in mode_options:
@@ -9173,6 +9223,46 @@ def show_technical_analysis_dashboard():
                             f"{category_key_part}__{scope_key_part}__{window_key_part}__{family_key_part}"
                         )
 
+                elif selection_mode == "Tag":
+                    tag_options = get_tag_names()
+
+                    if not tag_options:
+                        st.warning("No rolling heatmap tags are available.")
+                        selected_tag = None
+                        resolved_base_keys = []
+                        current_multiselect_key = "rh_tag_selected_keys__none"
+                    else:
+                        stored_tag = st.session_state.get("rh_selected_tag")
+                        if stored_tag not in tag_options:
+                            st.session_state.rh_selected_tag = tag_options[0]
+                            stored_tag = tag_options[0]
+
+                        selected_tag = st.selectbox(
+                            "Tag",
+                            options=tag_options,
+                            index=tag_options.index(stored_tag),
+                            key="rh_selected_tag",
+                            help=(
+                                "Tags are cross-category secondary descriptors. "
+                                "Selecting a tag returns all catalog rows carrying it."
+                            ),
+                        )
+
+                        resolved_base_keys = resolve_row_selection(
+                            selection_mode="Tag",
+                            tag=selected_tag,
+                        )
+
+                        tag_key_part = (
+                            str(selected_tag)
+                            .replace(" ", "_")
+                            .replace("/", "_")
+                            .replace(":", "_")
+                        )
+                        current_multiselect_key = (
+                            f"rh_tag_selected_keys__{tag_key_part}"
+                        )
+
                 else:
                     st.warning(f"Unknown Selection Mode: {selection_mode}")
                     resolved_base_keys = []
@@ -9203,6 +9293,7 @@ def show_technical_analysis_dashboard():
                             scope=st.session_state.get("rh_selected_scope"),
                             window=st.session_state.get("rh_selected_window"),
                             family=st.session_state.get("rh_selected_family"),
+                            tag=st.session_state.get("rh_selected_tag"),
                             preset_name=st.session_state.get("rh_selected_preset"),
                         )
                     )
