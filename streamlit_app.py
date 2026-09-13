@@ -52,6 +52,7 @@ from ui.rolling_heatmap_selection import (
     get_preset_names,
     get_scope_names,
     get_selection_modes,
+    get_tag_names,
     get_window_names,
     resolve_row_selection,
 )
@@ -59,6 +60,7 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     apply_bbp_divergence_text_overlay,
     apply_cci_divergence_text_overlay,
+    apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
 )
@@ -289,6 +291,10 @@ def initialize_session_state():
     if 'scd_selected_family' not in st.session_state:
         st.session_state.scd_selected_family = 'All'
 
+    if 'scd_selected_tag' not in st.session_state:
+        tag_names = get_tag_names()
+        st.session_state.scd_selected_tag = tag_names[0] if tag_names else None
+
     if 'scd_selected_preset' not in st.session_state:
         preset_names = get_preset_names()
         st.session_state.scd_selected_preset = preset_names[0] if preset_names else None
@@ -407,6 +413,10 @@ def initialize_session_state():
 
     if 'rh_selected_family' not in st.session_state:
         st.session_state.rh_selected_family = 'All'
+
+    if 'rh_selected_tag' not in st.session_state:
+        tag_names = get_tag_names()
+        st.session_state.rh_selected_tag = tag_names[0] if tag_names else None
 
     if 'rh_selected_preset' not in st.session_state:
         preset_names = get_preset_names()
@@ -1045,7 +1055,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
 
     mode_options = get_selection_modes()
     if not mode_options:
-        mode_options = ["Custom", "Category", "Preset"]
+        mode_options = ["Custom", "Category", "Preset", "Tag"]
 
     current_mode = st.session_state.get("scd_selection_mode", "Custom")
     if current_mode not in mode_options:
@@ -1213,6 +1223,46 @@ def _render_scd_indicator_selection_controls() -> list[str]:
                 f"{window_key_part}__{family_key_part}"
             )
 
+    elif selection_mode == "Tag":
+        tag_options = get_tag_names()
+
+        if not tag_options:
+            st.warning("No Rolling Heatmap tags are available.")
+            selected_tag = None
+            resolved_row_keys = []
+            multiselect_key = "scd_tag_selected_row_keys__none"
+        else:
+            stored_tag = st.session_state.get("scd_selected_tag")
+            if stored_tag not in tag_options:
+                st.session_state.scd_selected_tag = tag_options[0]
+                stored_tag = tag_options[0]
+
+            selected_tag = st.selectbox(
+                "Tag",
+                options=tag_options,
+                index=tag_options.index(stored_tag),
+                key="scd_selected_tag",
+                help=(
+                    "Tags are cross-category secondary descriptors from the "
+                    "Rolling Heatmap classification catalog."
+                ),
+            )
+
+            resolved_row_keys = resolve_row_selection(
+                selection_mode="Tag",
+                tag=selected_tag,
+            )
+
+            tag_key_part = (
+                str(selected_tag)
+                .replace(" ", "_")
+                .replace("/", "_")
+                .replace(":", "_")
+            )
+            multiselect_key = (
+                f"scd_tag_selected_row_keys__{tag_key_part}"
+            )
+
     else:
         st.warning(f"Unsupported SCD selection mode: {selection_mode!r}")
         resolved_row_keys = []
@@ -1227,6 +1277,7 @@ def _render_scd_indicator_selection_controls() -> list[str]:
             scope=st.session_state.get("scd_selected_scope"),
             window=st.session_state.get("scd_selected_window"),
             family=st.session_state.get("scd_selected_family"),
+            tag=st.session_state.get("scd_selected_tag"),
             preset_name=st.session_state.get("scd_selected_preset"),
         )
         st.info(empty_message)
@@ -3581,8 +3632,8 @@ def _build_scd_moving_average_compute_config(
     D3-D5 target families:
     - SMA: parameterized slope aliases, e.g. SMA_100_slope
     - EMA: parameterized slope aliases, e.g. EMA_20_slope
-    - HMA: rulebook uses unparameterized HMA_slope, anchored to HMA_21
-    - VWMA: rulebook uses unparameterized VWMA_slope, anchored to VWMA_20
+    - HMA: matching parameter-specific canonical slope plus ATR(14)
+    - VWMA: matching parameter-specific canonical slope, SMA, and ATR(14)
 
     This helper intentionally preserves the existing preprocessor slope shape.
     It does not introduce formulas, scoring, persistence, or production behavior.
@@ -3594,19 +3645,7 @@ def _build_scd_moving_average_compute_config(
         raise ValueError(f"Unsupported moving-average family: {engine_indicator!r}.")
 
     base_lengths = [length]
-    atrp_lengths = [length]
-
-    # HMA rules use HMA_slope, which the preprocessor resolves from hma_anchor.
-    # The broad reference path anchors HMA_slope to HMA_21. Include HMA_21
-    # whenever testing a non-21 HMA row so the diagnostic candidate can match
-    # the broad path's alias behavior.
-    if family == "HMA" and 21 not in base_lengths:
-        base_lengths.append(21)
-
-    # HMA_55 rulebook neutral-zone logic references ATRP_50, not ATRP_55.
-    # Keep this explicit until a rulebook-expression dependency resolver exists.
-    if family == "HMA" and length == 55 and 50 not in atrp_lengths:
-        atrp_lengths.append(50)
+    atrp_lengths = [] if family == "HMA" else [length]
 
     # VWMA rules use the matching parameter-specific canonical slope and
     # compare VWMA(n) with SMA(n). The selected-row refresh therefore needs
@@ -4926,7 +4965,7 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger, Bull/Bear Power, and VWMA rows already expose their
+    # Bollinger, Bull/Bear Power, VWMA, and HMA rows already expose their
     # user-facing information through structured adapter hover fields.
     # Suppress the redundant raw payload summary in SCD so diagnostic-style
     # payload text does not duplicate structured context or dominate hover
@@ -4943,6 +4982,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("BullBearPower_")
         or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
         or row_key.startswith("VWMA_")
+        or row_key.startswith("HMA_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5015,6 +5055,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
@@ -5059,6 +5100,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_hma_turn_text_overlay(
         fig,
         text=text,
         customdata=customdata,
@@ -5114,6 +5163,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         autorange="reversed",
         automargin=True,
         tickfont=dict(size=11),
+        showgrid=False,
     )
 
     return fig
@@ -5382,12 +5432,41 @@ def _build_scd_single_indicator_hover_customdata(
         )
 
     indicator_trend = custom.get("trend") or ""
+
+    volume_trend = ""
+    volume_value = custom.get(
+        "volume_value"
+    )
+    volume_delta = custom.get(
+        "volume_delta"
+    )
+
+    if volume_value is not None:
+        try:
+            volume_delta_value = float(
+                volume_delta
+            )
+
+            if volume_delta_value > 0.0:
+                volume_trend = "Rising"
+            elif volume_delta_value < 0.0:
+                volume_trend = "Falling"
+            else:
+                volume_trend = "Flat"
+        except (TypeError, ValueError):
+            volume_trend = ""
+
     if _is_scd_crossover_event_row(row_key):
         custom["single_combined_trend_line"] = ""
-    elif indicator_trend or price_trend:
+    elif (
+        indicator_trend
+        or price_trend
+        or volume_trend
+    ):
         custom["single_combined_trend_line"] = (
             f"Trend: {indicator_trend or 'N/A'}"
-            f"{f' | Price: {price_trend}' if price_trend else ''}<br>"
+            f"{f' | Price: {price_trend}' if price_trend else ''}"
+            f"{f' | Vol: {volume_trend}' if volume_trend else ''}<br>"
         )
     else:
         custom["single_combined_trend_line"] = ""
@@ -5516,6 +5595,25 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "<extra></extra>"
         )
 
+    elif row_key.startswith("HMA_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.ma_context_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.hma_post_signal_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
     else:
         hovertemplate = (
             "<b>%{customdata.display_name}</b><br>"
@@ -5575,6 +5673,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
+    apply_hma_turn_text_overlay(
         fig,
         text=text,
         customdata=customdata,
@@ -8968,7 +9074,7 @@ def show_technical_analysis_dashboard():
 
                 mode_options = get_selection_modes()
                 if not mode_options:
-                    mode_options = ["Custom", "Category", "Preset"]
+                    mode_options = ["Custom", "Category", "Preset", "Tag"]
 
                 current_mode = st.session_state.get("rh_selection_mode", "Custom")
                 if current_mode not in mode_options:
@@ -9147,6 +9253,46 @@ def show_technical_analysis_dashboard():
                             f"{category_key_part}__{scope_key_part}__{window_key_part}__{family_key_part}"
                         )
 
+                elif selection_mode == "Tag":
+                    tag_options = get_tag_names()
+
+                    if not tag_options:
+                        st.warning("No rolling heatmap tags are available.")
+                        selected_tag = None
+                        resolved_base_keys = []
+                        current_multiselect_key = "rh_tag_selected_keys__none"
+                    else:
+                        stored_tag = st.session_state.get("rh_selected_tag")
+                        if stored_tag not in tag_options:
+                            st.session_state.rh_selected_tag = tag_options[0]
+                            stored_tag = tag_options[0]
+
+                        selected_tag = st.selectbox(
+                            "Tag",
+                            options=tag_options,
+                            index=tag_options.index(stored_tag),
+                            key="rh_selected_tag",
+                            help=(
+                                "Tags are cross-category secondary descriptors. "
+                                "Selecting a tag returns all catalog rows carrying it."
+                            ),
+                        )
+
+                        resolved_base_keys = resolve_row_selection(
+                            selection_mode="Tag",
+                            tag=selected_tag,
+                        )
+
+                        tag_key_part = (
+                            str(selected_tag)
+                            .replace(" ", "_")
+                            .replace("/", "_")
+                            .replace(":", "_")
+                        )
+                        current_multiselect_key = (
+                            f"rh_tag_selected_keys__{tag_key_part}"
+                        )
+
                 else:
                     st.warning(f"Unknown Selection Mode: {selection_mode}")
                     resolved_base_keys = []
@@ -9177,6 +9323,7 @@ def show_technical_analysis_dashboard():
                             scope=st.session_state.get("rh_selected_scope"),
                             window=st.session_state.get("rh_selected_window"),
                             family=st.session_state.get("rh_selected_family"),
+                            tag=st.session_state.get("rh_selected_tag"),
                             preset_name=st.session_state.get("rh_selected_preset"),
                         )
                     )
@@ -9318,7 +9465,10 @@ def show_technical_analysis_dashboard():
 
                         if markdown_text:
                             with st.expander(f"Learn more about {doc_slug}", expanded=False):
-                                st.markdown(markdown_text)
+                                st.markdown(
+                                    markdown_text,
+                                    unsafe_allow_html=True,
+                                )
 
                         st.markdown("---")
 

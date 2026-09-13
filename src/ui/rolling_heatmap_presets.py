@@ -64,7 +64,7 @@ CUSTOM_DEFAULT: List[str] = [
     "SMA_200",
     "VWMA_20",
     "HMA_16",
-    #"HMA_21",
+    "HMA_21",
 
 
     # Trend / conviction
@@ -189,6 +189,7 @@ OVERVIEW_PRESETS: Mapping[str, List[str]] = {
         "EMA_200",
         "VWMA_50",
         "HMA_55",
+        "HMA_200",
 
         # Long-term trend / crossover events
         "SMA_50_X_SMA_200",

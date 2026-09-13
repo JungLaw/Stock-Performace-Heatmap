@@ -192,21 +192,21 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "category": "Trend",
         "scope": "Crossover Events",
         "window": "ST",
-        "tags": ["MVA", "EMA", "Event-only"],
+        "tags": ["Event-only"],
     },
     "SMA_20_X_SMA_50": {
         "family": "Crossover",
         "category": "Trend",
         "scope": "Crossover Events",
         "window": "MT",
-        "tags": ["MVA", "SMA", "Event-only"],
+        "tags": ["Event-only"],
     },
     "SMA_50_X_SMA_200": {
         "family": "Crossover",
         "category": "Trend",
         "scope": "Crossover Events",
         "window": "LT",
-        "tags": ["MVA", "SMA","Event-only"],
+        "tags": ["Event-only"],
     },
 
     "HMA_9": {
@@ -221,14 +221,14 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "category": "Trend",
         "scope": "Directional Bias",
         "window": "MT",
-        "tags": [],
+        "tags": ["Counter-Trend"],
     },
     "HMA_21": {
         "family": "HMA",
         "category": "Trend",
         "scope": "Directional Bias",
         "window": "MT",
-        "tags": [],
+        "tags": ["Counter-Trend"],
     },
     "HMA_50": {
         "family": "HMA",
@@ -238,6 +238,13 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "tags": [],
     },
     "HMA_55": {
+        "family": "HMA",
+        "category": "Trend",
+        "scope": "Directional Bias",
+        "window": "LT",
+        "tags": ["Counter-Trend"],
+    },
+    "HMA_200": {
         "family": "HMA",
         "category": "Trend",
         "scope": "Directional Bias",
@@ -326,21 +333,21 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "category": "Trend",
         "scope": "Conviction Filter",
         "window": "ST",
-        "tags": [],
+        "tags": ["Divergence"],
     },
     "BullBearPower_13": {
         "family": "BullBearPower",
         "category": "Trend",
         "scope": "Conviction Filter",
         "window": "MT",
-        "tags": [],
+        "tags": ["Divergence"],
     },
     "BullBearPower_21": {
         "family": "BullBearPower",
         "category": "Trend",
         "scope": "Conviction Filter",
         "window": "LT",
-        "tags": [],
+        "tags": ["Divergence"],
     },
 
     # -----------------------------------------------------------------
@@ -352,8 +359,7 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "scope": "Exhaustion Signals",
         "window": "ST",
         "tags": [
-            "Downside Exhaustion",
-            "Rebound Risk",
+            "State: Oversold"
         ],
     },
     "BBP_DOWNSIDE_EXHAUSTION_13": {
@@ -362,8 +368,7 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "scope": "Exhaustion Signals",
         "window": "MT",
         "tags": [
-            "Downside Exhaustion",
-            "Rebound Risk",
+            "State: Oversold"
         ],
     },
     "BBP_DOWNSIDE_EXHAUSTION_21": {
@@ -372,8 +377,7 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "scope": "Exhaustion Signals",
         "window": "LT",
         "tags": [
-            "Downside Exhaustion",
-            "Rebound Risk",
+            "State: Oversold"
         ],
     },
 
@@ -768,6 +772,16 @@ def get_all_row_keys() -> List[str]:
 def get_categories() -> List[str]:
     """Return available Category values in deterministic first-seen order."""
     return list(dict.fromkeys(meta["category"] for meta in ROW_CLASSIFICATION.values()))
+
+
+def get_tags() -> List[str]:
+    """Return available secondary Tag values in deterministic first-seen order."""
+    tags: List[str] = []
+
+    for meta in ROW_CLASSIFICATION.values():
+        tags.extend(meta.get("tags", []))
+
+    return list(dict.fromkeys(tags))
 
 
 def get_scopes(category: str | None = None) -> List[str]:

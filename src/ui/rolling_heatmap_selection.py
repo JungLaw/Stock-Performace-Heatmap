@@ -54,6 +54,7 @@ try:
         get_categories,
         get_families,
         get_scopes,
+        get_tags,
         get_windows,
     )
     from .rolling_heatmap_presets import (
@@ -69,6 +70,7 @@ except ImportError:  # pragma: no cover
         get_categories,
         get_families,
         get_scopes,
+        get_tags,
         get_windows,
     )
     from src.ui.rolling_heatmap_presets import (
@@ -78,7 +80,7 @@ except ImportError:  # pragma: no cover
     )
 
 
-SELECTION_MODES: tuple[str, ...] = ("Custom", "Category", "Preset")
+SELECTION_MODES: tuple[str, ...] = ("Custom", "Category", "Preset", "Tag")
 
 # Generated thematic presets.
 # Overview presets are explicit curated memberships in rolling_heatmap_presets.py.
@@ -201,6 +203,11 @@ def get_family_names(category: str | None = None) -> List[str]:
     return get_families(category=_normalize_optional_filter(category))
 
 
+def get_tag_names() -> List[str]:
+    """Return available secondary Tag values."""
+    return get_tags()
+
+
 # ---------------------------------------------------------------------
 # Mode-specific resolvers
 # ---------------------------------------------------------------------
@@ -289,6 +296,39 @@ def resolve_category_rows(
     return resolved
 
 
+def resolve_tag_rows(
+    *,
+    tag: str,
+    strict: bool = True,
+) -> List[str]:
+    """
+    Resolve Tag mode to an ordered canonical row_key list.
+
+    Tag mode is intentionally cross-category. A row matches when its
+    classification metadata contains the selected secondary tag.
+    """
+    normalized_tag = _normalize_optional_filter(tag)
+
+    if normalized_tag is None:
+        raise ValueError("Tag mode requires a concrete tag.")
+
+    resolved = [
+        row_key
+        for row_key, meta in ROW_CLASSIFICATION.items()
+        if normalized_tag in meta.get("tags", [])
+    ]
+
+    resolved = _catalog_order(resolved)
+
+    if strict:
+        validate_row_keys(
+            resolved,
+            context=f"Tag mode ({normalized_tag})",
+        )
+
+    return resolved
+
+
 def resolve_preset_rows(
     preset_name: str,
     *,
@@ -332,6 +372,7 @@ def resolve_row_selection(
     scope: str | None = None,
     window: str | None = None,
     family: str | None = None,
+    tag: str | None = None,
     preset_name: str | None = None,
     strict: bool = True,
 ) -> List[str]:
@@ -356,6 +397,14 @@ def resolve_row_selection(
             strict=strict,
         )
 
+    if mode == "Tag":
+        if tag is None:
+            raise ValueError("Tag selection requires tag=...")
+        return resolve_tag_rows(
+            tag=tag,
+            strict=strict,
+        )
+
     if mode == "Preset":
         if preset_name is None:
             raise ValueError("Preset selection requires preset_name=...")
@@ -374,6 +423,7 @@ def describe_empty_selection(
     scope: str | None = None,
     window: str | None = None,
     family: str | None = None,
+    tag: str | None = None,
     preset_name: str | None = None,
 ) -> str:
     """
@@ -392,6 +442,9 @@ def describe_empty_selection(
         if _normalize_optional_filter(family) is not None:
             parts.append(f"Family={family!r}")
         return "No rolling heatmap rows matched the selected filters: " + ", ".join(parts)
+
+    if mode == "Tag":
+        return f"No rolling heatmap rows resolved for tag {tag!r}."
 
     if mode == "Preset":
         return f"No rolling heatmap rows resolved for preset {preset_name!r}."
