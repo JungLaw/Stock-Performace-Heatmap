@@ -1,5 +1,5 @@
 {
-  "version": "0.2.20",
+  "version": "0.2.21",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -397,50 +397,78 @@
           ],
           [
             55
+          ],
+          [
+            200
           ]
         ],
         "feature_scopes": {
           "heatmap": {
             "9": {
-              "strong_buy": "Close > HMA_9 and HMA_9_slope > 0.002 and rising_2bar(HMA_9)",
-              "buy": "Close > HMA_9 and HMA_9_slope > 0",
-              "neutral": "abs(Close/HMA_9 - 1) * 100 <= 0.25 * ATRP_9",
-              "sell": "Close < HMA_9 and HMA_9_slope < 0",
-              "strong_sell": "Close < HMA_9 and HMA_9_slope < -0.002 and falling_2bar(HMA_9)",
-              "notes": "HMA is very reactive; slope matters more than price crossover."
-            },
-            "21": {
-              "strong_buy": "Close > HMA_21 and HMA_21_slope > 0.0015 and rising_2bar(HMA_21)",
-              "buy": "Close > HMA_21 and HMA_21_slope > 0",
-              "neutral": "abs(Close/HMA_21 - 1) * 100 <= 0.50 * ATRP_21",
-              "sell": "Close < HMA_21 and HMA_21_slope < 0",
-              "strong_sell": "Close < HMA_21 and HMA_21_slope < -0.0015 and falling_2bar(HMA_21)",
-              "notes": "Intermediate HMA = smoother, so thresholds lower."
-            },
-            "50": {
-              "strong_buy": "Close > HMA_50 and HMA_50_slope > 0.001 and rising_2bar(HMA_50)",
-              "buy": "Close > HMA_50 and HMA_50_slope > 0",
-              "neutral": "abs(Close/HMA_50 - 1) * 100 <= 1.0 * ATRP_50",
-              "sell": "Close < HMA_50 and HMA_50_slope < 0",
-              "strong_sell": "Close < HMA_50 and HMA_50_slope < -0.001 and falling_2bar(HMA_50)",
-              "notes": "Long-term HMA reacts slowly; slope thresholds adjust accordingly."
-
-            },
-            "55": {
-              "strong_buy": "Close > HMA_55 and HMA_55_slope > 0.001 and rising_2bar(HMA_55)",
-              "buy": "Close > HMA_55 and HMA_55_slope > 0",
-              "neutral": "abs(Close/HMA_55 - 1) * 100 <= 1.0 * ATRP_50",
-              "sell": "Close < HMA_55 and HMA_55_slope < 0",
-              "strong_sell": "Close < HMA_55 and HMA_55_slope < -0.001 and falling_2bar(HMA_55)",
-              "notes": "Particularly effective as a dynamic support/resistance level in trending markets."
+              "strong_buy": "(Close - HMA_9) / ATR_14 > 0.25 and (HMA_9_slope__linreg_14 / HMA_9) * 100 > 0.50",
+              "buy": "(Close - HMA_9) / ATR_14 > 0.25 and (HMA_9_slope__linreg_14 / HMA_9) * 100 > 0.20 and (HMA_9_slope__linreg_14 / HMA_9) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_9) / ATR_14 < -0.25 and (HMA_9_slope__linreg_14 / HMA_9) * 100 < -0.20 and (HMA_9_slope__linreg_14 / HMA_9) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_9) / ATR_14 < -0.25 and (HMA_9_slope__linreg_14 / HMA_9) * 100 < -0.50",
+              "k": 0.25,
+              "base_slope_pct_per_bar": 0.20,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "Directional HMA trend state. Price must be more than 0.25 ATR(14) from HMA(9) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
             },
             "16": {
-              "strong_buy": "Close > HMA_16 and HMA_16_slope > 0.001 and rising_2bar(HMA_16)",
-              "buy": "Close > HMA_16 and HMA_16_slope > 0 and HMA_16_slope <= 0.001",
-              "neutral": "abs(Close/HMA_16 - 1) * 100 <= 1.0 * ATRP_16",
-              "sell": "Close < HMA_16 and HMA_16_slope < 0 and HMA_16_slope >= -0.001",
-              "strong_sell": "Close < HMA_16 and HMA_16_slope < -0.001 and falling_2bar(HMA_16)",
-              "notes": "Strong Buy: Price is above, slope is aggressively up (> 0.001), and accelerating over last 2 bars.<br>Buy: Price is above, slope is positive but moderate (avoids overlapping strong_buy)<br>Neutral: Price is tightly bound to the moving average within a 1x ATR percentage band.<br>Sell: Price is below, slope is negative but moderate.<br>Strong Sell: Price is below, slope is aggressively down (< -0.001), and decelerating over last 2 bars."
+              "strong_buy": "(Close - HMA_16) / ATR_14 > 0.50 and (HMA_16_slope__linreg_14 / HMA_16) * 100 > 0.50",
+              "buy": "(Close - HMA_16) / ATR_14 > 0.50 and (HMA_16_slope__linreg_14 / HMA_16) * 100 > 0.20 and (HMA_16_slope__linreg_14 / HMA_16) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_16) / ATR_14 < -0.50 and (HMA_16_slope__linreg_14 / HMA_16) * 100 < -0.20 and (HMA_16_slope__linreg_14 / HMA_16) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_16) / ATR_14 < -0.50 and (HMA_16_slope__linreg_14 / HMA_16) * 100 < -0.50",
+              "k": 0.50,
+              "base_slope_pct_per_bar": 0.20,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "Directional HMA trend state. Price must be more than 0.50 ATR(14) from HMA(16) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
+            },
+            "21": {
+              "strong_buy": "(Close - HMA_21) / ATR_14 > 0.50 and (HMA_21_slope__linreg_14 / HMA_21) * 100 > 0.50",
+              "buy": "(Close - HMA_21) / ATR_14 > 0.50 and (HMA_21_slope__linreg_14 / HMA_21) * 100 > 0.20 and (HMA_21_slope__linreg_14 / HMA_21) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_21) / ATR_14 < -0.50 and (HMA_21_slope__linreg_14 / HMA_21) * 100 < -0.20 and (HMA_21_slope__linreg_14 / HMA_21) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_21) / ATR_14 < -0.50 and (HMA_21_slope__linreg_14 / HMA_21) * 100 < -0.50",
+              "k": 0.50,
+              "base_slope_pct_per_bar": 0.20,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "'Signal' combines ATR-normalized price distance with the 14-bar normalized HMA slope. Direction and context fields are supplementary and do not change the Signal score. Price must be more than 0.50 ATR(14) from HMA(21) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
+            },
+            "50": {
+              "strong_buy": "(Close - HMA_50) / ATR_14 > 0.50 and (HMA_50_slope__linreg_14 / HMA_50) * 100 > 0.50",
+              "buy": "(Close - HMA_50) / ATR_14 > 0.50 and (HMA_50_slope__linreg_14 / HMA_50) * 100 > 0.20 and (HMA_50_slope__linreg_14 / HMA_50) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_50) / ATR_14 < -0.50 and (HMA_50_slope__linreg_14 / HMA_50) * 100 < -0.20 and (HMA_50_slope__linreg_14 / HMA_50) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_50) / ATR_14 < -0.50 and (HMA_50_slope__linreg_14 / HMA_50) * 100 < -0.50",
+              "k": 0.50,
+              "base_slope_pct_per_bar": 0.20,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "Directional HMA trend state. Price must be more than 0.50 ATR(14) from HMA(50) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
+            },
+            "55": {
+              "strong_buy": "(Close - HMA_55) / ATR_14 > 0.50 and (HMA_55_slope__linreg_14 / HMA_55) * 100 > 0.50",
+              "buy": "(Close - HMA_55) / ATR_14 > 0.50 and (HMA_55_slope__linreg_14 / HMA_55) * 100 > 0.20 and (HMA_55_slope__linreg_14 / HMA_55) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_55) / ATR_14 < -0.50 and (HMA_55_slope__linreg_14 / HMA_55) * 100 < -0.20 and (HMA_55_slope__linreg_14 / HMA_55) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_55) / ATR_14 < -0.50 and (HMA_55_slope__linreg_14 / HMA_55) * 100 < -0.50",
+              "k": 0.50,
+              "base_slope_pct_per_bar": 0.20,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "Directional HMA trend state. Price must be more than 0.50 ATR(14) from HMA(55) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
+            },
+            "200": {
+              "strong_buy": "(Close - HMA_200) / ATR_14 > 2.00 and (HMA_200_slope__linreg_14 / HMA_200) * 100 > 0.50",
+              "buy": "(Close - HMA_200) / ATR_14 > 2.00 and (HMA_200_slope__linreg_14 / HMA_200) * 100 > 0.25 and (HMA_200_slope__linreg_14 / HMA_200) * 100 <= 0.50",
+              "neutral": "",
+              "sell": "(Close - HMA_200) / ATR_14 < -2.00 and (HMA_200_slope__linreg_14 / HMA_200) * 100 < -0.25 and (HMA_200_slope__linreg_14 / HMA_200) * 100 >= -0.50",
+              "strong_sell": "(Close - HMA_200) / ATR_14 < -2.00 and (HMA_200_slope__linreg_14 / HMA_200) * 100 < -0.50",
+              "k": 2.00,
+              "base_slope_pct_per_bar": 0.25,
+              "strong_slope_pct_per_bar": 0.50,
+              "notes": "Very-long-term directional HMA trend state. Price must be more than 2.00 ATR(14) from HMA(200) and the normalized 14-bar HMA slope must agree. Strong states require slope magnitude greater than 0.50% per bar."
             }
           },
           "overlay": {

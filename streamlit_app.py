@@ -59,6 +59,7 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     apply_bbp_divergence_text_overlay,
     apply_cci_divergence_text_overlay,
+    apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
 )
@@ -3581,8 +3582,8 @@ def _build_scd_moving_average_compute_config(
     D3-D5 target families:
     - SMA: parameterized slope aliases, e.g. SMA_100_slope
     - EMA: parameterized slope aliases, e.g. EMA_20_slope
-    - HMA: rulebook uses unparameterized HMA_slope, anchored to HMA_21
-    - VWMA: rulebook uses unparameterized VWMA_slope, anchored to VWMA_20
+    - HMA: matching parameter-specific canonical slope plus ATR(14)
+    - VWMA: matching parameter-specific canonical slope, SMA, and ATR(14)
 
     This helper intentionally preserves the existing preprocessor slope shape.
     It does not introduce formulas, scoring, persistence, or production behavior.
@@ -3594,19 +3595,7 @@ def _build_scd_moving_average_compute_config(
         raise ValueError(f"Unsupported moving-average family: {engine_indicator!r}.")
 
     base_lengths = [length]
-    atrp_lengths = [length]
-
-    # HMA rules use HMA_slope, which the preprocessor resolves from hma_anchor.
-    # The broad reference path anchors HMA_slope to HMA_21. Include HMA_21
-    # whenever testing a non-21 HMA row so the diagnostic candidate can match
-    # the broad path's alias behavior.
-    if family == "HMA" and 21 not in base_lengths:
-        base_lengths.append(21)
-
-    # HMA_55 rulebook neutral-zone logic references ATRP_50, not ATRP_55.
-    # Keep this explicit until a rulebook-expression dependency resolver exists.
-    if family == "HMA" and length == 55 and 50 not in atrp_lengths:
-        atrp_lengths.append(50)
+    atrp_lengths = [] if family == "HMA" else [length]
 
     # VWMA rules use the matching parameter-specific canonical slope and
     # compare VWMA(n) with SMA(n). The selected-row refresh therefore needs
@@ -4926,7 +4915,7 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger, Bull/Bear Power, and VWMA rows already expose their
+    # Bollinger, Bull/Bear Power, VWMA, and HMA rows already expose their
     # user-facing information through structured adapter hover fields.
     # Suppress the redundant raw payload summary in SCD so diagnostic-style
     # payload text does not duplicate structured context or dominate hover
@@ -4943,6 +4932,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("BullBearPower_")
         or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
         or row_key.startswith("VWMA_")
+        or row_key.startswith("HMA_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5015,6 +5005,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
@@ -5059,6 +5050,14 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_hma_turn_text_overlay(
         fig,
         text=text,
         customdata=customdata,
@@ -5516,6 +5515,25 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "<extra></extra>"
         )
 
+    elif row_key.startswith("HMA_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.ma_context_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.hma_post_signal_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
     else:
         hovertemplate = (
             "<b>%{customdata.display_name}</b><br>"
@@ -5575,6 +5593,14 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
+    apply_hma_turn_text_overlay(
         fig,
         text=text,
         customdata=customdata,

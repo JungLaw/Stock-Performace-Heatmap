@@ -1878,6 +1878,12 @@ class DatabaseIntegratedTechnicalCalculator:
                 "param_key": "55",
                 "display_key": "HMA_55",
                 "value_col": "HMA_55",
+            },
+            {
+                "engine_indicator": "HMA",
+                "param_key": "200",
+                "display_key": "HMA_200",
+                "value_col": "HMA_200",
             },    
             {
                 "engine_indicator": "CCI",
@@ -2937,6 +2943,326 @@ class DatabaseIntegratedTechnicalCalculator:
                 ),
             }
 
+        # HMA context-only hover truth.
+        #
+        # Derive these series once from full chronological history before
+        # presentation-window reduction. They do not alter HMA score truth.
+        #
+        # All HMA rows expose:
+        # - ATR-normalized price distance
+        # - canonical 14-bar normalized HMA slope
+        #
+        # Designated turning-context rows additionally expose:
+        # - HMA16 turn + HMA16 14-bar slope trend context
+        # - HMA21 turn + HMA55 one-bar direction
+        # - HMA55 turn + HMA200 one-bar direction
+        #
+        # Turn definition:
+        #   Up:
+        #       HMA[t] > HMA[t-1]
+        #       and HMA[t-1] <= HMA[t-2]
+        #
+        #   Down:
+        #       HMA[t] < HMA[t-1]
+        #       and HMA[t-1] >= HMA[t-2]
+        #
+        # Turn Context remains descriptive and does not alter the primary
+        # five-state HMA score.
+        hma_context_by_display_key: Dict[
+            str,
+            Dict[str, pd.Series],
+        ] = {}
+
+        hma_timing_specs = {
+            "HMA_16": {
+                "trend_mode": "same_slope",
+                "trend_reference_col": "HMA_16",
+            },
+            "HMA_21": {
+                "trend_mode": "slow_hma",
+                "trend_reference_col": "HMA_55",
+            },
+            "HMA_55": {
+                "trend_mode": "slow_hma",
+                "trend_reference_col": "HMA_200",
+            },
+        }
+
+        for meta in optionc_meta:
+            if meta.get("engine_indicator") != "HMA":
+                continue
+
+            display_key = str(
+                meta.get("display_key", "")
+            )
+
+            param_key = str(
+                meta.get("param_key", "")
+            )
+
+            try:
+                period = int(param_key)
+            except (TypeError, ValueError):
+                continue
+
+            hma_col = f"HMA_{period}"
+            slope_col = (
+                f"{hma_col}_slope__linreg_14"
+            )
+            atr_col = "ATR_14"
+
+            required_cols = [
+                "Close",
+                hma_col,
+                slope_col,
+                atr_col,
+            ]
+
+            if not all(
+                col in df_ind.columns
+                for col in required_cols
+            ):
+                continue
+
+            close = pd.to_numeric(
+                df_ind["Close"],
+                errors="coerce",
+            )
+
+            hma = pd.to_numeric(
+                df_ind[hma_col],
+                errors="coerce",
+            )
+
+            slope = pd.to_numeric(
+                df_ind[slope_col],
+                errors="coerce",
+            )
+
+            atr = (
+                pd.to_numeric(
+                    df_ind[atr_col],
+                    errors="coerce",
+                )
+                .replace(0.0, np.nan)
+            )
+
+            safe_hma = hma.replace(
+                0.0,
+                np.nan,
+            )
+
+            price_distance_atr = (
+                close - hma
+            ) / atr
+
+            slope_pct_per_bar = (
+                slope
+                / safe_hma
+                * 100.0
+            ).replace(
+                [np.inf, -np.inf],
+                np.nan,
+            )
+
+            hma_context: Dict[
+                str,
+                pd.Series,
+            ] = {
+                "price_distance_atr": (
+                    price_distance_atr
+                ),
+                "slope_pct_per_bar": (
+                    slope_pct_per_bar
+                ),
+            }
+
+            timing_spec = hma_timing_specs.get(
+                display_key
+            )
+
+            if timing_spec is not None:
+                valid_turn_inputs = (
+                    hma.notna()
+                    & hma.shift(1).notna()
+                    & hma.shift(2).notna()
+                )
+
+                turn = pd.Series(
+                    pd.NA,
+                    index=df_ind.index,
+                    dtype="object",
+                )
+
+                turn.loc[
+                    valid_turn_inputs
+                ] = "None"
+
+                turn_up = (
+                    valid_turn_inputs
+                    & (hma > hma.shift(1))
+                    & (
+                        hma.shift(1)
+                        <= hma.shift(2)
+                    )
+                )
+
+                turn_down = (
+                    valid_turn_inputs
+                    & (hma < hma.shift(1))
+                    & (
+                        hma.shift(1)
+                        >= hma.shift(2)
+                    )
+                )
+
+                turn.loc[
+                    turn_up
+                ] = "Up"
+
+                turn.loc[
+                    turn_down
+                ] = "Down"
+
+                trend_context = pd.Series(
+                    pd.NA,
+                    index=df_ind.index,
+                    dtype="object",
+                )
+
+                if (
+                    timing_spec["trend_mode"]
+                    == "same_slope"
+                ):
+                    valid_trend = (
+                        slope_pct_per_bar.notna()
+                    )
+
+                    trend_context.loc[
+                        valid_trend
+                        & (
+                            slope_pct_per_bar
+                            > 0.0
+                        )
+                    ] = "Rising"
+
+                    trend_context.loc[
+                        valid_trend
+                        & (
+                            slope_pct_per_bar
+                            < 0.0
+                        )
+                    ] = "Falling"
+
+                    trend_context.loc[
+                        valid_trend
+                        & (
+                            slope_pct_per_bar
+                            == 0.0
+                        )
+                    ] = "Flat"
+
+                else:
+                    trend_reference_col = str(
+                        timing_spec[
+                            "trend_reference_col"
+                        ]
+                    )
+
+                    if (
+                        trend_reference_col
+                        in df_ind.columns
+                    ):
+                        trend_reference = pd.to_numeric(
+                            df_ind[
+                                trend_reference_col
+                            ],
+                            errors="coerce",
+                        )
+
+                        trend_delta = (
+                            trend_reference.diff()
+                        )
+
+                        valid_trend = (
+                            trend_reference.notna()
+                            & trend_reference.shift(1).notna()
+                        )
+
+                        trend_context.loc[
+                            valid_trend
+                            & (
+                                trend_delta
+                                > 0.0
+                            )
+                        ] = "Rising"
+
+                        trend_context.loc[
+                            valid_trend
+                            & (
+                                trend_delta
+                                < 0.0
+                            )
+                        ] = "Falling"
+
+                        trend_context.loc[
+                            valid_trend
+                            & (
+                                trend_delta
+                                == 0.0
+                            )
+                        ] = "Flat"
+
+                turn_context = pd.Series(
+                    pd.NA,
+                    index=df_ind.index,
+                    dtype="object",
+                )
+
+                turn_context.loc[
+                    (turn == "Up")
+                    & (
+                        trend_context
+                        == "Rising"
+                    )
+                ] = "Bullish Trend-Aligned"
+
+                turn_context.loc[
+                    (turn == "Up")
+                    & (
+                        trend_context
+                        == "Falling"
+                    )
+                ] = "Bullish Counter-Trend"
+
+                turn_context.loc[
+                    (turn == "Down")
+                    & (
+                        trend_context
+                        == "Falling"
+                    )
+                ] = "Bearish Trend-Aligned"
+
+                turn_context.loc[
+                    (turn == "Down")
+                    & (
+                        trend_context
+                        == "Rising"
+                    )
+                ] = "Bearish Counter-Trend"
+
+                hma_context["turn"] = turn
+                hma_context[
+                    "trend_context"
+                ] = trend_context
+                hma_context[
+                    "turn_context"
+                ] = turn_context
+
+            hma_context_by_display_key[
+                display_key
+            ] = hma_context
+
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
@@ -3330,6 +3656,89 @@ class DatabaseIntegratedTechnicalCalculator:
                         )
                     except (TypeError, ValueError):
                         pass
+
+                # HMA context-only transport.
+                #
+                # All HMA numeric context and designated turning-context
+                # labels were derived above from full chronological history.
+                # Downstream adapter/UI code owns formatting only and must
+                # not recalculate these values or reinterpret score truth.
+                if eng_name == "HMA":
+                    hma_context = (
+                        hma_context_by_display_key.get(
+                            display_key,
+                            {}
+                        )
+                    )
+
+                    numeric_context_keys = {
+                        "price_distance_atr": (
+                            "hma_price_distance_atr"
+                        ),
+                        "slope_pct_per_bar": (
+                            "hma_slope_pct_per_bar"
+                        ),
+                    }
+
+                    for (
+                        source_key,
+                        extras_key,
+                    ) in numeric_context_keys.items():
+                        series = hma_context.get(
+                            source_key
+                        )
+
+                        if (
+                            isinstance(series, pd.Series)
+                            and dt in series.index
+                        ):
+                            raw_context_value = (
+                                series.loc[dt]
+                            )
+
+                            if not pd.isna(
+                                raw_context_value
+                            ):
+                                extras[
+                                    extras_key
+                                ] = float(
+                                    raw_context_value
+                                )
+
+                    text_context_keys = {
+                        "turn": "hma_turn",
+                        "trend_context": (
+                            "hma_trend_context"
+                        ),
+                        "turn_context": (
+                            "hma_turn_context"
+                        ),
+                    }
+
+                    for (
+                        source_key,
+                        extras_key,
+                    ) in text_context_keys.items():
+                        series = hma_context.get(
+                            source_key
+                        )
+
+                        if (
+                            isinstance(series, pd.Series)
+                            and dt in series.index
+                        ):
+                            raw_context_value = (
+                                series.loc[dt]
+                            )
+
+                            if not pd.isna(
+                                raw_context_value
+                            ):
+                                extras[
+                                    extras_key
+                                ] = str(
+                                    raw_context_value
+                                )
 
                 # MACD-specific payload enrichment:
                 # keep histogram as the row value, but expose line/signal for hover.

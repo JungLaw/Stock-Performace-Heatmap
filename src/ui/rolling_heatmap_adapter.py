@@ -211,34 +211,100 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "HMA_9": {
         "display_name": "HMA (9)",
-        "definition": "Hull Moving Average reduces lag while staying smooth.",
-        "how_to_read": "Short-term trend/timing; turns quickly relative to EMA/SMA.",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory."
+        ),
+        "how_to_read": (
+            "HMA Direction marks a new turn only: Turned Up/Down appears on the "
+            "reversal day; None means no new turn today. Trend Context shows the "
+            "broader trend, and Turn Context says whether the turn is aligned with "
+            "or counter to it.<br>"
+            "On turn dates, ▲/▼ shows the new direction; blue means broader trend "
+            "Rising and red means Falling."
+        ),
     },
     "HMA_16": {
         "display_name": "HMA(16)",
-        "definition": "HMA(16) is a fast, smooth indicator designed to eliminate lag. It uses weighted moving averages to track price action closely while filtering out market noise. Turns quickly relative to EMA/SMA.",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory."
+        ),
         "how_to_read": (
-            "Slope Indicator: An upward slope indicates a bullish trend.<br>"
-            "Downward Slope: A downward slope indicates a bearish trend.<br>"
-            "Direction Changes: A turning point suggests a potential trend reversal.<br>"
-            "Price Crossovers: Price crossing above the line signals a buying opportunity.<br>"
-            "Below the Line: Price dropping below the line signals a selling opportunity."
+            "HMA Direction marks a new turn only: Turned Up/Down appears on the "
+            "reversal day; None means no new turn today. Trend Context shows the "
+            "broader trend, and Turn Context says whether the turn is aligned with "
+            "or counter to it.<br>"
+            "On turn dates, ▲/▼ shows the new direction; blue means broader trend "
+            "Rising and red means Falling."
         ),
     },
     "HMA_21": {
         "display_name": "HMA (21)",
-        "definition": "Hull Moving Average is designed to reduce lag while staying smooth.",
-        "how_to_read": "Can turn earlier than SMA/EMA; often used for trend and turns.",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory. Both drive the 'Signal'."
+        ),
+        "how_to_read": (
+            "'HMA Direction' + 'Trend Context' determine 'Turn Context'.<br>"
+            "'HMA Direction' marks a new turn/reversal only: 'Turned Up/Down' appears on the "
+            "reversal day, None: no new turn today. 'Trend Context' shows the "
+            "broader trend. 'Turn Context' says whether the turn is aligned/counter "
+            "to it.<br>"
+            "▲/▼ shows the new direction (on turn dates only); 'blue' means broader trend "
+            "Rising and 'red' means Falling."
+        ),
     },
     "HMA_50": {
         "display_name": "HMA (50)",
-        "definition": "Hull Moving Average over a longer window.",
-        "how_to_read": "Smoother trend reference with reduced lag relative to longer SMAs/EMAs.",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory."
+        ),
+        "how_to_read": (
+            "HMA Direction marks a new turn only: Turned Up/Down appears on the "
+            "reversal day; None means no new turn today. Trend Context shows the "
+            "broader trend, and Turn Context says whether the turn is aligned with "
+            "or counter to it.<br>"
+            "On turn dates, ▲/▼ shows the new direction; blue means broader trend "
+            "Rising and red means Falling."
+        ),
     },
     "HMA_55": {
         "display_name": "HMA(55)",
-        "definition": "Behaves like a 'living' trend line — it turns faster than a SMA(50) but w/o the whipsaw of a short EMA.",
-        "how_to_read": "Smoother trend reference with reduced lag relative to longer SMAs/EMAs.",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory."
+        ),
+        "how_to_read": (
+            "HMA Direction marks a new turn only: Turned Up/Down appears on the "
+            "reversal day; None means no new turn today. Trend Context shows the "
+            "broader trend, and Turn Context says whether the turn is aligned with "
+            "or counter to it.<br>"
+            "On turn dates, ▲/▼ shows the new direction; blue means broader trend "
+            "Rising and red means Falling."
+        ),
+    },
+    "HMA_200": {
+        "display_name": "HMA (200)",
+        "definition": (
+            "HMA reduces moving-average lag while preserving trend smoothness. "
+            "ATR Distance shows price separation from HMA; 14-bar HMA Slope "
+            "measures its normalized trend trajectory."
+        ),
+        "how_to_read": (
+            "HMA Direction marks a new turn only: Turned Up/Down appears on the "
+            "reversal day; None means no new turn today. Trend Context shows the "
+            "broader trend, and Turn Context says whether the turn is aligned with "
+            "or counter to it.<br>"
+            "On turn dates, ▲/▼ shows the new direction; blue means broader trend "
+            "Rising and red means Falling."
+        ),
     },
     "VWMA_10": {
         "display_name": "VWMA (10)",
@@ -2652,6 +2718,7 @@ def build_plotly_heatmap_inputs(
                         "ma_context_block": "",
                         "crossover_context_block": "",
                         "crossover_summary_block": "",
+                        "hma_post_signal_block": "",
 
                         # no rule semantics
                         "rule_expr": "",
@@ -2780,6 +2847,14 @@ def build_plotly_heatmap_inputs(
             bb_bw_context_block = ""
             ma_context_block = ""
             vwma_post_signal_block = ""
+
+            # HMA context-only display fields.
+            # Semantic truth is derived upstream in technical.py.
+            hma_post_signal_block = ""
+            hma_turn_value = None
+            hma_trend_context_value = None
+            hma_turn_context_value = None
+
             vwma_volume_extreme_event_value = None
             adx_context_block = ""
             crossover_context_block = ""
@@ -3541,11 +3616,19 @@ def build_plotly_heatmap_inputs(
                 f"{delta_pct_suffix}<br>"
             )
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
-            signal_line = (
-                f"<br>Signal: {signal_display_label}<br>"
-                if signal_display_label
-                else ""
-            )
+            if key.startswith("HMA_"):
+                signal_line = (
+                    f"Signal: {signal_display_label}<br>"
+                    if signal_display_label
+                    else ""
+                )
+            else:
+                signal_line = (
+                    f"<br>Signal: {signal_display_label}<br>"
+                    if signal_display_label
+                    else ""
+                )
+
             rule_block = _format_hover_block("Rule", rule_text, width=80)
             notes_block = _format_hover_block("Notes", rule_notes, width=72)
             definition_block = _format_hover_block("Definition", definition, width=72)
@@ -4143,11 +4226,208 @@ def build_plotly_heatmap_inputs(
                     )
 
             elif (
+                key.startswith("HMA_")
+                and isinstance(extra_map, dict)
+            ):
+                current_price = price_by_date.get(d_raw)
+
+                try:
+                    current_price = (
+                        float(current_price)
+                        if not _is_missing(current_price)
+                        else None
+                    )
+                except Exception:
+                    current_price = None
+
+                try:
+                    hma_value = (
+                        float(v)
+                        if not _is_missing(v)
+                        else None
+                    )
+                except Exception:
+                    hma_value = None
+
+                diff_abs = None
+                diff_pct = None
+
+                if (
+                    current_price is not None
+                    and hma_value not in (
+                        None,
+                        0,
+                    )
+                ):
+                    try:
+                        diff_abs = (
+                            current_price
+                            - hma_value
+                        )
+                    except Exception:
+                        diff_abs = None
+
+                    try:
+                        diff_pct = (
+                            (
+                                current_price
+                                / hma_value
+                            )
+                            - 1.0
+                        ) * 100.0
+                    except Exception:
+                        diff_pct = None
+
+                hma_pre_signal_lines = []
+
+                if diff_abs is not None:
+                    if diff_abs > 0:
+                        diff_abs_text = (
+                            f"+${abs(diff_abs):.2f}"
+                        )
+                    elif diff_abs < 0:
+                        diff_abs_text = (
+                            f"-${abs(diff_abs):.2f}"
+                        )
+                    else:
+                        diff_abs_text = "$0.00"
+
+                    pct_suffix = (
+                        f" ({diff_pct:+.2f}%)"
+                        if diff_pct is not None
+                        else ""
+                    )
+
+                    hma_pre_signal_lines.append(
+                        "Price vs. HMA: "
+                        f"{diff_abs_text}"
+                        f"{pct_suffix}"
+                    )
+
+                hma_price_distance_atr = (
+                    extra_map.get(
+                        "hma_price_distance_atr"
+                    )
+                )
+
+                if not _is_missing(
+                    hma_price_distance_atr
+                ):
+                    try:
+                        hma_pre_signal_lines.append(
+                            "ATR Distance: "
+                            f"{float(hma_price_distance_atr):+.2f} ATR"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                hma_slope_pct_per_bar = (
+                    extra_map.get(
+                        "hma_slope_pct_per_bar"
+                    )
+                )
+
+                if not _is_missing(
+                    hma_slope_pct_per_bar
+                ):
+                    try:
+                        hma_pre_signal_lines.append(
+                            "14-bar HMA Slope: "
+                            f"{float(hma_slope_pct_per_bar):+.2f}%/bar"
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+                if hma_pre_signal_lines:
+                    ma_context_block = (
+                        "<br>".join(
+                            hma_pre_signal_lines
+                        )
+                        + "<br>"
+                    )
+
+                hma_turn_value = extra_map.get(
+                    "hma_turn"
+                )
+
+                hma_trend_context_value = (
+                    extra_map.get(
+                        "hma_trend_context"
+                    )
+                )
+
+                hma_turn_context_value = (
+                    extra_map.get(
+                        "hma_turn_context"
+                    )
+                )
+
+                # Turning context is defined only for the designated timing
+                # HMAs. HMA9 / HMA50 / HMA200 retain the ordinary HMA
+                # geometry + Signal presentation without invented pair context.
+                hma_trend_reference_labels = {
+                    "HMA_16": (
+                        "HMA16 14-bar trend"
+                    ),
+                    "HMA_21": "HMA(55)",
+                    "HMA_55": "HMA(200)",
+                }
+
+                if key in hma_trend_reference_labels:
+                    hma_turn_display = "—"
+
+                    if hma_turn_value == "Up":
+                        hma_turn_display = (
+                            "Turned Up ▲"
+                        )
+                    elif hma_turn_value == "Down":
+                        hma_turn_display = (
+                            "Turned Down ▼"
+                        )
+                    elif hma_turn_value == "None":
+                        hma_turn_display = "None"
+
+                    trend_reference_label = (
+                        hma_trend_reference_labels[
+                            key
+                        ]
+                    )
+
+                    trend_context_display = (
+                        str(
+                            hma_trend_context_value
+                        )
+                        if not _is_missing(
+                            hma_trend_context_value
+                        )
+                        else "—"
+                    )
+
+                    turn_context_display = (
+                        str(
+                            hma_turn_context_value
+                        )
+                        if not _is_missing(
+                            hma_turn_context_value
+                        )
+                        else "—"
+                    )
+
+                    hma_post_signal_block = (
+                        f"HMA Direction: "
+                        f"{hma_turn_display}<br>"
+                        f"Trend Context: "
+                        f"{trend_reference_label} "
+                        f"{trend_context_display}<br>"
+                        f"Turn Context: "
+                        f"{turn_context_display}<br>"
+                    )
+
+            elif (
                 not _is_crossover_key(key)
                 and (
                     key.startswith("SMA_")
                     or key.startswith("EMA_")
-                    or key.startswith("HMA_")
                 )
             ):
                 current_price = price_by_date.get(d_raw)
@@ -4282,6 +4562,26 @@ def build_plotly_heatmap_inputs(
                     "band_context_block": band_context_block,
                     "ma_context_block": ma_context_block,
                     "vwma_post_signal_block": vwma_post_signal_block,
+
+                    "hma_post_signal_block": (
+                        hma_post_signal_block
+                    ),
+                    "hma_turn": (
+                        hma_turn_value
+                        if key.startswith("HMA_")
+                        else None
+                    ),
+                    "hma_trend_context": (
+                        hma_trend_context_value
+                        if key.startswith("HMA_")
+                        else None
+                    ),
+                    "hma_turn_context": (
+                        hma_turn_context_value
+                        if key.startswith("HMA_")
+                        else None
+                    ),
+
                     "vwma_volume_extreme_event": (
                         vwma_volume_extreme_event_value
                         if key.startswith("VWMA_")
@@ -4605,6 +4905,170 @@ def apply_cci_divergence_text_overlay(
         )
 
 
+def apply_hma_turn_text_overlay(
+    fig: go.Figure,
+    *,
+    text: List[List[str]],
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Render designated HMA turning-point events as sparse text overlays.
+
+    Arrow meaning:
+        Up arrow = designated timing HMA turned up
+        Down arrow = designated timing HMA turned down
+
+    Font color meaning on turn dates only:
+        blue = broader HMA Trend Context is Rising
+        red  = broader HMA Trend Context is Falling
+
+    Combined interpretation:
+        Up arrow + blue = Bullish Trend-Aligned
+        Up arrow + red  = Bullish Counter-Trend
+        Down arrow + red  = Bearish Trend-Aligned
+        Down arrow + blue = Bearish Counter-Trend
+
+    HMA turn/trend truth is supplied through adapter customdata.
+    This helper performs no HMA, slope, trend, or score calculation and
+    does not alter the underlying score/background semantics.
+    """
+    if not fig.data:
+        return
+
+    # Compose safely with any sparse overlays applied before this helper.
+    base_text = [
+        list(row)
+        for row in fig.data[0].text
+    ]
+
+    blue_x: List[Any] = []
+    blue_y: List[Any] = []
+    blue_text: List[str] = []
+
+    red_x: List[Any] = []
+    red_y: List[Any] = []
+    red_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if (
+            row_idx >= len(base_text)
+            or row_idx >= len(y)
+        ):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if (
+                col_idx >= len(base_text[row_idx])
+                or col_idx >= len(x)
+            ):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            # Formal turning-context model exists only on these timing rows.
+            if indicator_key not in {
+                "HMA_16",
+                "HMA_21",
+                "HMA_55",
+            }:
+                continue
+
+            turn = cell.get("hma_turn")
+            trend_context = cell.get(
+                "hma_trend_context"
+            )
+
+            if turn not in {
+                "Up",
+                "Down",
+            }:
+                continue
+
+            # Flat/unavailable broader context has no blue/red visual
+            # contract, so leave ordinary heatmap text untouched.
+            if trend_context not in {
+                "Rising",
+                "Falling",
+            }:
+                continue
+
+            value_text = base_text[row_idx][col_idx]
+
+            if value_text in {
+                None,
+                "",
+            }:
+                continue
+
+            arrow = (
+                "\u25B2"
+                if turn == "Up"
+                else "\u25BC"
+            )
+
+            overlay_text = (
+                f"{value_text} {arrow}"
+            )
+
+            # The sparse Scatter trace becomes the sole displayed value at
+            # this coordinate. Score/background/customdata remain unchanged.
+            base_text[row_idx][col_idx] = ""
+
+            if trend_context == "Rising":
+                blue_x.append(x[col_idx])
+                blue_y.append(y[row_idx])
+                blue_text.append(
+                    overlay_text
+                )
+            else:
+                red_x.append(x[col_idx])
+                red_y.append(y[row_idx])
+                red_text.append(
+                    overlay_text
+                )
+
+    fig.data[0].text = base_text
+
+    if blue_text:
+        fig.add_trace(
+            go.Scatter(
+                x=blue_x,
+                y=blue_y,
+                mode="text",
+                text=blue_text,
+                textfont=dict(
+                    size=12,
+                    color="blue",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if red_text:
+        fig.add_trace(
+            go.Scatter(
+                x=red_x,
+                y=red_y,
+                mode="text",
+                text=red_text,
+                textfont=dict(
+                    size=12,
+                    color="red",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+
 def apply_vwma_volume_extreme_text_overlay(
     fig: go.Figure,
     *,
@@ -4778,15 +5242,16 @@ def make_rolling_heatmap_figure(
         "Date: %{customdata.date}<br>"
         "<br>"
         "Value: %{customdata.formatted_value}<br>"
-        "%{customdata.ma_context_block}"
         "%{customdata.crossover_summary_block}"
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
         "%{customdata.trend_line}"
         "%{customdata.bb_bw_context_block}"
         "%{customdata.alignment_line}"
+        "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
@@ -4830,6 +5295,14 @@ def make_rolling_heatmap_figure(
     )
 
     apply_cci_divergence_text_overlay(
+        fig,
+        text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_hma_turn_text_overlay(
         fig,
         text=hm.text,
         customdata=hm.customdata,

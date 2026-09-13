@@ -221,14 +221,14 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "category": "Trend",
         "scope": "Directional Bias",
         "window": "MT",
-        "tags": [],
+        "tags": ["Counter-Trend"],
     },
     "HMA_21": {
         "family": "HMA",
         "category": "Trend",
         "scope": "Directional Bias",
         "window": "MT",
-        "tags": [],
+        "tags": ["Counter-Trend"],
     },
     "HMA_50": {
         "family": "HMA",
@@ -238,6 +238,13 @@ ROW_CLASSIFICATION: Dict[str, Dict[str, Any]] = {
         "tags": [],
     },
     "HMA_55": {
+        "family": "HMA",
+        "category": "Trend",
+        "scope": "Directional Bias",
+        "window": "LT",
+        "tags": ["Counter-Trend"],
+    },
+    "HMA_200": {
         "family": "HMA",
         "category": "Trend",
         "scope": "Directional Bias",

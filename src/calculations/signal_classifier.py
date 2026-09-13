@@ -438,6 +438,34 @@ class SignalEngine:
                     | df[atr_col].isna()
                 )
 
+        # HMA directional rules require the matching HMA value,
+        # its parameter-specific canonical 14-bar regression slope,
+        # Close, and ATR(14) for normalized price-distance comparisons.
+        #
+        # Preserve structurally immature rows as missing rather than
+        # allowing the ordinary neutral fallback to represent them as
+        # valid Neutral / 0 classifications.
+        elif indicator_name == "HMA":
+            close_col = "Close"
+            hma_col = f"HMA_{param_key}"
+            slope_col = f"HMA_{param_key}_slope__linreg_14"
+            atr_col = "ATR_14"
+
+            required_cols = [
+                close_col,
+                hma_col,
+                slope_col,
+                atr_col,
+            ]
+
+            if all(col in df.columns for col in required_cols):
+                indicator_missing_mask = (
+                    df[close_col].isna()
+                    | df[hma_col].isna()
+                    | df[slope_col].isna()
+                    | df[atr_col].isna()
+                )
+
         else:
             parameterized_value_prefixes = {
                 "RSI": "RSI",
