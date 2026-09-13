@@ -2715,10 +2715,14 @@ def build_plotly_heatmap_inputs(
                         "bullbear_context_block": "",
                         "dpo_context_block": "",
                         "band_context_block": "",
+                        "bb_bw_context_block": "",
                         "ma_context_block": "",
                         "crossover_context_block": "",
                         "crossover_summary_block": "",
+                        "vwma_post_signal_block": "",
                         "hma_post_signal_block": "",
+                        "cci_context_block": "",
+                        "bbp_exhaustion_context_block": "",
 
                         # no rule semantics
                         "rule_expr": "",
