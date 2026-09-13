@@ -5432,12 +5432,41 @@ def _build_scd_single_indicator_hover_customdata(
         )
 
     indicator_trend = custom.get("trend") or ""
+
+    volume_trend = ""
+    volume_value = custom.get(
+        "volume_value"
+    )
+    volume_delta = custom.get(
+        "volume_delta"
+    )
+
+    if volume_value is not None:
+        try:
+            volume_delta_value = float(
+                volume_delta
+            )
+
+            if volume_delta_value > 0.0:
+                volume_trend = "Rising"
+            elif volume_delta_value < 0.0:
+                volume_trend = "Falling"
+            else:
+                volume_trend = "Flat"
+        except (TypeError, ValueError):
+            volume_trend = ""
+
     if _is_scd_crossover_event_row(row_key):
         custom["single_combined_trend_line"] = ""
-    elif indicator_trend or price_trend:
+    elif (
+        indicator_trend
+        or price_trend
+        or volume_trend
+    ):
         custom["single_combined_trend_line"] = (
             f"Trend: {indicator_trend or 'N/A'}"
-            f"{f' | Price: {price_trend}' if price_trend else ''}<br>"
+            f"{f' | Price: {price_trend}' if price_trend else ''}"
+            f"{f' | Vol: {volume_trend}' if volume_trend else ''}<br>"
         )
     else:
         custom["single_combined_trend_line"] = ""
