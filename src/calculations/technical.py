@@ -1010,6 +1010,1083 @@ class DatabaseIntegratedTechnicalCalculator:
 
         return relative_change, direction
 
+    @staticmethod
+    def _confirmed_swing_low_5bar(series: pd.Series) -> pd.Series:
+        """
+        Identify five-bar structural swing lows on the actual pivot date.
+
+        A pivot at t is lower than the two lows before and two lows after.
+        Because two future trading bars are required, the pivot becomes
+        knowable only at t+2. Consumers must emit any divergence event
+        on or after that confirmation date rather than back-painting it.
+        """
+        s = pd.to_numeric(series, errors="coerce")
+
+        valid = (
+            s.notna()
+            & s.shift(1).notna()
+            & s.shift(2).notna()
+            & s.shift(-1).notna()
+            & s.shift(-2).notna()
+        )
+
+        return (
+            valid
+            & (s < s.shift(1))
+            & (s < s.shift(2))
+            & (s < s.shift(-1))
+            & (s < s.shift(-2))
+        )
+
+    @staticmethod
+    def _confirmed_swing_high_5bar(series: pd.Series) -> pd.Series:
+        """
+        Identify five-bar structural swing highs on the actual pivot date.
+
+        A pivot at t is higher than the two highs before and two highs after.
+        The pivot becomes knowable only at t+2.
+        """
+        s = pd.to_numeric(series, errors="coerce")
+
+        valid = (
+            s.notna()
+            & s.shift(1).notna()
+            & s.shift(2).notna()
+            & s.shift(-1).notna()
+            & s.shift(-2).notna()
+        )
+
+        return (
+            valid
+            & (s > s.shift(1))
+            & (s > s.shift(2))
+            & (s > s.shift(-1))
+            & (s > s.shift(-2))
+        )
+
+    def _build_uo_semantic_context(
+        self,
+        df_ind: pd.DataFrame,
+        optionc_meta: list[dict[str, Any]],
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """
+        Build full-history Ultimate Oscillator staged-reversal context.
+
+        This helper owns UO semantic/event truth used by both scoring and the
+        rolling payload. It derives seven semantic states:
+
+          Bullish Watch
+          Bullish Divergence
+          Bullish Confirmed
+          No Active Setup
+          Bearish Watch
+          Bearish Divergence
+          Bearish Confirmed
+
+        The five-state rule-engine projection is exposed through mutually
+        exclusive Boolean dataframe columns. Divergence uses confirmed
+        five-bar PRICE pivots, becomes knowable at current pivot + 2 bars,
+        and remains active until Classic Confirmation or the end of the
+        approved 10-bar confirmation window. A newer same-direction
+        divergence supersedes an older still-pending setup.
+        """
+        context: Dict[str, Dict[str, pd.Series]] = {}
+
+        if df_ind is None or df_ind.empty:
+            return context
+
+        required_price_cols = {"High", "Low"}
+        if not required_price_cols.issubset(df_ind.columns):
+            return context
+
+        if "Adj Close" in df_ind.columns:
+            close = pd.to_numeric(
+                df_ind["Adj Close"],
+                errors="coerce",
+            ).astype("float64")
+        elif "Close" in df_ind.columns:
+            close = pd.to_numeric(
+                df_ind["Close"],
+                errors="coerce",
+            ).astype("float64")
+        else:
+            return context
+
+        high = pd.to_numeric(
+            df_ind["High"],
+            errors="coerce",
+        ).astype("float64")
+        low = pd.to_numeric(
+            df_ind["Low"],
+            errors="coerce",
+        ).astype("float64")
+
+        prior_close = close.shift(1)
+
+        lower_ref = pd.concat(
+            [low, prior_close],
+            axis=1,
+        ).min(axis=1, skipna=True)
+
+        upper_ref = pd.concat(
+            [high, prior_close],
+            axis=1,
+        ).max(axis=1, skipna=True)
+
+        buying_pressure = close - lower_ref
+        true_range = upper_ref - lower_ref
+
+        low_pivots = self._confirmed_swing_low_5bar(low)
+        high_pivots = self._confirmed_swing_high_5bar(high)
+
+        low_positions = np.flatnonzero(
+            low_pivots.to_numpy()
+        )
+
+        high_positions = np.flatnonzero(
+            high_pivots.to_numpy()
+        )
+
+        thresholds = {
+            "5_10_15": (30.0, 70.0),
+            "7_14_28": (35.0, 70.0),
+            "10_20_40": (35.0, 70.0),
+        }
+
+        for meta in optionc_meta:
+            if (
+                meta.get("engine_indicator")
+                != "Ultimate_Oscillator"
+            ):
+                continue
+
+            param_key = str(
+                meta.get("param_key", "")
+            )
+            display_key = str(
+                meta.get("display_key", "")
+            )
+            value_col = str(
+                meta.get("value_col", "")
+            )
+
+            if (
+                param_key not in thresholds
+                or not display_key
+                or value_col not in df_ind.columns
+            ):
+                continue
+
+            try:
+                fast_len, medium_len, slow_len = (
+                    int(part)
+                    for part in param_key.split("_")
+                )
+            except (TypeError, ValueError):
+                continue
+
+            bullish_threshold, bearish_threshold = (
+                thresholds[param_key]
+            )
+
+            uo = pd.to_numeric(
+                df_ind[value_col],
+                errors="coerce",
+            ).astype("float64")
+
+            def _pressure_average(
+                length: int,
+            ) -> pd.Series:
+                bp_sum = buying_pressure.rolling(
+                    window=length,
+                    min_periods=length,
+                ).sum()
+
+                tr_sum = true_range.rolling(
+                    window=length,
+                    min_periods=length,
+                ).sum()
+
+                return (
+                    bp_sum
+                    / tr_sum.replace(
+                        0.0,
+                        np.nan,
+                    )
+                )
+
+            pressure_fast = _pressure_average(
+                fast_len
+            )
+            pressure_medium = _pressure_average(
+                medium_len
+            )
+            pressure_slow = _pressure_average(
+                slow_len
+            )
+
+            zone = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            valid_uo = uo.notna()
+
+            zone.loc[
+                valid_uo
+            ] = "Neither Extreme"
+
+            zone.loc[
+                valid_uo
+                & (uo < bullish_threshold)
+            ] = "Oversold"
+
+            zone.loc[
+                valid_uo
+                & (uo > bearish_threshold)
+            ] = "Overbought"
+
+            pressure_bias = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            pressure_bias.loc[
+                valid_uo
+                & (uo > 50.0)
+            ] = "Positive"
+
+            pressure_bias.loc[
+                valid_uo
+                & (uo < 50.0)
+            ] = "Negative"
+
+            pressure_bias.loc[
+                valid_uo
+                & (uo == 50.0)
+            ] = "Balanced"
+
+            prior_uo = uo.shift(1)
+
+            crossover_valid = (
+                valid_uo
+                & prior_uo.notna()
+            )
+
+            centerline_crossover = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            centerline_crossover.loc[
+                crossover_valid
+            ] = "None"
+
+            centerline_crossover.loc[
+                crossover_valid
+                & (prior_uo <= 50.0)
+                & (uo > 50.0)
+            ] = "Cross Above 50"
+
+            centerline_crossover.loc[
+                crossover_valid
+                & (prior_uo >= 50.0)
+                & (uo < 50.0)
+            ] = "Cross Below 50"
+
+            semantic_state = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            divergence_direction = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            confirmation_status = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            confirmation_level = pd.Series(
+                np.nan,
+                index=df_ind.index,
+                dtype="float64",
+            )
+
+            confirmation_event_date = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            confirmation_sessions_remaining = (
+                pd.Series(
+                    pd.NA,
+                    index=df_ind.index,
+                    dtype="Int64",
+                )
+            )
+
+            prior_pivot_date = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            current_pivot_date = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            divergence_event_date = pd.Series(
+                pd.NA,
+                index=df_ind.index,
+                dtype="object",
+            )
+
+            prior_price_pivot = pd.Series(
+                np.nan,
+                index=df_ind.index,
+                dtype="float64",
+            )
+
+            current_price_pivot = pd.Series(
+                np.nan,
+                index=df_ind.index,
+                dtype="float64",
+            )
+
+            prior_uo_pivot = pd.Series(
+                np.nan,
+                index=df_ind.index,
+                dtype="float64",
+            )
+
+            current_uo_pivot = pd.Series(
+                np.nan,
+                index=df_ind.index,
+                dtype="float64",
+            )
+
+            events_by_start: Dict[
+                int,
+                list[dict[str, Any]],
+            ] = {}
+
+            def _register_event(
+                *,
+                direction: str,
+                previous_pos: int,
+                current_pos: int,
+                previous_price: float,
+                current_price: float,
+                previous_uo_value: float,
+                current_uo_value: float,
+                level: float,
+            ) -> None:
+                event_pos = current_pos + 2
+
+                if event_pos >= len(df_ind):
+                    return
+
+                confirmation_pos: int | None = None
+                confirmation_value: float | None = None
+
+                last_confirmation_pos = min(
+                    event_pos + 10,
+                    len(df_ind) - 1,
+                )
+
+                for candidate_pos in range(
+                    event_pos,
+                    last_confirmation_pos + 1,
+                ):
+                    candidate_uo = uo.iloc[
+                        candidate_pos
+                    ]
+
+                    if pd.isna(candidate_uo):
+                        continue
+
+                    if (
+                        direction == "Bullish"
+                        and candidate_uo > level
+                    ):
+                        confirmation_pos = (
+                            candidate_pos
+                        )
+                        confirmation_value = float(
+                            candidate_uo
+                        )
+                        break
+
+                    if (
+                        direction == "Bearish"
+                        and candidate_uo < level
+                    ):
+                        confirmation_pos = (
+                            candidate_pos
+                        )
+                        confirmation_value = float(
+                            candidate_uo
+                        )
+                        break
+
+                record: dict[str, Any] = {
+                    "direction": direction,
+                    "prior_pos": int(
+                        previous_pos
+                    ),
+                    "current_pos": int(
+                        current_pos
+                    ),
+                    "event_pos": int(
+                        event_pos
+                    ),
+                    "expiry_pos": int(
+                        event_pos + 11
+                    ),
+                    "confirmation_pos": (
+                        confirmation_pos
+                    ),
+                    "confirmation_value": (
+                        confirmation_value
+                    ),
+                    "level": float(level),
+                    "prior_price": float(
+                        previous_price
+                    ),
+                    "current_price": float(
+                        current_price
+                    ),
+                    "prior_uo": float(
+                        previous_uo_value
+                    ),
+                    "current_uo": float(
+                        current_uo_value
+                    ),
+                }
+
+                events_by_start.setdefault(
+                    event_pos,
+                    [],
+                ).append(record)
+
+            for (
+                previous_pos,
+                current_pos,
+            ) in zip(
+                low_positions[:-1],
+                low_positions[1:],
+            ):
+                previous_price = low.iloc[
+                    previous_pos
+                ]
+                current_price = low.iloc[
+                    current_pos
+                ]
+                previous_uo_value = uo.iloc[
+                    previous_pos
+                ]
+                current_uo_value = uo.iloc[
+                    current_pos
+                ]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_uo_value,
+                        current_uo_value,
+                    )
+                ):
+                    continue
+
+                qualifying_extreme = (
+                    previous_uo_value
+                    < bullish_threshold
+                    or current_uo_value
+                    < bullish_threshold
+                )
+
+                if not (
+                    current_price
+                    < previous_price
+                    and current_uo_value
+                    > previous_uo_value
+                    and qualifying_extreme
+                ):
+                    continue
+
+                span = uo.iloc[
+                    previous_pos:
+                    current_pos + 1
+                ].dropna()
+
+                if span.empty:
+                    continue
+
+                _register_event(
+                    direction="Bullish",
+                    previous_pos=previous_pos,
+                    current_pos=current_pos,
+                    previous_price=float(
+                        previous_price
+                    ),
+                    current_price=float(
+                        current_price
+                    ),
+                    previous_uo_value=float(
+                        previous_uo_value
+                    ),
+                    current_uo_value=float(
+                        current_uo_value
+                    ),
+                    level=float(
+                        span.max()
+                    ),
+                )
+
+            for (
+                previous_pos,
+                current_pos,
+            ) in zip(
+                high_positions[:-1],
+                high_positions[1:],
+            ):
+                previous_price = high.iloc[
+                    previous_pos
+                ]
+                current_price = high.iloc[
+                    current_pos
+                ]
+                previous_uo_value = uo.iloc[
+                    previous_pos
+                ]
+                current_uo_value = uo.iloc[
+                    current_pos
+                ]
+
+                if any(
+                    pd.isna(value)
+                    for value in (
+                        previous_price,
+                        current_price,
+                        previous_uo_value,
+                        current_uo_value,
+                    )
+                ):
+                    continue
+
+                qualifying_extreme = (
+                    previous_uo_value
+                    > bearish_threshold
+                    or current_uo_value
+                    > bearish_threshold
+                )
+
+                if not (
+                    current_price
+                    > previous_price
+                    and current_uo_value
+                    < previous_uo_value
+                    and qualifying_extreme
+                ):
+                    continue
+
+                span = uo.iloc[
+                    previous_pos:
+                    current_pos + 1
+                ].dropna()
+
+                if span.empty:
+                    continue
+
+                _register_event(
+                    direction="Bearish",
+                    previous_pos=previous_pos,
+                    current_pos=current_pos,
+                    previous_price=float(
+                        previous_price
+                    ),
+                    current_price=float(
+                        current_price
+                    ),
+                    previous_uo_value=float(
+                        previous_uo_value
+                    ),
+                    current_uo_value=float(
+                        current_uo_value
+                    ),
+                    level=float(
+                        span.min()
+                    ),
+                )
+
+            active: Dict[
+                str,
+                dict[str, Any] | None,
+            ] = {
+                "Bullish": None,
+                "Bearish": None,
+            }
+
+            conflict_count = 0
+
+            def _write_record_context(
+                position: int,
+                record: dict[str, Any],
+            ) -> None:
+                direction = str(
+                    record["direction"]
+                )
+
+                divergence_direction.iloc[
+                    position
+                ] = direction
+
+                confirmation_level.iloc[
+                    position
+                ] = float(
+                    record["level"]
+                )
+
+                prior_pivot_date.iloc[
+                    position
+                ] = df_ind.index[
+                    int(
+                        record["prior_pos"]
+                    )
+                ]
+
+                current_pivot_date.iloc[
+                    position
+                ] = df_ind.index[
+                    int(
+                        record["current_pos"]
+                    )
+                ]
+
+                divergence_event_date.iloc[
+                    position
+                ] = df_ind.index[
+                    int(
+                        record["event_pos"]
+                    )
+                ]
+
+                prior_price_pivot.iloc[
+                    position
+                ] = float(
+                    record["prior_price"]
+                )
+
+                current_price_pivot.iloc[
+                    position
+                ] = float(
+                    record["current_price"]
+                )
+
+                prior_uo_pivot.iloc[
+                    position
+                ] = float(
+                    record["prior_uo"]
+                )
+
+                current_uo_pivot.iloc[
+                    position
+                ] = float(
+                    record["current_uo"]
+                )
+
+                confirmation_pos = record.get(
+                    "confirmation_pos"
+                )
+
+                if confirmation_pos is not None:
+                    confirmation_event_date.iloc[
+                        position
+                    ] = df_ind.index[
+                        int(
+                            confirmation_pos
+                        )
+                    ]
+
+            for position in range(
+                len(df_ind)
+            ):
+                if pd.isna(
+                    uo.iloc[position]
+                ):
+                    continue
+
+                expired_records: list[
+                    dict[str, Any]
+                ] = []
+
+                for direction in (
+                    "Bullish",
+                    "Bearish",
+                ):
+                    record = active[
+                        direction
+                    ]
+
+                    if (
+                        record is not None
+                        and position
+                        >= int(
+                            record[
+                                "expiry_pos"
+                            ]
+                        )
+                    ):
+                        expired_records.append(
+                            record
+                        )
+                        active[
+                            direction
+                        ] = None
+
+                for record in (
+                    events_by_start.get(
+                        position,
+                        [],
+                    )
+                ):
+                    direction = str(
+                        record[
+                            "direction"
+                        ]
+                    )
+
+                    active[
+                        direction
+                    ] = record
+
+                confirming_directions = [
+                    direction
+                    for (
+                        direction,
+                        record,
+                    ) in active.items()
+                    if (
+                        record is not None
+                        and record.get(
+                            "confirmation_pos"
+                        )
+                        == position
+                    )
+                ]
+
+                if (
+                    len(
+                        confirming_directions
+                    )
+                    > 1
+                ):
+                    conflict_count += 1
+                    continue
+
+                if confirming_directions:
+                    direction = (
+                        confirming_directions[0]
+                    )
+
+                    record = active[
+                        direction
+                    ]
+
+                    if record is None:
+                        continue
+
+                    semantic_state.iloc[
+                        position
+                    ] = (
+                        f"{direction} Confirmed"
+                    )
+
+                    confirmation_status.iloc[
+                        position
+                    ] = (
+                        f"{direction} Confirmed"
+                    )
+
+                    _write_record_context(
+                        position,
+                        record,
+                    )
+
+                    active[
+                        direction
+                    ] = None
+
+                    continue
+
+                active_directions = [
+                    direction
+                    for (
+                        direction,
+                        record,
+                    ) in active.items()
+                    if record is not None
+                ]
+
+                if (
+                    len(
+                        active_directions
+                    )
+                    > 1
+                ):
+                    conflict_count += 1
+                    continue
+
+                if active_directions:
+                    direction = (
+                        active_directions[0]
+                    )
+
+                    record = active[
+                        direction
+                    ]
+
+                    if record is None:
+                        continue
+
+                    semantic_state.iloc[
+                        position
+                    ] = (
+                        f"{direction} Divergence"
+                    )
+
+                    confirmation_status.iloc[
+                        position
+                    ] = "Pending"
+
+                    confirmation_sessions_remaining.iloc[
+                        position
+                    ] = max(
+                        0,
+                        10
+                        - (
+                            position
+                            - int(
+                                record[
+                                    "event_pos"
+                                ]
+                            )
+                        ),
+                    )
+
+                    _write_record_context(
+                        position,
+                        record,
+                    )
+
+                    continue
+
+                current_uo_value = float(
+                    uo.iloc[position]
+                )
+
+                if (
+                    current_uo_value
+                    < bullish_threshold
+                ):
+                    semantic_state.iloc[
+                        position
+                    ] = "Bullish Watch"
+
+                elif (
+                    current_uo_value
+                    > bearish_threshold
+                ):
+                    semantic_state.iloc[
+                        position
+                    ] = "Bearish Watch"
+
+                else:
+                    semantic_state.iloc[
+                        position
+                    ] = "No Active Setup"
+
+                if expired_records:
+                    record = (
+                        expired_records[-1]
+                    )
+
+                    confirmation_status.iloc[
+                        position
+                    ] = "Expired"
+
+                    _write_record_context(
+                        position,
+                        record,
+                    )
+
+                else:
+                    confirmation_status.iloc[
+                        position
+                    ] = "None"
+
+            if conflict_count:
+                logger.warning(
+                    "UO semantic-state collision for %s: "
+                    "%s rows left unavailable",
+                    display_key,
+                    conflict_count,
+                )
+
+            prefix = f"UO_{param_key}"
+
+            bullish_confirmed = (
+                semantic_state.eq(
+                    "Bullish Confirmed"
+                )
+            )
+
+            bullish_setup = (
+                semantic_state.isin(
+                    [
+                        "Bullish Watch",
+                        "Bullish Divergence",
+                    ]
+                )
+            )
+
+            no_active_setup = (
+                semantic_state.eq(
+                    "No Active Setup"
+                )
+            )
+
+            bearish_setup = (
+                semantic_state.isin(
+                    [
+                        "Bearish Watch",
+                        "Bearish Divergence",
+                    ]
+                )
+            )
+
+            bearish_confirmed = (
+                semantic_state.eq(
+                    "Bearish Confirmed"
+                )
+            )
+
+            column_map = {
+                f"{prefix}_SEMANTIC_STATE":
+                    semantic_state,
+                f"{prefix}_ZONE":
+                    zone,
+                f"{prefix}_DIVERGENCE_DIRECTION":
+                    divergence_direction,
+                f"{prefix}_CONFIRMATION_STATUS":
+                    confirmation_status,
+                f"{prefix}_CONFIRMATION_LEVEL":
+                    confirmation_level,
+                f"{prefix}_CONFIRMATION_EVENT_DATE":
+                    confirmation_event_date,
+                f"{prefix}_CONFIRMATION_SESSIONS_REMAINING":
+                    confirmation_sessions_remaining,
+                f"{prefix}_PRIOR_PIVOT_DATE":
+                    prior_pivot_date,
+                f"{prefix}_CURRENT_PIVOT_DATE":
+                    current_pivot_date,
+                f"{prefix}_DIVERGENCE_EVENT_DATE":
+                    divergence_event_date,
+                f"{prefix}_PRIOR_PRICE_PIVOT":
+                    prior_price_pivot,
+                f"{prefix}_CURRENT_PRICE_PIVOT":
+                    current_price_pivot,
+                f"{prefix}_PRIOR_UO_PIVOT":
+                    prior_uo_pivot,
+                f"{prefix}_CURRENT_UO_PIVOT":
+                    current_uo_pivot,
+                f"{prefix}_PRESSURE_BIAS":
+                    pressure_bias,
+                f"{prefix}_CENTERLINE_CROSSOVER":
+                    centerline_crossover,
+                f"{prefix}_PRESSURE_FAST":
+                    pressure_fast,
+                f"{prefix}_PRESSURE_MEDIUM":
+                    pressure_medium,
+                f"{prefix}_PRESSURE_SLOW":
+                    pressure_slow,
+                f"{prefix}_BULLISH_CONFIRMED":
+                    bullish_confirmed,
+                f"{prefix}_BULLISH_SETUP":
+                    bullish_setup,
+                f"{prefix}_NO_ACTIVE_SETUP":
+                    no_active_setup,
+                f"{prefix}_BEARISH_SETUP":
+                    bearish_setup,
+                f"{prefix}_BEARISH_CONFIRMED":
+                    bearish_confirmed,
+            }
+
+            for (
+                column_name,
+                series,
+            ) in column_map.items():
+                df_ind[
+                    column_name
+                ] = series
+
+            context[display_key] = {
+                "semantic_state":
+                    semantic_state,
+                "zone":
+                    zone,
+                "divergence_direction":
+                    divergence_direction,
+                "confirmation_status":
+                    confirmation_status,
+                "confirmation_level":
+                    confirmation_level,
+                "confirmation_event_date":
+                    confirmation_event_date,
+                "confirmation_sessions_remaining":
+                    confirmation_sessions_remaining,
+                "prior_pivot_date":
+                    prior_pivot_date,
+                "current_pivot_date":
+                    current_pivot_date,
+                "divergence_event_date":
+                    divergence_event_date,
+                "prior_price_pivot":
+                    prior_price_pivot,
+                "current_price_pivot":
+                    current_price_pivot,
+                "prior_uo_pivot":
+                    prior_uo_pivot,
+                "current_uo_pivot":
+                    current_uo_pivot,
+                "pressure_bias":
+                    pressure_bias,
+                "centerline_crossover":
+                    centerline_crossover,
+                "pressure_fast":
+                    pressure_fast,
+                "pressure_medium":
+                    pressure_medium,
+                "pressure_slow":
+                    pressure_slow,
+            }
+
+        return context
+
     def _build_bb_bw_semantic_context(
         self,
         df_ind: pd.DataFrame,
@@ -1221,8 +2298,18 @@ class DatabaseIntegratedTechnicalCalculator:
         # This is the correct Option F / rolling-heatmap behavior because
         # `_get_optionc_meta()` is already the single source of truth for
         # rolling payload inclusion.
+        optionc_meta = self._get_optionc_meta()
+
+        # UO staged-reversal truth must exist before the rule engine runs because
+        # the rulebook projects upstream semantic states into the canonical
+        # five-state score. The helper also leaves typed context columns on
+        # df_ind for later rolling-payload transport.
+        self._build_uo_semantic_context(
+            df_ind=df_ind,
+            optionc_meta=optionc_meta,
+        )
+
         if indicators is None:
-            optionc_meta = self._get_optionc_meta()
             indicators = sorted({m["engine_indicator"] for m in optionc_meta})
             
         scores = run_optionc_heatmap(
@@ -2176,57 +3263,11 @@ class DatabaseIntegratedTechnicalCalculator:
         cci_divergence_by_display_key: Dict[str, pd.Series] = {}
         cci_zero_line_crossover_by_display_key: Dict[str, pd.Series] = {}
 
-        def _confirmed_swing_low_5bar(series: pd.Series) -> pd.Series:
-            """
-            Identify 5-bar structural swing lows on the actual pivot date.
-
-            A pivot at t is lower than the two lows before and two lows after.
-            Because two future trading bars are required, the pivot becomes
-            knowable only at t+2. Divergence emission is shifted accordingly
-            below so no future information is back-painted onto t.
-            """
-            s = pd.to_numeric(series, errors="coerce")
-
-            valid = (
-                s.notna()
-                & s.shift(1).notna()
-                & s.shift(2).notna()
-                & s.shift(-1).notna()
-                & s.shift(-2).notna()
-            )
-
-            return (
-                valid
-                & (s < s.shift(1))
-                & (s < s.shift(2))
-                & (s < s.shift(-1))
-                & (s < s.shift(-2))
-            )
-
-        def _confirmed_swing_high_5bar(series: pd.Series) -> pd.Series:
-            """
-            Identify 5-bar structural swing highs on the actual pivot date.
-
-            A pivot at t is higher than the two highs before and two highs after.
-            The corresponding divergence event is exposed only at t+2.
-            """
-            s = pd.to_numeric(series, errors="coerce")
-
-            valid = (
-                s.notna()
-                & s.shift(1).notna()
-                & s.shift(2).notna()
-                & s.shift(-1).notna()
-                & s.shift(-2).notna()
-            )
-
-            return (
-                valid
-                & (s > s.shift(1))
-                & (s > s.shift(2))
-                & (s > s.shift(-1))
-                & (s > s.shift(-2))
-            )
+        # Reuse the class-level five-bar pivot implementation so BBP, CCI,
+        # and UO share one structural definition. Existing BBP/CCI code below
+        # continues to call the local names unchanged.
+        _confirmed_swing_low_5bar = self._confirmed_swing_low_5bar
+        _confirmed_swing_high_5bar = self._confirmed_swing_high_5bar
 
         for period in (10, 13, 21):
             ema_col = f"EMA_{period}"
@@ -3552,6 +4593,129 @@ class DatabaseIntegratedTechnicalCalculator:
                         if not pd.isna(raw_zero_cross):
                             extras["cci_zero_line_crossover"] = str(
                                 raw_zero_cross
+                            )
+
+                # UO staged-reversal context transport.
+                #
+                # All semantic/event truth is derived upstream on complete
+                # chronological history before scoring and before visible-window
+                # reduction. The payload carries typed facts only; downstream
+                # adapter/UI layers must not recalculate UO semantics.
+                if eng_name == "Ultimate_Oscillator":
+                    prefix = f"UO_{param_key}"
+
+                    uo_extra_columns = {
+                        "uo_semantic_state":
+                            f"{prefix}_SEMANTIC_STATE",
+                        "uo_zone":
+                            f"{prefix}_ZONE",
+                        "uo_divergence_direction":
+                            f"{prefix}_DIVERGENCE_DIRECTION",
+                        "uo_confirmation_status":
+                            f"{prefix}_CONFIRMATION_STATUS",
+                        "uo_confirmation_level":
+                            f"{prefix}_CONFIRMATION_LEVEL",
+                        "uo_confirmation_event_date":
+                            f"{prefix}_CONFIRMATION_EVENT_DATE",
+                        "uo_confirmation_sessions_remaining":
+                            f"{prefix}_CONFIRMATION_SESSIONS_REMAINING",
+                        "uo_prior_pivot_date":
+                            f"{prefix}_PRIOR_PIVOT_DATE",
+                        "uo_current_pivot_date":
+                            f"{prefix}_CURRENT_PIVOT_DATE",
+                        "uo_divergence_event_date":
+                            f"{prefix}_DIVERGENCE_EVENT_DATE",
+                        "uo_prior_price_pivot":
+                            f"{prefix}_PRIOR_PRICE_PIVOT",
+                        "uo_current_price_pivot":
+                            f"{prefix}_CURRENT_PRICE_PIVOT",
+                        "uo_prior_uo_pivot":
+                            f"{prefix}_PRIOR_UO_PIVOT",
+                        "uo_current_uo_pivot":
+                            f"{prefix}_CURRENT_UO_PIVOT",
+                        "uo_pressure_bias":
+                            f"{prefix}_PRESSURE_BIAS",
+                        "uo_centerline_crossover":
+                            f"{prefix}_CENTERLINE_CROSSOVER",
+                        "uo_pressure_fast":
+                            f"{prefix}_PRESSURE_FAST",
+                        "uo_pressure_medium":
+                            f"{prefix}_PRESSURE_MEDIUM",
+                        "uo_pressure_slow":
+                            f"{prefix}_PRESSURE_SLOW",
+                    }
+
+                    numeric_uo_extra_keys = {
+                        "uo_confirmation_level",
+                        "uo_confirmation_sessions_remaining",
+                        "uo_prior_price_pivot",
+                        "uo_current_price_pivot",
+                        "uo_prior_uo_pivot",
+                        "uo_current_uo_pivot",
+                        "uo_pressure_fast",
+                        "uo_pressure_medium",
+                        "uo_pressure_slow",
+                    }
+
+                    date_uo_extra_keys = {
+                        "uo_confirmation_event_date",
+                        "uo_prior_pivot_date",
+                        "uo_current_pivot_date",
+                        "uo_divergence_event_date",
+                    }
+
+                    for (
+                        extra_key,
+                        column_name,
+                    ) in uo_extra_columns.items():
+                        if column_name not in df_ind.columns:
+                            continue
+
+                        raw_uo_extra = df_ind.loc[
+                            dt,
+                            column_name,
+                        ]
+
+                        if pd.isna(raw_uo_extra):
+                            continue
+
+                        if (
+                            extra_key
+                            in numeric_uo_extra_keys
+                        ):
+                            try:
+                                extras[
+                                    extra_key
+                                ] = float(
+                                    raw_uo_extra
+                                )
+                            except (
+                                TypeError,
+                                ValueError,
+                            ):
+                                continue
+
+                        elif (
+                            extra_key
+                            in date_uo_extra_keys
+                        ):
+                            try:
+                                extras[
+                                    extra_key
+                                ] = pd.Timestamp(
+                                    raw_uo_extra
+                                ).date().isoformat()
+                            except (
+                                TypeError,
+                                ValueError,
+                            ):
+                                continue
+
+                        else:
+                            extras[
+                                extra_key
+                            ] = str(
+                                raw_uo_extra
                             )
 
                 # VWMA context-only transport.
@@ -4893,6 +6057,15 @@ class DatabaseIntegratedTechnicalCalculator:
             )
             if df_ind is None or df_ind.empty:
                 return {"status": "empty", "ticker": ticker, "dates": [], "short_term": None, "extras": {}}
+
+            # The Rolling Signal Heatmap builds its payload from this df_ind.
+            # Populate canonical UO staged-reversal context on this exact
+            # dataframe before _build_optionc_rolling_signals() transports it.
+            optionc_meta = self._get_optionc_meta()
+            self._build_uo_semantic_context(
+                df_ind=df_ind,
+                optionc_meta=optionc_meta,
+            )
 
             scores = self.calculate_rule_engine_signals_optionc(
                 ticker=ticker,

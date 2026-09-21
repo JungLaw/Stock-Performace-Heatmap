@@ -94,6 +94,27 @@ def _format_hover_block(label: str, value: Any, *, width: int = 72) -> str:
     return f"<br>{label}:<br>{wrapped}<br>"
 
 
+def _format_uo_hover_date(value: Any) -> str:
+    """
+    Format an upstream UO event/pivot date as M/D/YY for hover display.
+
+    Date/event truth remains upstream-owned. This helper changes only
+    presentation and falls back to the original value if parsing fails.
+    """
+    if value is None:
+        return ""
+
+    try:
+        ts = pd.Timestamp(value)
+
+        if pd.isna(ts):
+            return ""
+
+        return f"{ts.month}/{ts.day}/{str(ts.year)[-2:]}"
+    except Exception:
+        return str(value)
+
+
 # ----------------------------
 # Row definitions (v1)
 # ----------------------------
@@ -437,18 +458,51 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "UO_5_10_15": {
         "display_name": "UO(5,10,15)",
-        "definition": "Ultimate Oscillator blends short/medium/long buying pressure into one momentum oscillator.",
-        "how_to_read": "Higher = stronger momentum; 45–55 often treated as neutral depending on your rules.",
-    },    
+        "definition": (
+            "Ultimate Oscillator combines short-, medium-, and long-horizon "
+            "buying pressure relative to true range using a 4:2:1 weighting. "
+            "Its staged-reversal framework uses an extreme condition, "
+            "price/UO divergence, and Classic Confirmation."
+        ),
+        "how_to_read": (
+            "Watch = UO is in an extreme zone. ◆ = an active confirmed-pivot "
+            "price/UO divergence. Bullish Confirmed / Bearish Confirmed means "
+            "UO has broken the Classic Confirmation level within the 10-bar "
+            "confirmation window. ▲ / ▼ marks a current-session cross of the "
+            "50 line. Additional details: see UO.md → Staged Reversal Framework."
+        ),
+    },
     "UO_7_14_28": {
         "display_name": "UO(7,14,28)",
-        "definition": "Blends short/medium/long lookbacks into one momentum oscillator.",
-        "how_to_read": "Higher suggests stronger buying pressure; lower suggests selling pressure.",
+        "definition": (
+            "Ultimate Oscillator combines short-, medium-, and long-horizon "
+            "buying pressure relative to true range using a 4:2:1 weighting. "
+            "Its staged-reversal framework uses an extreme condition, "
+            "price/UO divergence, and Classic Confirmation."
+        ),
+        "how_to_read": (
+            "Watch = UO is in an extreme zone. ◆ = an active confirmed-pivot "
+            "price/UO divergence. Bullish Confirmed / Bearish Confirmed means "
+            "UO has broken the Classic Confirmation level within the 10-bar "
+            "confirmation window. ▲ / ▼ marks a current-session cross of the "
+            "50 line. Additional details: see UO.md → Staged Reversal Framework."
+        ),
     },
     "UO_10_20_40": {
-        "display_name": "Ultimate Oscillator (10,20,40)",
-        "definition": "Ultimate Oscillator blends short/medium/long buying pressure into one momentum oscillator.",
-        "how_to_read": "Longer windows smooth signals; use your rule thresholds for buy/sell regions.",
+        "display_name": "UO(10,20,40)",
+        "definition": (
+            "Ultimate Oscillator combines short-, medium-, and long-horizon "
+            "buying pressure relative to true range using a 4:2:1 weighting. "
+            "Its staged-reversal framework uses an extreme condition, "
+            "price/UO divergence, and Classic Confirmation."
+        ),
+        "how_to_read": (
+            "Watch = UO is in an extreme zone. ◆ = an active confirmed-pivot "
+            "price/UO divergence. Bullish Confirmed / Bearish Confirmed means "
+            "UO has broken the Classic Confirmation level within the 10-bar "
+            "confirmation window. ▲ / ▼ marks a current-session cross of the "
+            "50 line. Additional details: see UO.md → Staged Reversal Framework."
+        ),
     },
     "CCI_10": {
         "display_name": "CCI (10)",
@@ -965,6 +1019,8 @@ def format_cell_value(indicator_key: str, v: Any) -> str:
         return f"{fv * 100.0:.2f}"
     if indicator_key.startswith("CMF"):
         return f"{fv * 100.0:+.1f}"
+    if indicator_key.startswith("UO_"):
+        return f"{fv:.1f}"
     if indicator_key == "OBV" or indicator_key.startswith("OBV"):
         return _abbr(fv)
     return f"{fv:.2f}"
@@ -2722,6 +2778,10 @@ def build_plotly_heatmap_inputs(
                         "vwma_post_signal_block": "",
                         "hma_post_signal_block": "",
                         "cci_context_block": "",
+                        "uo_context_block": "",
+                        "uo_semantic_state": None,
+                        "uo_divergence_direction": None,
+                        "uo_centerline_crossover": None,
                         "bbp_exhaustion_context_block": "",
 
                         # no rule semantics
@@ -2817,6 +2877,34 @@ def build_plotly_heatmap_inputs(
                 signal_display_label = (
                     score_to_bbp_exhaustion_signal_label(s)
                 )
+            elif (
+                key.startswith("UO_")
+                and isinstance(extra_map, dict)
+            ):
+                uo_signal_state = extra_map.get(
+                    "uo_semantic_state"
+                )
+
+                uo_signal_labels = {
+                    "Bullish Confirmed": "Bullish Confirmed",
+                    "Bullish Watch": "Bullish Setup (Watch)",
+                    "Bullish Divergence": (
+                        "Bullish Setup (Divergence)"
+                    ),
+                    "No Active Setup": "No Active Setup",
+                    "Bearish Watch": "Bearish Setup (Watch)",
+                    "Bearish Divergence": (
+                        "Bearish Setup (Divergence)"
+                    ),
+                    "Bearish Confirmed": "Bearish Confirmed",
+                }
+
+                signal_display_label = (
+                    uo_signal_labels.get(
+                        str(uo_signal_state),
+                        score_label,
+                    )
+                )
             else:
                 signal_display_label = score_label
 
@@ -2845,6 +2933,13 @@ def build_plotly_heatmap_inputs(
             cci_context_block = ""
             cci_divergence_value = None
             cci_zero_line_crossover_value = None
+
+            # UO context-only display fields.
+            # Semantic/event truth is derived upstream in technical.py.
+            uo_context_block = ""
+            uo_semantic_state_value = None
+            uo_divergence_direction_value = None
+            uo_centerline_crossover_value = None
 
             dpo_context_block = ""
             band_context_block = ""
@@ -2915,6 +3010,542 @@ def build_plotly_heatmap_inputs(
                     cci_context_block = (
                         "<br>".join(cci_context_lines)
                         + "<br>"
+                    )
+
+            # UO:
+            # Consume upstream staged-reversal and pressure context only.
+            # Pivot, divergence, confirmation, expiry, and score truth are
+            # computed upstream in technical.py. This adapter formats them only.
+            if (
+                key.startswith("UO_")
+                and isinstance(extra_map, dict)
+            ):
+                uo_semantic_state = extra_map.get(
+                    "uo_semantic_state"
+                )
+                uo_zone = extra_map.get(
+                    "uo_zone"
+                )
+                uo_divergence_direction = extra_map.get(
+                    "uo_divergence_direction"
+                )
+                uo_confirmation_status = extra_map.get(
+                    "uo_confirmation_status"
+                )
+                uo_confirmation_level = extra_map.get(
+                    "uo_confirmation_level"
+                )
+                uo_confirmation_event_date = extra_map.get(
+                    "uo_confirmation_event_date"
+                )
+                uo_confirmation_sessions_remaining = extra_map.get(
+                    "uo_confirmation_sessions_remaining"
+                )
+                uo_prior_pivot_date = extra_map.get(
+                    "uo_prior_pivot_date"
+                )
+                uo_current_pivot_date = extra_map.get(
+                    "uo_current_pivot_date"
+                )
+                uo_divergence_event_date = extra_map.get(
+                    "uo_divergence_event_date"
+                )
+                uo_prior_price_pivot = extra_map.get(
+                    "uo_prior_price_pivot"
+                )
+                uo_current_price_pivot = extra_map.get(
+                    "uo_current_price_pivot"
+                )
+                uo_prior_uo_pivot = extra_map.get(
+                    "uo_prior_uo_pivot"
+                )
+                uo_current_uo_pivot = extra_map.get(
+                    "uo_current_uo_pivot"
+                )
+                uo_pressure_bias = extra_map.get(
+                    "uo_pressure_bias"
+                )
+                uo_centerline_crossover = extra_map.get(
+                    "uo_centerline_crossover"
+                )
+                uo_pressure_fast = extra_map.get(
+                    "uo_pressure_fast"
+                )
+                uo_pressure_medium = extra_map.get(
+                    "uo_pressure_medium"
+                )
+                uo_pressure_slow = extra_map.get(
+                    "uo_pressure_slow"
+                )
+
+                if uo_semantic_state in {
+                    "Bullish Watch",
+                    "Bullish Divergence",
+                    "Bullish Confirmed",
+                    "No Active Setup",
+                    "Bearish Watch",
+                    "Bearish Divergence",
+                    "Bearish Confirmed",
+                }:
+                    uo_semantic_state_value = (
+                        uo_semantic_state
+                    )
+
+                if uo_divergence_direction in {
+                    "Bullish",
+                    "Bearish",
+                }:
+                    uo_divergence_direction_value = (
+                        uo_divergence_direction
+                    )
+
+                if uo_centerline_crossover in {
+                    "Cross Above 50",
+                    "Uptrend Bias",
+                }:
+                    uo_centerline_crossover_value = (
+                        "Uptrend Bias"
+                    )
+                elif uo_centerline_crossover in {
+                    "Cross Below 50",
+                    "Downtrend Bias",
+                }:
+                    uo_centerline_crossover_value = (
+                        "Downtrend Bias"
+                    )
+
+                uo_context_lines = []
+
+                if not _is_missing(uo_zone):
+                    uo_context_lines.append(
+                        f"Zone: {uo_zone}"
+                    )
+
+                if not _is_missing(uo_pressure_bias):
+                    pressure_bias_text = (
+                        f"Pressure Bias: {uo_pressure_bias}"
+                    )
+
+                    if (
+                        uo_centerline_crossover_value
+                        == "Uptrend Bias"
+                    ):
+                        pressure_bias_text += " ▲"
+                    elif (
+                        uo_centerline_crossover_value
+                        == "Downtrend Bias"
+                    ):
+                        pressure_bias_text += " ▼"
+
+                    uo_context_lines.append(
+                        pressure_bias_text
+                    )
+
+                prev_uo_pressure_fast = (
+                    prev_extra_map.get("uo_pressure_fast")
+                    if isinstance(prev_extra_map, dict)
+                    else None
+                )
+                prev_uo_pressure_medium = (
+                    prev_extra_map.get("uo_pressure_medium")
+                    if isinstance(prev_extra_map, dict)
+                    else None
+                )
+                prev_uo_pressure_slow = (
+                    prev_extra_map.get("uo_pressure_slow")
+                    if isinstance(prev_extra_map, dict)
+                    else None
+                )
+
+                pressure_values = (
+                    (
+                        "Fast",
+                        uo_pressure_fast,
+                        prev_uo_pressure_fast,
+                    ),
+                    (
+                        "Medium",
+                        uo_pressure_medium,
+                        prev_uo_pressure_medium,
+                    ),
+                    (
+                        "Slow",
+                        uo_pressure_slow,
+                        prev_uo_pressure_slow,
+                    ),
+                )
+
+                pressure_parts = []
+
+                for (
+                    pressure_name,
+                    pressure_value,
+                    previous_pressure_value,
+                ) in pressure_values:
+                    if _is_missing(pressure_value):
+                        continue
+
+                    pressure_text = (
+                        f"{pressure_name} "
+                        f"{format_signed_number(
+                            pressure_value,
+                            decimals=2,
+                        )}"
+                    )
+
+                    pressure_delta_abs = None
+                    if not _is_missing(
+                        previous_pressure_value
+                    ):
+                        try:
+                            pressure_delta_abs = (
+                                float(pressure_value)
+                                - float(
+                                    previous_pressure_value
+                                )
+                            )
+                        except Exception:
+                            pressure_delta_abs = None
+
+                    pressure_delta_pct = safe_pct_delta(
+                        pressure_value,
+                        previous_pressure_value,
+                    )
+
+                    if (
+                        pressure_delta_abs is not None
+                        or pressure_delta_pct is not None
+                    ):
+                        delta_parts = []
+
+                        if pressure_delta_abs is not None:
+                            delta_parts.append(
+                                format_signed_number(
+                                    pressure_delta_abs,
+                                    decimals=2,
+                                )
+                            )
+
+                        if pressure_delta_pct is not None:
+                            delta_parts.append(
+                                format_signed_percent(
+                                    pressure_delta_pct,
+                                    decimals=1,
+                                )
+                            )
+
+                        pressure_text += (
+                            " ("
+                            + ", ".join(delta_parts)
+                            + ")"
+                        )
+
+                    pressure_parts.append(
+                        pressure_text
+                    )
+
+                pressure_mix_label = None
+
+                if all(
+                    not _is_missing(value)
+                    for value in (
+                        uo_pressure_fast,
+                        uo_pressure_medium,
+                        uo_pressure_slow,
+                    )
+                ):
+                    try:
+                        pressure_fast_float = float(
+                            uo_pressure_fast
+                        )
+                        pressure_medium_float = float(
+                            uo_pressure_medium
+                        )
+                        pressure_slow_float = float(
+                            uo_pressure_slow
+                        )
+
+                        if (
+                            pressure_fast_float
+                            > pressure_medium_float
+                            > pressure_slow_float
+                        ):
+                            pressure_mix_label = (
+                                "recent pressure strengthening"
+                            )
+                        elif (
+                            pressure_fast_float
+                            < pressure_medium_float
+                            < pressure_slow_float
+                        ):
+                            pressure_mix_label = (
+                                "recent pressure weakening"
+                            )
+                        else:
+                            pressure_mix_label = (
+                                "mixed / transitional"
+                            )
+                    except Exception:
+                        pressure_mix_label = None
+
+                if pressure_parts:
+                    pressure_mix_text = (
+                        "Pressure Mix: "
+                        + " | ".join(pressure_parts)
+                    )
+
+                    if pressure_mix_label:
+                        pressure_mix_text += (
+                            "<br> - "
+                            f"{pressure_mix_label}"
+                        )
+
+                    uo_context_lines.append(
+                        pressure_mix_text
+                    )
+
+                active_divergence = (
+                    uo_semantic_state_value
+                    in {
+                        "Bullish Divergence",
+                        "Bearish Divergence",
+                    }
+                )
+
+                if (
+                    active_divergence
+                    and uo_divergence_direction_value
+                    is not None
+                ):
+                    divergence_text = (
+                        "Divergence: Active - "
+                        f"{uo_divergence_direction_value}"
+                    )
+
+                    pivot_parts = []
+
+                    if (
+                        not _is_missing(uo_prior_pivot_date)
+                        and not _is_missing(
+                            uo_prior_price_pivot
+                        )
+                        and not _is_missing(
+                            uo_prior_uo_pivot
+                        )
+                    ):
+                        try:
+                            pivot_parts.append(
+                                "Prior: "
+                                f"{_format_uo_hover_date(uo_prior_pivot_date)}, "
+                                f"${float(uo_prior_price_pivot):.2f}, "
+                                f"UO {float(uo_prior_uo_pivot):.2f}"
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            pass
+
+                    if (
+                        not _is_missing(uo_current_pivot_date)
+                        and not _is_missing(
+                            uo_current_price_pivot
+                        )
+                        and not _is_missing(
+                            uo_current_uo_pivot
+                        )
+                    ):
+                        try:
+                            pivot_parts.append(
+                                "Current: "
+                                f"{_format_uo_hover_date(uo_current_pivot_date)}, "
+                                f"${float(uo_current_price_pivot):.2f}, "
+                                f"UO {float(uo_current_uo_pivot):.2f}"
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            pass
+
+                    if not _is_missing(
+                        uo_divergence_event_date
+                    ):
+                        pivot_parts.append(
+                            "Event: "
+                            f"{_format_uo_hover_date(uo_divergence_event_date)}"
+                        )
+
+                    if pivot_parts:
+                        divergence_text += (
+                            "<br> - "
+                            + " | ".join(pivot_parts)
+                        )
+
+                    uo_context_lines.append(
+                        divergence_text
+                    )
+                else:
+                    uo_context_lines.append(
+                        "Divergence: None"
+                    )
+
+                if (
+                    uo_confirmation_status
+                    == "Pending"
+                ):
+                    confirmation_parts = []
+
+                    if not _is_missing(
+                        uo_confirmation_level
+                    ):
+                        try:
+                            confirmation_parts.append(
+                                "Trigger: "
+                                f"{float(uo_confirmation_level):.2f}"
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            pass
+
+                    if not _is_missing(
+                        uo_confirmation_sessions_remaining
+                    ):
+                        try:
+                            confirmation_parts.append(
+                                f"{int(
+                                    uo_confirmation_sessions_remaining
+                                )} sessions remaining"
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            pass
+
+                    confirmation_text = (
+                        "Classic Confirmation: Pending"
+                    )
+
+                    if confirmation_parts:
+                        confirmation_text += (
+                            " ("
+                            + " | ".join(confirmation_parts)
+                            + ")"
+                        )
+
+                    uo_context_lines.append(
+                        confirmation_text
+                    )
+
+                elif uo_confirmation_status in {
+                    "Bullish Confirmed",
+                    "Bearish Confirmed",
+                }:
+                    confirmation_parts = []
+
+                    if not _is_missing(
+                        uo_confirmation_level
+                    ):
+                        try:
+                            confirmation_parts.append(
+                                "Trigger: "
+                                f"{float(uo_confirmation_level):.2f}"
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            pass
+
+                    if not _is_missing(
+                        uo_confirmation_event_date
+                    ):
+                        confirmation_parts.append(
+                            "Event: "
+                            f"{_format_uo_hover_date(
+                                uo_confirmation_event_date
+                            )}"
+                        )
+
+                    confirmation_text = (
+                        "Classic Confirmation: "
+                        f"{uo_confirmation_status}"
+                    )
+
+                    if confirmation_parts:
+                        confirmation_text += (
+                            " ("
+                            + " | ".join(confirmation_parts)
+                            + ")"
+                        )
+
+                    uo_context_lines.append(
+                        confirmation_text
+                    )
+
+                elif uo_confirmation_status == "Expired":
+                    uo_context_lines.append(
+                        "Classic Confirmation: "
+                        "Expired (10-bar window elapsed)"
+                    )
+
+                else:
+                    uo_context_lines.append(
+                        "Classic Confirmation: None"
+                    )
+
+                if uo_context_lines:
+                    uo_context_block = (
+                        "<br>".join(uo_context_lines)
+                        + "<br>"
+                    )
+
+                # UO uses semantic-state-specific human-readable Rule text.
+                # The semantic truth remains upstream-owned; this block only
+                # translates the already-established state for display.
+                if uo_semantic_state_value == "Bullish Confirmed":
+                    rule_text = (
+                        "Qualifying bullish divergence + UO broke above its "
+                        "Classic Confirmation trigger within the 10-session window."
+                    )
+
+                elif uo_semantic_state_value == "Bullish Divergence":
+                    rule_text = (
+                        "Lower confirmed price low + higher UO pivot low, "
+                        "with a qualifying oversold reading; awaiting confirmation."
+                    )
+
+                elif uo_semantic_state_value == "Bullish Watch":
+                    bullish_watch_threshold = (
+                        30
+                        if key == "UO_5_10_15"
+                        else 35
+                    )
+                    rule_text = (
+                        f"UO < {bullish_watch_threshold}"
+                    )
+
+                elif uo_semantic_state_value == "Bearish Confirmed":
+                    rule_text = (
+                        "Qualifying bearish divergence + UO broke below its "
+                        "Classic Confirmation trigger within the 10-session window."
+                    )
+
+                elif uo_semantic_state_value == "Bearish Divergence":
+                    rule_text = (
+                        "Higher confirmed price high + lower UO pivot high, "
+                        "with a qualifying overbought reading; awaiting confirmation."
+                    )
+
+                elif uo_semantic_state_value == "Bearish Watch":
+                    rule_text = "UO > 70"
+
+                elif uo_semantic_state_value == "No Active Setup":
+                    rule_text = (
+                        "No active Watch, Divergence, or Confirmed setup."
                     )
 
             # MACD: Custom hover content (deltas) 
@@ -4636,6 +5267,23 @@ def build_plotly_heatmap_inputs(
                         cci_zero_line_crossover_value
                     ),
 
+                    "uo_context_block": uo_context_block,
+                    "uo_semantic_state": (
+                        uo_semantic_state_value
+                        if key.startswith("UO_")
+                        else None
+                    ),
+                    "uo_divergence_direction": (
+                        uo_divergence_direction_value
+                        if key.startswith("UO_")
+                        else None
+                    ),
+                    "uo_centerline_crossover": (
+                        uo_centerline_crossover_value
+                        if key.startswith("UO_")
+                        else None
+                    ),
+
                     "elder_ray_setup": elder_ray_setup_value,
                     "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
@@ -4907,6 +5555,155 @@ def apply_cci_divergence_text_overlay(
                 showlegend=False,
             )
         )
+
+
+def apply_uo_divergence_symbol_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Render UO divergence and 50-line crossover symbols as annotations.
+
+    50-line crossover:
+        Uptrend Bias = blue ▲
+        Downtrend Bias = red ▼
+
+    Divergence:
+        Bullish Divergence = blue ◆
+        Bearish Divergence = red ◆
+
+    Layout:
+        crossover symbol | centered UO value | divergence symbol
+
+    The underlying Heatmap text remains untouched. Annotation pixel
+    offsets position the symbols on the same horizontal line as the
+    numeric value without changing heatmap category/column widths.
+
+    Semantic/event truth is supplied through adapter customdata.
+    This helper performs no UO, pivot, divergence, confirmation,
+    crossover, or score calculation.
+    """
+    if not fig.data:
+        return
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(
+                cell.get("indicator_key", "")
+            )
+
+            if not indicator_key.startswith("UO_"):
+                continue
+
+            semantic_state = cell.get(
+                "uo_semantic_state"
+            )
+            divergence_direction = cell.get(
+                "uo_divergence_direction"
+            )
+            centerline_crossover = cell.get(
+                "uo_centerline_crossover"
+            )
+
+            bullish_divergence = (
+                semantic_state == "Bullish Divergence"
+                and divergence_direction == "Bullish"
+            )
+            bearish_divergence = (
+                semantic_state == "Bearish Divergence"
+                and divergence_direction == "Bearish"
+            )
+
+            up_cross = (
+                centerline_crossover == "Uptrend Bias"
+            )
+            down_cross = (
+                centerline_crossover == "Downtrend Bias"
+            )
+
+            has_divergence = (
+                bullish_divergence
+                or bearish_divergence
+            )
+            has_crossover = (
+                up_cross
+                or down_cross
+            )
+
+            if not has_divergence and not has_crossover:
+                continue
+
+            x_value = x[col_idx]
+            y_value = y[row_idx]
+
+            # 50-line crossover sits to the LEFT of the centered value.
+            if has_crossover:
+                crossover_symbol = (
+                    "\u25B2"
+                    if up_cross
+                    else "\u25BC"
+                )
+                crossover_color = (
+                    "blue"
+                    if up_cross
+                    else "red"
+                )
+
+                fig.add_annotation(
+                    x=x_value,
+                    y=y_value,
+                    xref="x",
+                    yref="y",
+                    text=crossover_symbol,
+                    showarrow=False,
+                    xshift=-18,
+                    yshift=0,
+                    xanchor="center",
+                    yanchor="middle",
+                    font=dict(
+                        size=13,
+                        color=crossover_color,
+                    ),
+                    captureevents=False,
+                )
+
+            # Active divergence sits to the RIGHT of the centered value.
+            if has_divergence:
+                divergence_color = (
+                    "blue"
+                    if bullish_divergence
+                    else "red"
+                )
+
+                fig.add_annotation(
+                    x=x_value,
+                    y=y_value,
+                    xref="x",
+                    yref="y",
+                    text="\u25C6",
+                    showarrow=False,
+                    xshift=18,
+                    yshift=0,
+                    xanchor="center",
+                    yanchor="middle",
+                    font=dict(
+                        size=13,
+                        color=divergence_color,
+                    ),
+                    captureevents=False,
+                )
 
 
 def apply_hma_turn_text_overlay(
@@ -5254,6 +6051,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.alignment_line}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
+        "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
@@ -5301,6 +6099,13 @@ def make_rolling_heatmap_figure(
     apply_cci_divergence_text_overlay(
         fig,
         text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_uo_divergence_symbol_overlay(
+        fig,
         customdata=hm.customdata,
         x=hm.x,
         y=hm.y,

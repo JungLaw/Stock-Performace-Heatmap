@@ -1,5 +1,5 @@
 {
-  "version": "0.2.21",
+  "version": "0.2.22",
   "generated_by": "ChatGPT - Step A fixed",
   "description": "Fixed hierarchical rules.json schema shell (Step A). Heatmap stubs empty; overlay/alerts/custom placeholders included. Extra scopes tiles/MVA/basic_signals present.",
   "categories": {
@@ -1008,28 +1008,28 @@
         "feature_scopes": {
           "heatmap": {
             "5_10_15": {
-              "strong_buy": "UO > 60 and rising_2bar(UO)",
-              "buy": "UO > 55",
-              "neutral": "45 <= UO <= 55",
-              "sell": "UO < 45",
-              "strong_sell": "UO < 40 and falling_2bar(UO)",
-              "notes": "45-55 neutral stable. Slope confirmation benefits UO strongly."
+              "strong_buy": "UO_BULLISH_CONFIRMED",
+              "buy": "UO_BULLISH_SETUP",
+              "neutral": "UO_NO_ACTIVE_SETUP",
+              "sell": "UO_BEARISH_SETUP",
+              "strong_sell": "UO_BEARISH_CONFIRMED",
+              "notes": "Fast UO staged-reversal model: Watch below 30 / above 70; qualifying divergence uses confirmed five-bar price pivots; Classic Confirmation is the strongest reversal-evidence state and must occur within the approved 10-bar window."
             },
             "7_14_28": {
-              "strong_buy": "UO > 60 and rising_2bar(UO)",
-              "buy": "UO > 55",
-              "neutral": "45 <= UO <= 55",
-              "sell": "UO < 45",
-              "strong_sell": "UO < 40 and falling_2bar(UO)",
-              "notes": "Intermediate UO = standard form."
+              "strong_buy": "UO_BULLISH_CONFIRMED",
+              "buy": "UO_BULLISH_SETUP",
+              "neutral": "UO_NO_ACTIVE_SETUP",
+              "sell": "UO_BEARISH_SETUP",
+              "strong_sell": "UO_BEARISH_CONFIRMED",
+              "notes": "Classic-horizon UO staged-reversal model: Watch below 35 / above 70; qualifying divergence uses confirmed five-bar price pivots; Classic Confirmation is the strongest reversal-evidence state and must occur within the approved 10-bar window."
             },
             "10_20_40": {
-              "strong_buy": "UO > 60 and rising_2bar(UO)",
-              "buy": "UO > 55",
-              "neutral": "45 <= UO <= 55",
-              "sell": "UO < 45",
-              "strong_sell": "UO < 40 and falling_2bar(UO)",
-              "notes": "Long UO smooths oscillations, strong-signal slope remains acceptable."
+              "strong_buy": "UO_BULLISH_CONFIRMED",
+              "buy": "UO_BULLISH_SETUP",
+              "neutral": "UO_NO_ACTIVE_SETUP",
+              "sell": "UO_BEARISH_SETUP",
+              "strong_sell": "UO_BEARISH_CONFIRMED",
+              "notes": "Slow UO staged-reversal model: Watch below 35 / above 70; qualifying divergence uses confirmed five-bar price pivots; Classic Confirmation is the strongest reversal-evidence state and must occur within the approved 10-bar window."
             }
           },
           "overlay": {

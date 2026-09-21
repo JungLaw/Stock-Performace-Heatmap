@@ -60,6 +60,7 @@ from ui.rolling_heatmap_adapter import (
     INDICATOR_DEFS,
     apply_bbp_divergence_text_overlay,
     apply_cci_divergence_text_overlay,
+    apply_uo_divergence_symbol_overlay,
     apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
@@ -4932,6 +4933,7 @@ def _build_scd_hover_customdata(
         "dpo_context_block",
         "bullbear_context_block",
         "cci_context_block",
+        "uo_context_block",
         "rule_block",
         "notes_block",
         "definition_block",
@@ -4965,8 +4967,8 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger, Bull/Bear Power, VWMA, and HMA rows already expose their
-    # user-facing information through structured adapter hover fields.
+    # Bollinger, Bull/Bear Power, VWMA, HMA, and UO rows already expose
+    # their user-facing information through structured adapter hover fields.
     # Suppress the redundant raw payload summary in SCD so diagnostic-style
     # payload text does not duplicate structured context or dominate hover
     # geometry.
@@ -4983,6 +4985,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
         or row_key.startswith("VWMA_")
         or row_key.startswith("HMA_")
+        or row_key.startswith("UO_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5054,6 +5057,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.alignment_line}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
+        "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
@@ -5102,6 +5106,13 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     apply_cci_divergence_text_overlay(
         fig,
         text=text,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_uo_divergence_symbol_overlay(
+        fig,
         customdata=customdata,
         x=tickers,
         y=y_labels,
@@ -5629,6 +5640,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.alignment_line}"
             "%{customdata.ma_context_block}"
             "%{customdata.adx_context_block}"
+            "%{customdata.uo_context_block}"
             "%{customdata.signal_line}"
             "%{customdata.cci_context_block}"
             "%{customdata.bbp_exhaustion_context_block}"
@@ -5675,6 +5687,13 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     apply_cci_divergence_text_overlay(
         fig,
         text=text,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
+    apply_uo_divergence_symbol_overlay(
+        fig,
         customdata=customdata,
         x=tickers,
         y=date_labels,
@@ -5961,6 +5980,54 @@ def _build_scd_single_indicator_chart_series(
     return transformed, warnings
 
 
+def _get_scd_chart_signal_text(
+    *,
+    row_key: str,
+    cell: Any,
+) -> str:
+    """
+    Return the user-facing Signal label for SCD chart hovers.
+
+    UO reuses the adapter-owned semantic Signal line so chart hovers match
+    the heatmap's seven-state presentation vocabulary. Other indicators
+    retain their existing payload signal labels.
+    """
+    if not isinstance(cell, dict):
+        return "N/A"
+
+    if row_key.startswith("UO_"):
+        adapter_cd = cell.get("adapter_customdata")
+
+        if isinstance(adapter_cd, dict):
+            signal_line = adapter_cd.get("signal_line")
+
+            if signal_line not in {
+                None,
+                "",
+            }:
+                signal_text = (
+                    str(signal_line)
+                    .removeprefix("<br>")
+                    .removeprefix("Signal: ")
+                    .removesuffix("<br>")
+                    .strip()
+                )
+
+                if signal_text:
+                    return signal_text
+
+    signal = cell.get("signal")
+
+    return (
+        str(signal)
+        if signal not in {
+            None,
+            "",
+        }
+        else "N/A"
+    )
+
+
 def _get_scd_single_chart_hover_fields(
     *,
     matrix: Dict[str, Any],
@@ -6089,14 +6156,16 @@ def _get_scd_single_chart_hover_fields(
     return [
         str(date_key),
         _format_scd_heatmap_text(row_key, cell),
-        cell.get("signal") if isinstance(cell, dict) else None,
+        _get_scd_chart_signal_text(
+            row_key=row_key,
+            cell=cell,
+        ),
         chart_value,
         price_value,
         price_delta,
         indicator_delta_line,
         alignment_line,
     ]
-
 
 def _add_scd_single_chart_reference_lines(
     *,
@@ -6385,6 +6454,7 @@ def _build_scd_single_price_chart_figure(
     """
     Build the SCD Price Trend Chart from existing matrix-owned Price cells.
     """
+    row_key = str(matrix.get("row_key", ""))
     dates = list(matrix.get("dates", []))
     date_labels = [
         _format_scd_compact_date_label(date_key)
@@ -6457,19 +6527,11 @@ def _build_scd_single_price_chart_figure(
                     else "N/A"
                 )
 
-            signal = (
-                cell.get("signal")
-                if isinstance(cell, dict)
-                else None
-            )
-
             signal_text = (
-                str(signal)
-                if signal not in {
-                    None,
-                    "",
-                }
-                else "N/A"
+                _get_scd_chart_signal_text(
+                    row_key=row_key,
+                    cell=cell,
+                )
             )
 
             customdata.append(
