@@ -55,6 +55,16 @@ INSTANCE_BINDINGS = {
     # DataFrame column is UO_<fast>_<medium>_<slow>
     "Ultimate_Oscillator": {
         "UO": "UO_{param_key}",
+        "UO_BULLISH_CONFIRMED":
+            "UO_{param_key}_BULLISH_CONFIRMED",
+        "UO_BULLISH_SETUP":
+            "UO_{param_key}_BULLISH_SETUP",
+        "UO_NO_ACTIVE_SETUP":
+            "UO_{param_key}_NO_ACTIVE_SETUP",
+        "UO_BEARISH_SETUP":
+            "UO_{param_key}_BEARISH_SETUP",
+        "UO_BEARISH_CONFIRMED":
+            "UO_{param_key}_BEARISH_CONFIRMED",
     },
 
     # DPO rules reference normalized percentage-point DPO via `DPO_PCT`.
@@ -379,6 +389,26 @@ class SignalEngine:
                     | df[ema_col].isna()
                     | df[ema_col].shift(5).isna()
                     | df[atr_col].isna()
+                )
+
+        # Ultimate Oscillator scoring consumes upstream staged-reversal truth.
+        # A row is classifiable only when both the numeric UO value and the
+        # resolved semantic state are available. This preserves warmup and any
+        # explicitly unresolved semantic collisions as missing rather than
+        # silently converting them to Neutral / 0.
+        elif indicator_name == "Ultimate_Oscillator":
+            value_col = f"UO_{param_key}"
+            state_col = (
+                f"UO_{param_key}_SEMANTIC_STATE"
+            )
+
+            if (
+                value_col in df.columns
+                and state_col in df.columns
+            ):
+                indicator_missing_mask = (
+                    df[value_col].isna()
+                    | df[state_col].isna()
                 )
 
         # BBP Downside Exhaustion has a separate structural-maturity contract.
