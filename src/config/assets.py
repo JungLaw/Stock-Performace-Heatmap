@@ -139,7 +139,7 @@ CUSTOM_DEFAULT = [
     ('GEV', 'GE Vernova'),
     #('V', 'Visa'),
     ('MRVL', 'Marvell'),     # ('VYMI', 'Intl. High Div.')
-    ('VRT', 'VRT'),                  # ('V', 'Visa')
+    ('VRT', 'Vertiv'),                  # ('V', 'Visa')
     ('AAPL', 'Apple'),
     ('BABA', 'Alibaba'),
     ('SPY', 'S&P 500'),

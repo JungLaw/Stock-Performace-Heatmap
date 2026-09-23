@@ -7793,37 +7793,95 @@ def display_summary_stats(performance_data):
             st.metric("Positive %", "N/A")
     
     # Best/Worst performers
-    if stats['best_performer'] and stats['worst_performer']:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            best = stats['best_performer']
-            # Handle both price and volume data structures
-            if 'percentage_change' in best:
-                performance_value = best['percentage_change']
-            elif 'volume_change' in best:
-                performance_value = best['volume_change']
-            else:
-                performance_value = 0.0
-            
-            st.success(
-                f"🏆 Best: **{best['ticker']}** "
-                f"({performance_value:+.2f}%)"
+    valid_data = [
+        item
+        for item in performance_data
+        if not item.get('error', False)
+    ]
+
+    performance_key = None
+
+    if valid_data:
+        if 'percentage_change' in valid_data[0]:
+            performance_key = 'percentage_change'
+        elif 'volume_change' in valid_data[0]:
+            performance_key = 'volume_change'
+
+    if performance_key:
+        selected_bucket = st.session_state.get(
+            'selected_bucket',
+            'custom',
+        )
+
+        ticker_names = dict(
+            ASSET_GROUPS.get(
+                selected_bucket,
+                {},
+            ).get(
+                'ticker_names',
+                {},
             )
-        
+        )
+
+        best_performers = sorted(
+            valid_data,
+            key=lambda item: item[performance_key],
+            reverse=True,
+        )[:5]
+
+        worst_performers = sorted(
+            valid_data,
+            key=lambda item: item[performance_key],
+        )[:5]
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            best_lines = [
+                (
+                    f"{rank}. **{item['ticker']}** "
+                    f"({item[performance_key]:+.1f}%)"
+                    + (
+                        f" - {ticker_names[item['ticker']]}"
+                        if ticker_names.get(item['ticker'])
+                        and ticker_names[item['ticker']]
+                        != item['ticker']
+                        else ""
+                    )
+                )
+                for rank, item in enumerate(
+                    best_performers,
+                    start=1,
+                )
+            ]
+
+            st.success(
+                "🏆 **Best**\n\n"
+                + "\n\n".join(best_lines)
+            )
+
         with col2:
-            worst = stats['worst_performer']
-            # Handle both price and volume data structures
-            if 'percentage_change' in worst:
-                performance_value = worst['percentage_change']
-            elif 'volume_change' in worst:
-                performance_value = worst['volume_change']
-            else:
-                performance_value = 0.0
-            
+            worst_lines = [
+                (
+                    f"{rank}. **{item['ticker']}** "
+                    f"({item[performance_key]:+.1f}%)"
+                    + (
+                        f" - {ticker_names[item['ticker']]}"
+                        if ticker_names.get(item['ticker'])
+                        and ticker_names[item['ticker']]
+                        != item['ticker']
+                        else ""
+                    )
+                )
+                for rank, item in enumerate(
+                    worst_performers,
+                    start=1,
+                )
+            ]
+
             st.error(
-                f"📉 Worst: **{worst['ticker']}** "
-                f"({performance_value:+.2f}%)"
+                "📉 **Worst**\n\n"
+                + "\n\n".join(worst_lines)
             )
 
 def display_heatmap(performance_data, title, asset_group=None):
@@ -8433,45 +8491,132 @@ def display_data_table(performance_data):
         return
     
     # Filter valid data and create DataFrame
-    valid_data = [p for p in performance_data if not p.get('error', False)]
+    valid_data = [
+        p
+        for p in performance_data
+        if not p.get('error', False)
+    ]
     
     if not valid_data:
         st.warning("No valid data to display in table")
         return
     
     # Detect data type and create appropriate DataFrame
-    if valid_data and 'percentage_change' in valid_data[0]:
-        # Price performance data
+    if 'percentage_change' in valid_data[0]:
+        # Price performance data.
+        #
+        # Keep numeric values numeric so Streamlit header sorting remains
+        # numeric rather than lexicographic. Display formatting is handled
+        # separately through column_config.
         df_display = pd.DataFrame([
             {
                 'Ticker': p['ticker'],
-                'Current Price': f"${p['current_price']:.2f}" if p['current_price'] else "N/A",
-                'Historical Price': f"${p['historical_price']:.2f}" if p['historical_price'] else "N/A",
-                'Absolute Change': f"${p['absolute_change']:+.2f}" if p['absolute_change'] else "N/A",
-                'Percentage Change': f"{p['percentage_change']:+.2f}%" if p['percentage_change'] is not None else "N/A",
-                'Period': p.get('period_label', p.get('period', 'N/A'))
+                'Current Price': (
+                    p['current_price']
+                    if p.get('current_price') is not None
+                    else None
+                ),
+                'Historical Price': (
+                    p['historical_price']
+                    if p.get('historical_price') is not None
+                    else None
+                ),
+                'Absolute Change': (
+                    p['absolute_change']
+                    if p.get('absolute_change') is not None
+                    else None
+                ),
+                'Percentage Change': (
+                    p['percentage_change']
+                    if p.get('percentage_change') is not None
+                    else None
+                ),
+                'Period': p.get(
+                    'period_label',
+                    p.get('period', 'N/A')
+                ),
             }
             for p in valid_data
         ])
-        # Sort by percentage change (descending)
-        df_display = df_display.sort_values('Percentage Change', key=lambda x: 
-            pd.to_numeric(x.str.rstrip('%'), errors='coerce'), ascending=False)
+
+        # Initial display order: highest percentage change first.
+        df_display = df_display.sort_values(
+            'Percentage Change',
+            ascending=False,
+            na_position='last',
+        )
+
+        column_config = {
+            'Current Price': st.column_config.NumberColumn(
+                'Current Price',
+                format='$%.2f',
+            ),
+            'Historical Price': st.column_config.NumberColumn(
+                'Historical Price',
+                format='$%.2f',
+            ),
+            'Absolute Change': st.column_config.NumberColumn(
+                'Absolute Change',
+                format='$%+.2f',
+            ),
+            'Percentage Change': st.column_config.NumberColumn(
+                'Percentage Change',
+                format='%+.2f%%',
+            ),
+        }
             
-    elif valid_data and 'volume_change' in valid_data[0]:
-        # Volume performance data
+    elif 'volume_change' in valid_data[0]:
+        # Volume performance data.
+        #
+        # Preserve numeric values and let Streamlit handle presentation.
+        # This keeps interactive header sorting numeric.
         df_display = pd.DataFrame([
             {
                 'Ticker': p['ticker'],
-                'Current Volume': f"{p['current_volume']:,}" if p['current_volume'] else "N/A",
-                'Benchmark Average': f"{p['benchmark_average']:,.0f}" if p['benchmark_average'] else "N/A",
-                'Volume Change': f"{p['volume_change']:+.2f}%" if p['volume_change'] is not None else "N/A",
-                'Benchmark Period': p.get('benchmark_label', p.get('benchmark_period', 'N/A'))
+                'Current Volume': (
+                    int(round(p['current_volume']))
+                    if p.get('current_volume') is not None
+                    else None
+                ),
+                'Benchmark Average': (
+                    int(round(p['benchmark_average']))
+                    if p.get('benchmark_average') is not None
+                    else None
+                ),
+                'Volume Change': (
+                    p['volume_change']
+                    if p.get('volume_change') is not None
+                    else None
+                ),
+                'Benchmark Period': p.get(
+                    'benchmark_label',
+                    p.get('benchmark_period', 'N/A')
+                ),
             }
             for p in valid_data
         ])
-        # Sort by volume change (descending)
-        df_display = df_display.sort_values('Volume Change', key=lambda x: 
-            pd.to_numeric(x.str.rstrip('%'), errors='coerce'), ascending=False)
+
+        # Initial display order: highest volume change first.
+        df_display = df_display.sort_values(
+            'Volume Change',
+            ascending=False,
+            na_position='last',
+        )
+
+        column_config = {
+            'Current Volume': st.column_config.NumberColumn(
+                'Current Volume',
+                format='localized',
+            ),
+            'Benchmark Average': st.column_config.NumberColumn(
+                'Benchmark Average',
+                format='localized',
+            ),
+            'Volume Change': st.column_config.NumberColumn(
+                'Volume Change',
+                format='%+.2f%%',
+            ),
+        }
     else:
         # Unknown data structure
         st.warning("Unknown data format - cannot display table")
@@ -8480,8 +8625,10 @@ def display_data_table(performance_data):
     st.dataframe(
         df_display,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config=column_config,
     )
+
 
 def _extract_rolling_signals_from_data(data: dict) -> dict:
     rs = data.get("rolling_signals") or {}

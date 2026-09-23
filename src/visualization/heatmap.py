@@ -125,10 +125,10 @@ class FinvizHeatmapGenerator:
             
             # Create display label (display name + percentage)
             if pct_change >= 0:
-                label = f"{display_name}<br>+{pct_change:.2f}%"
+                label = f"{display_name}<br>+{pct_change:.1f}%"
             else:
-                label = f"{display_name}<br>{pct_change:.2f}%"
-            
+                label = f"{display_name}<br>{pct_change:.1f}%"
+
             # Rich hover text (always show ticker in hover)
             hover_text = self._create_hover_text(item, display_name)
             
