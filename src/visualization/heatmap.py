@@ -534,12 +534,16 @@ Data unavailable<br>
         
         return hover_text
     
-    def create_treemap(self, performance_data: List[Dict], 
-                      title: str = "Stock Performance Heatmap",
-                      sizing_method: str = 'equal',
-                      width: int = 1200,
-                      height: int = 800,
-                      asset_group: str = None) -> go.Figure:
+    def create_treemap(
+        self,
+        performance_data: List[Dict],
+        title: str = "Stock Performance Heatmap",
+        sizing_method: str = 'equal',
+        width: int = 1200,
+        height: int = 800,
+        asset_group: str = None,
+        tile_order: str = 'original',
+    ) -> go.Figure:
         """
         Create Finviz-style treemap visualization
         
@@ -550,12 +554,31 @@ Data unavailable<br>
             width: Chart width in pixels
             height: Chart height in pixels
             asset_group: Asset group name for display name handling
+            tile_order: Display-only tile ordering:
+                'original' preserves incoming ticker order
+                'performance_desc' orders highest performance first
             
         Returns:
             Plotly Figure object
         """
         # Prepare data
-        df = self.prepare_treemap_data(performance_data, sizing_method, asset_group)
+        df = self.prepare_treemap_data(
+            performance_data,
+            sizing_method,
+            asset_group,
+        )
+
+        # Presentation-only ordering.
+        #
+        # prepare_treemap_data() constructs a new DataFrame, so sorting here does
+        # not mutate performance_data or either Performance session-state cache.
+        if not df.empty and tile_order == 'performance_desc':
+            df = df.sort_values(
+                by='percentage_change',
+                ascending=False,
+                kind='mergesort',
+                na_position='last',
+            ).reset_index(drop=True)
         
         if df.empty:
             # Create empty chart with message
@@ -590,6 +613,7 @@ Data unavailable<br>
             labels=df['ticker'],
             values=df['size'],
             parents=[""] * len(df),  # All items at root level
+            sort=False,
             
             # Text and labeling
             text=df['label'],

@@ -152,6 +152,8 @@ def initialize_session_state():
         st.session_state.performance_data = None
     if 'last_update' not in st.session_state:
         st.session_state.last_update = None
+    if 'performance_request_signature' not in st.session_state:
+        st.session_state.performance_request_signature = None
     if 'calculator' not in st.session_state:
         st.session_state.calculator = DatabaseIntegratedPerformanceCalculator()
     if 'volume_calculator' not in st.session_state:
@@ -195,6 +197,8 @@ def initialize_session_state():
         st.session_state.volume_data = None
     if 'volume_last_update' not in st.session_state:
         st.session_state.volume_last_update = None
+    if 'volume_request_signature' not in st.session_state:
+        st.session_state.volume_request_signature = None
 
     # Filtering state (Step 3: Future-ready for additions)
     if 'country_visible_tickers' not in st.session_state:
@@ -7884,7 +7888,12 @@ def display_summary_stats(performance_data):
                 + "\n\n".join(worst_lines)
             )
 
-def display_heatmap(performance_data, title, asset_group=None):
+def display_heatmap(
+    performance_data,
+    title,
+    asset_group=None,
+    tile_order='original',
+):
     """Display the main heatmap visualization"""
     generator = st.session_state.heatmap_generator
     
@@ -7894,7 +7903,8 @@ def display_heatmap(performance_data, title, asset_group=None):
         title=title,
         width=1200,
         height=700,
-        asset_group=asset_group
+        asset_group=asset_group,
+        tile_order=tile_order,
     )
     
     # Display with full width
@@ -9700,56 +9710,98 @@ def show_performance_heatmaps():
     # Create sidebar controls
     controls = create_sidebar_controls()
         
-    # Check if we need to fetch new data - handle both price and volume modes
+    # Check if we need to fetch new data - handle both price and volume modes.
+    #
+    # Cache identity is based on the exact data request rather than the number
+    # of successful rows returned. Individual ticker errors therefore remain a
+    # valid cached result for the request that produced them.
+    current_request_signature = (
+        controls['analysis_mode'],
+        controls['period'],
+        tuple(controls['tickers']),
+    )
+
     if controls['analysis_mode'] == 'price':
         current_data = st.session_state.performance_data
         last_update = st.session_state.last_update
+        cached_request_signature = (
+            st.session_state.performance_request_signature
+        )
     else:  # volume mode
         current_data = st.session_state.volume_data
         last_update = st.session_state.volume_last_update
-    
-    ticker_count_changed = (
-        current_data is not None and 
-        len(controls['tickers']) != len([p for p in current_data if not p.get('error', False)])
+        cached_request_signature = (
+            st.session_state.volume_request_signature
+        )
+
+    request_changed = (
+        cached_request_signature
+        != current_request_signature
     )
 
     should_fetch = (
-        controls['refresh'] or 
-        current_data is None or
-        last_update is None or
-        ticker_count_changed  # NEW: Refresh when ticker count changes
+        controls['refresh']
+        or current_data is None
+        or current_data == []
+        or last_update is None
+        or request_changed
     )
-    
+
     if should_fetch:
         if controls['analysis_mode'] == 'price':
             # Fetch price performance data
             performance_data = fetch_performance_data(
-                controls['tickers'], 
+                controls['tickers'],
                 controls['period'],
                 save_to_db=controls['database_save']
             )
-            
-            # Store in session state
+
+            # Store in session state.
+            #
+            # Record request identity whenever the fetch path returned a
+            # non-empty result set. Individual ticker error rows remain part of
+            # that completed request and must not force another fetch on the next
+            # unrelated Streamlit rerun.
             st.session_state.performance_data = performance_data
             st.session_state.last_update = datetime.now()
+
+            if performance_data:
+                st.session_state.performance_request_signature = (
+                    current_request_signature
+                )
+            else:
+                st.session_state.performance_request_signature = None
+
             current_data = performance_data
-            
+
         else:  # volume mode
             # Fetch volume performance data
             volume_data = fetch_volume_data(
-                controls['tickers'], 
+                controls['tickers'],
                 controls['period'],
                 save_to_db=controls['database_save']
             )
-            
-            # Store in session state
+
+            # Store in session state using the same request-identity contract as
+            # Price performance.
             st.session_state.volume_data = volume_data
             st.session_state.volume_last_update = datetime.now()
+
+            if volume_data:
+                st.session_state.volume_request_signature = (
+                    current_request_signature
+                )
+            else:
+                st.session_state.volume_request_signature = None
+
             current_data = volume_data
-        
-        st.success(f"✅ Data updated successfully at {datetime.now().strftime('%H:%M:%S')}")
+
+        st.success(
+            f"✅ Data updated successfully at "
+            f"{datetime.now().strftime('%H:%M:%S')}"
+        )
     else:
-        # Use cached data based on analysis mode
+        # Use cached data only when it belongs to the exact active request.
         if controls['analysis_mode'] == 'price':
             current_data = st.session_state.performance_data
         else:
@@ -9770,7 +9822,20 @@ def show_performance_heatmaps():
         
         # Display heatmap
         st.subheader("🗺️ Performance Heatmap")
-        
+
+        tile_order_labels = {
+            'original': 'Original',
+            'performance_desc': 'Highest → Lowest',
+        }
+
+        selected_tile_order = st.radio(
+            "Tile Order",
+            options=list(tile_order_labels.keys()),
+            format_func=lambda key: tile_order_labels[key],
+            horizontal=True,
+            key='performance_heatmap_tile_order',
+        )
+
         # Add timestamp and baseline date info (only for price mode)
         if controls['analysis_mode'] == 'price':
             valid_items = [
@@ -9905,8 +9970,9 @@ def show_performance_heatmaps():
             current_data,
             title,
             controls['group'],
+            tile_order=selected_tile_order,
         )
-        
+
         # Display data table
         with st.expander("📋 Detailed Data Table", expanded=False):
             display_data_table(current_data)
