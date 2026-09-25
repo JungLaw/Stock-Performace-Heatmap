@@ -64,6 +64,7 @@ from ui.rolling_heatmap_adapter import (
     apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
+    build_vwma_hover_opening,
 )
 
 # Developer-only diagnostic controls.
@@ -5026,14 +5027,102 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
             except (TypeError, ValueError):
                 z_row.append(None)
 
-            text_row.append(_format_scd_heatmap_text(row_key, cell))
-            custom_row.append(
+            text_row.append(
+                _format_scd_heatmap_text(
+                    row_key,
+                    cell,
+                )
+            )
+
+            custom = (
                 _build_scd_hover_customdata(
                     ticker=ticker,
                     row_key=row_key,
                     cell=cell,
                 )
             )
+
+            if str(row_key).startswith(
+                "VWMA_"
+            ):
+                price_cell = (
+                    cells
+                    .get("__PRICE__", {})
+                    .get(ticker, {})
+                )
+
+                price_customdata = {}
+
+                if isinstance(
+                    price_cell,
+                    dict,
+                ):
+                    maybe_price_customdata = (
+                        price_cell.get(
+                            "adapter_customdata"
+                        )
+                    )
+
+                    same_date = (
+                        str(
+                            price_cell.get(
+                                "date",
+                                "",
+                            )
+                        )
+                        == str(
+                            cell.get(
+                                "date",
+                                "",
+                            )
+                        )
+                    )
+
+                    if (
+                        same_date
+                        and isinstance(
+                            maybe_price_customdata,
+                            dict,
+                        )
+                    ):
+                        price_customdata = (
+                            maybe_price_customdata
+                        )
+
+                vwma_opening = (
+                    build_vwma_hover_opening(
+                        custom,
+                        price_customdata,
+                    )
+                )
+
+                custom[
+                    "formatted_value"
+                ] = vwma_opening[
+                    "formatted_value"
+                ]
+
+                custom[
+                    "scd_value_line"
+                ] = (
+                    "Value: "
+                    f"{vwma_opening['formatted_value']}"
+                    "<br>"
+                )
+
+                custom[
+                    "delta_line"
+                ] = vwma_opening[
+                    "delta_line"
+                ]
+
+                custom[
+                    "trend_line"
+                ] = vwma_opening[
+                    "trend_line"
+                ]
+
+            custom_row.append(custom)
 
         z.append(z_row)
         text.append(text_row)
@@ -5226,6 +5315,57 @@ def _build_scd_single_indicator_hover_customdata(
         maybe_cd = price_cell.get("adapter_customdata")
         if isinstance(maybe_cd, dict):
             price_customdata = maybe_cd
+
+    if str(row_key).startswith("VWMA_"):
+        vwma_price_customdata = (
+            price_customdata
+        )
+
+        if (
+            isinstance(price_cell, dict)
+            and str(
+                price_cell.get("date", "")
+            )
+            != str(
+                cell.get("date", "")
+            )
+        ):
+            vwma_price_customdata = {}
+
+        vwma_opening = (
+            build_vwma_hover_opening(
+                custom,
+                vwma_price_customdata,
+            )
+        )
+
+        custom[
+            "formatted_value"
+        ] = vwma_opening[
+            "formatted_value"
+        ]
+
+        custom[
+            "scd_single_value_line"
+        ] = (
+            f"{custom.get('value_label', 'Value')}: "
+            f"{vwma_opening['formatted_value']}"
+            "<br>"
+        )
+
+        custom[
+            "single_combined_delta_line"
+        ] = vwma_opening[
+            "delta_line"
+        ]
+
+        custom[
+            "single_combined_trend_line"
+        ] = vwma_opening[
+            "trend_line"
+        ]
+
+        return custom
 
     def _format_price_value_for_single_hover() -> str:
         raw_value = price_customdata.get("raw_value")

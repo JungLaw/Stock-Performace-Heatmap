@@ -115,6 +115,324 @@ def _format_uo_hover_date(value: Any) -> str:
         return str(value)
 
 
+def build_vwma_hover_opening(
+    vwma_customdata: Dict[str, Any],
+    price_customdata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """
+    Build the shared three-line VWMA hover opening.
+
+    This is presentation-only. It reads existing adapter-owned VWMA,
+    Price, and Volume metadata and does not mutate either input mapping.
+    """
+    vwma = (
+        vwma_customdata
+        if isinstance(vwma_customdata, dict)
+        else {}
+    )
+    price = (
+        price_customdata
+        if isinstance(price_customdata, dict)
+        else {}
+    )
+
+    def _to_float_or_none(value: Any) -> Optional[float]:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        if pd.isna(numeric):
+            return None
+
+        return numeric
+
+    def _format_compact_volume(
+        value: Any,
+        *,
+        signed: bool = False,
+    ) -> str:
+        numeric = _to_float_or_none(value)
+        if numeric is None:
+            return ""
+
+        sign = (
+            "+"
+            if signed and numeric > 0
+            else ""
+        )
+        magnitude = abs(numeric)
+
+        if magnitude >= 1_000_000_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000_000_000:.1f}B"
+            )
+
+        if magnitude >= 1_000_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000_000:.1f}M"
+            )
+
+        if magnitude >= 1_000:
+            return (
+                f"{sign}"
+                f"{numeric / 1_000:.0f}K"
+            )
+
+        return (
+            f"{sign}"
+            f"{numeric:,.0f}"
+        )
+
+    def _trend_from_delta(value: Any) -> str:
+        numeric = _to_float_or_none(value)
+        if numeric is None:
+            return ""
+
+        if numeric > 0.0:
+            return "Rising"
+
+        if numeric < 0.0:
+            return "Falling"
+
+        return "Flat"
+
+    # -------------------------------------------------
+    # Value
+    # -------------------------------------------------
+    value_parts = []
+
+    formatted_value = str(
+        vwma.get("formatted_value", "")
+        or ""
+    ).strip()
+
+    if formatted_value:
+        value_parts.append(formatted_value)
+
+    price_value = _to_float_or_none(
+        price.get("raw_value")
+    )
+
+    price_value_text = ""
+
+    if price_value is not None:
+        price_value_text = f"{price_value:.2f}"
+    else:
+        price_value_text = str(
+            price.get("formatted_value", "")
+            or ""
+        ).strip()
+
+        if price_value_text.startswith("$"):
+            price_value_text = (
+                price_value_text[1:]
+            )
+
+        if price_value_text in {
+            "",
+            "-",
+            "—",
+        }:
+            price_value_text = ""
+
+    if price_value_text:
+        value_parts.append(
+            f"Price: {price_value_text}"
+        )
+
+    volume_value = _to_float_or_none(
+        vwma.get("vwma_volume_value")
+    )
+    if volume_value is None:
+        volume_value = _to_float_or_none(
+            vwma.get("volume_value")
+        )
+
+    volume_value_text = (
+        _format_compact_volume(volume_value)
+    )
+
+    if volume_value_text:
+        value_parts.append(
+            f"Vol: {volume_value_text}"
+        )
+
+    combined_value = (
+        " | ".join(value_parts)
+        if value_parts
+        else formatted_value
+    )
+
+    # -------------------------------------------------
+    # Delta
+    # -------------------------------------------------
+    delta_parts = []
+
+    indicator_delta_line = str(
+        vwma.get("delta_line", "")
+        or ""
+    ).removesuffix("<br>")
+
+    if indicator_delta_line:
+        delta_parts.append(
+            indicator_delta_line
+        )
+
+    price_delta = _to_float_or_none(
+        price.get("delta_abs")
+    )
+    price_delta_pct = _to_float_or_none(
+        price.get("delta_pct")
+    )
+
+    price_delta_text = ""
+
+    if price_delta is not None:
+        price_delta_text = (
+            f"{price_delta:+.2f}"
+        )
+
+        if price_delta_pct is not None:
+            price_delta_text += (
+                f" ({price_delta_pct:+.1f}%)"
+            )
+    else:
+        price_delta_abs_fallback = str(
+            price.get("delta_abs_fmt", "")
+            or ""
+        ).strip()
+        price_delta_pct_fallback = str(
+            price.get("delta_pct_suffix", "")
+            or ""
+        ).strip()
+
+        if price_delta_abs_fallback:
+            price_delta_text = (
+                f"{price_delta_abs_fallback}"
+                f"{price_delta_pct_fallback}"
+            )
+
+    if price_delta_text:
+        delta_parts.append(
+            f"$: {price_delta_text}"
+        )
+
+    volume_delta = _to_float_or_none(
+        vwma.get("vwma_volume_delta")
+    )
+    if volume_delta is None:
+        volume_delta = _to_float_or_none(
+            vwma.get("volume_delta")
+        )
+
+    volume_delta_pct = _to_float_or_none(
+        vwma.get("vwma_volume_delta_pct")
+    )
+    if volume_delta_pct is None:
+        volume_delta_pct = _to_float_or_none(
+            vwma.get("volume_delta_pct")
+        )
+
+    volume_delta_text = (
+        _format_compact_volume(
+            volume_delta,
+            signed=True,
+        )
+    )
+
+    if volume_delta_text:
+        volume_delta_display = (
+            f"Vol: {volume_delta_text}"
+        )
+
+        if volume_delta_pct is not None:
+            volume_delta_display += (
+                f" ({volume_delta_pct:+.1f}%)"
+            )
+
+        delta_parts.append(
+            volume_delta_display
+        )
+
+    combined_delta_line = (
+        " | ".join(delta_parts)
+        + "<br>"
+        if delta_parts
+        else str(
+            vwma.get("delta_line", "")
+            or ""
+        )
+    )
+
+    # -------------------------------------------------
+    # Trend
+    # -------------------------------------------------
+    trend_parts = []
+
+    indicator_trend = str(
+        vwma.get("trend", "")
+        or ""
+    ).strip()
+
+    if indicator_trend:
+        trend_parts.append(
+            f"Trend: {indicator_trend}"
+        )
+    else:
+        existing_trend_line = str(
+            vwma.get("trend_line", "")
+            or ""
+        ).removesuffix("<br>").strip()
+
+        if existing_trend_line:
+            trend_parts.append(
+                existing_trend_line
+            )
+
+    price_trend = str(
+        price.get("trend", "")
+        or ""
+    ).strip()
+
+    if not price_trend:
+        price_trend = _trend_from_delta(
+            price_delta
+        )
+
+    if price_trend:
+        trend_parts.append(
+            f"Price: {price_trend}"
+        )
+
+    volume_trend = _trend_from_delta(
+        volume_delta
+    )
+
+    if volume_trend:
+        trend_parts.append(
+            f"Vol: {volume_trend}"
+        )
+
+    combined_trend_line = (
+        " | ".join(trend_parts)
+        + "<br>"
+        if trend_parts
+        else str(
+            vwma.get("trend_line", "")
+            or ""
+        )
+    )
+
+    return {
+        "formatted_value": combined_value,
+        "delta_line": combined_delta_line,
+        "trend_line": combined_trend_line,
+    }
+
+
 # ----------------------------
 # Row definitions (v1)
 # ----------------------------
@@ -6038,6 +6356,75 @@ def make_rolling_heatmap_figure(
         [1.0, "#006400"],   # strong buy
     ]
 
+    # RSH presentation copy only. Keep hm.customdata unchanged because
+    # existing overlays and downstream consumers depend on adapter-owned
+    # metadata remaining stable.
+    hover_customdata = [
+        [
+            dict(cell)
+            if isinstance(cell, dict)
+            else cell
+            for cell in row
+        ]
+        for row in hm.customdata
+    ]
+
+    try:
+        price_row_idx = hm.row_keys.index(
+            "__PRICE__"
+        )
+    except ValueError:
+        price_row_idx = None
+
+    price_hover_row = (
+        hover_customdata[price_row_idx]
+        if (
+            price_row_idx is not None
+            and price_row_idx
+            < len(hover_customdata)
+        )
+        else []
+    )
+
+    for row_idx, row_key in enumerate(
+        hm.row_keys
+    ):
+        if not str(row_key).startswith(
+            "VWMA_"
+        ):
+            continue
+
+        if row_idx >= len(
+            hover_customdata
+        ):
+            continue
+
+        for col_idx, cell in enumerate(
+            hover_customdata[row_idx]
+        ):
+            if not isinstance(cell, dict):
+                continue
+
+            price_cell = (
+                price_hover_row[col_idx]
+                if (
+                    col_idx
+                    < len(price_hover_row)
+                    and isinstance(
+                        price_hover_row[col_idx],
+                        dict,
+                    )
+                )
+                else {}
+            )
+
+            cell.update(
+                build_vwma_hover_opening(
+                    cell,
+                    price_cell,
+                )
+            )
+
     hovertemplate = (
         "<b>%{customdata.display_name}</b><br>"
         "Date: %{customdata.date}<br>"
@@ -6079,7 +6466,7 @@ def make_rolling_heatmap_figure(
             y=hm.y,
             text=hm.text,
             texttemplate="%{text}",
-            customdata=hm.customdata,
+            customdata=hover_customdata,
             colorscale=colorscale,
             zmin=-2,
             zmax=2,
