@@ -7579,6 +7579,26 @@ def create_sidebar_controls():
         index=0
     )
     selected_period = period_options[selected_period_name]
+
+    if st.session_state.selected_analysis_mode == 'volume':
+        view_last_complete_day = st.sidebar.toggle(
+            "View last complete day",
+            value=False,
+            help=(
+                "Off: use the latest available Volume observation. "
+                "During market hours this is cumulative intraday volume. "
+                "On: use the latest fully completed trading session."
+            ),
+            key='performance_volume_last_complete_day',
+        )
+
+        volume_view_mode = (
+            'completed'
+            if view_last_complete_day
+            else 'live'
+        )
+    else:
+        volume_view_mode = None
     
     # Refresh button
     st.sidebar.subheader("🔄 Data Refresh")
@@ -7597,7 +7617,8 @@ def create_sidebar_controls():
         'period_name': selected_period_name,
         'refresh': refresh_button,
         'database_save': bucket_save_to_db,  # ← NOW USES BUCKET-SPECIFIC TOGGLE
-        'analysis_mode': st.session_state.selected_analysis_mode
+        'analysis_mode': st.session_state.selected_analysis_mode,
+        'volume_view_mode': volume_view_mode,
     }
 
 
@@ -7702,7 +7723,13 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
         
         return performance_data
 
-def fetch_volume_data(tickers, period, save_to_db: bool = True):
+
+def fetch_volume_data(
+    tickers,
+    period,
+    observation_mode='live',
+    save_to_db: bool = True,
+):
     """Fetch volume data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching volume data for {len(tickers)} tickers..."):
         # Create progress bar
@@ -7715,14 +7742,24 @@ def fetch_volume_data(tickers, period, save_to_db: bool = True):
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            volume_data = (
-                volume_calculator
-                .calculate_volume_performance_for_group(
-                    tickers,
-                    period,
-                    save_to_db=save_to_db,
+            if observation_mode == 'completed':
+                volume_data = (
+                    volume_calculator
+                    .calculate_latest_completed_volume_performance_for_group(
+                        tickers,
+                        period,
+                        save_to_db=save_to_db,
+                    )
                 )
-            )
+            else:
+                volume_data = (
+                    volume_calculator
+                    .calculate_live_volume_performance_for_group(
+                        tickers,
+                        period,
+                        save_to_db=save_to_db,
+                    )
+                )
             
             # Show database usage statistics
             valid_count = len([v for v in volume_data if not v.get('error', False)])
@@ -7733,16 +7770,29 @@ def fetch_volume_data(tickers, period, save_to_db: bool = True):
             status_text.empty()
             
             # Display efficiency information
-            if database_usage > 0:
-                cache_rate = database_usage / valid_count * 100 if valid_count > 0 else 0
+            if observation_mode == 'live':
+                st.success(
+                    f"✅ Live Volume data updated for "
+                    f"{valid_count} tickers"
+                )
+            elif database_usage > 0:
+                cache_rate = (
+                    database_usage / valid_count * 100
+                    if valid_count > 0
+                    else 0
+                )
                 st.success(
                     f"✅ Volume data fetched successfully! "
-                    f"Database cache used for {database_usage}/{valid_count} tickers "
+                    f"Database cache used for "
+                    f"{database_usage}/{valid_count} tickers "
                     f"({cache_rate:.0f}% cache hit rate)"
                 )
             else:
-                st.info("ℹ️ Volume data fetched from yfinance (no database cache available)")
-            
+                st.info(
+                    "ℹ️ Completed Volume data fetched from "
+                    "yfinance (no database cache available)"
+                )
+
         except Exception as e:
             st.error(f"Error fetching volume data: {str(e)}")
             volume_data = []
@@ -9715,11 +9765,19 @@ def show_performance_heatmaps():
     # Cache identity is based on the exact data request rather than the number
     # of successful rows returned. Individual ticker errors therefore remain a
     # valid cached result for the request that produced them.
-    current_request_signature = (
-        controls['analysis_mode'],
-        controls['period'],
-        tuple(controls['tickers']),
-    )
+    if controls['analysis_mode'] == 'volume':
+        current_request_signature = (
+            controls['analysis_mode'],
+            controls['period'],
+            controls['volume_view_mode'],
+            tuple(controls['tickers']),
+        )
+    else:
+        current_request_signature = (
+            controls['analysis_mode'],
+            controls['period'],
+            tuple(controls['tickers']),
+        )
 
     if controls['analysis_mode'] == 'price':
         current_data = st.session_state.performance_data
@@ -9779,7 +9837,10 @@ def show_performance_heatmaps():
             volume_data = fetch_volume_data(
                 controls['tickers'],
                 controls['period'],
-                save_to_db=controls['database_save']
+                observation_mode=controls[
+                    'volume_view_mode'
+                ],
+                save_to_db=controls['database_save'],
             )
 
             # Store in session state using the same request-identity contract as
@@ -9796,10 +9857,17 @@ def show_performance_heatmaps():
 
             current_data = volume_data
 
-        st.success(
-            f"✅ Data updated successfully at "
-            f"{datetime.now().strftime('%H:%M:%S')}"
-        )
+        valid_update_items = [
+            item
+            for item in (current_data or [])
+            if not item.get('error', False)
+        ]
+
+        if valid_update_items:
+            st.success(
+                f"✅ Data updated successfully at "
+                f"{datetime.now().strftime('%H:%M:%S')}"
+            )
     else:
         # Use cached data only when it belongs to the exact active request.
         if controls['analysis_mode'] == 'price':
@@ -9812,7 +9880,16 @@ def show_performance_heatmaps():
         if controls['analysis_mode'] == 'price':
             title = f"{controls['group_name']} - {controls['period_name']} Performance"
         else:  # volume mode
-            title = f"{controls['group_name']} - Current Volume vs. {controls['period_name']} Avg."
+            if controls['volume_view_mode'] == 'completed':
+                volume_title_prefix = "Last Complete Volume"
+            else:
+                volume_title_prefix = "Current Volume"
+
+            title = (
+                f"{controls['group_name']} - "
+                f"{volume_title_prefix} vs. "
+                f"{controls['period_name']} Avg."
+            )
         
         # Display summary statistics
         st.subheader("📊 Summary Statistics")
@@ -9952,19 +10029,91 @@ def show_performance_heatmaps():
                 )
 
         else:
-            last_completed_day = pd.Timestamp(
-                get_last_completed_trading_day()
-            )
+            valid_volume_items = [
+                item
+                for item in current_data
+                if not item.get('error', False)
+            ]
 
-            volume_as_of = (
-                f"{last_completed_day.month}/"
-                f"{last_completed_day.day}/"
-                f"{str(last_completed_day.year)[-2:]}"
-            )
+            volume_timestamps = []
+            volume_dates = []
 
-            st.caption(
-                f"As of: {volume_as_of}"
-            )
+            for item in valid_volume_items:
+                volume_context = (
+                    item.get('volume_context')
+                    or {}
+                )
+
+                effective_timestamp = (
+                    volume_context.get(
+                        'effective_timestamp'
+                    )
+                )
+                effective_date = volume_context.get(
+                    'effective_date'
+                )
+
+                if effective_timestamp:
+                    try:
+                        volume_timestamps.append(
+                            pd.Timestamp(
+                                effective_timestamp
+                            )
+                        )
+                    except Exception:
+                        pass
+
+                if effective_date:
+                    try:
+                        volume_dates.append(
+                            pd.Timestamp(effective_date)
+                        )
+                    except Exception:
+                        pass
+
+            volume_caption = None
+
+            if volume_timestamps:
+                oldest_timestamp = min(
+                    volume_timestamps
+                )
+
+                hour = (
+                    oldest_timestamp
+                    .strftime('%I')
+                    .lstrip('0')
+                    or '0'
+                )
+
+                volume_caption = (
+                    f"{oldest_timestamp.month}/"
+                    f"{oldest_timestamp.day}/"
+                    f"{str(oldest_timestamp.year)[-2:]}"
+                    f" @ {hour}:"
+                    f"{oldest_timestamp.strftime('%M')}"
+                    f"{oldest_timestamp.strftime('%p')[0]}"
+                )
+
+            elif volume_dates:
+                oldest_date = min(volume_dates)
+
+                volume_caption = (
+                    f"{oldest_date.month}/"
+                    f"{oldest_date.day}/"
+                    f"{str(oldest_date.year)[-2:]}"
+                )
+
+            if volume_caption:
+                label = (
+                    "As of"
+                    if controls['volume_view_mode']
+                    == 'completed'
+                    else "Timestamp"
+                )
+
+                st.caption(
+                    f"{label}: {volume_caption}"
+                )
         
         display_heatmap(
             current_data,

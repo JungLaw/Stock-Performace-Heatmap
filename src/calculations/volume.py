@@ -1,4 +1,3 @@
-# Stamp: Tue, July 14, 2026 11:50 AM
 """
 Database-Integrated Volume Calculator
 
@@ -12,6 +11,7 @@ import numpy as np
 import sqlite3
 import yfinance as yf
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 import logging
@@ -363,7 +363,183 @@ class DatabaseIntegratedVolumeCalculator:
         except Exception as e:
             logger.error(f"❌ Error fetching volume data for {ticker} from yfinance: {e}")
             return None
-    
+
+    def _get_prior_trading_day(
+        self,
+        observation_date: date,
+    ) -> datetime:
+        """
+        Return the trading session immediately before observation_date.
+
+        The observation itself is intentionally excluded because live-volume
+        benchmarks must use completed sessions preceding the displayed
+        observation.
+        """
+        prior_day = datetime.combine(
+            observation_date,
+            datetime.min.time(),
+        ) - timedelta(days=1)
+
+        while not is_us_trading_day(prior_day):
+            prior_day -= timedelta(days=1)
+
+        return prior_day
+
+    def _get_latest_fully_completed_trading_day(
+        self,
+        reference_time: Optional[datetime] = None,
+    ) -> datetime:
+        """
+        Return the latest fully completed regular US trading session.
+
+        On a normal trading day, today's session becomes complete at
+        4:00 PM America/New_York. Before then, use the prior trading
+        session. On weekends and market holidays, use the most recent
+        prior trading session.
+
+        This resolver is intentionally local to the Volume Performance
+        Heatmap path and does not alter the shared performance helper.
+        """
+        eastern = ZoneInfo('America/New_York')
+
+        if reference_time is None:
+            market_time = datetime.now(eastern)
+        elif reference_time.tzinfo is None:
+            market_time = reference_time.replace(
+                tzinfo=eastern
+            )
+        else:
+            market_time = reference_time.astimezone(
+                eastern
+            )
+
+        market_day = datetime.combine(
+            market_time.date(),
+            datetime.min.time(),
+        )
+
+        if (
+            is_us_trading_day(market_day)
+            and market_time.hour >= 16
+        ):
+            return market_day
+
+        candidate = market_day - timedelta(days=1)
+
+        while not is_us_trading_day(candidate):
+            candidate -= timedelta(days=1)
+
+        return candidate
+
+    def get_live_volume_snapshot(
+        self,
+        ticker: str,
+    ) -> Optional[Dict]:
+        """
+        Return the latest Yahoo regular-market price/volume snapshot.
+
+        This method is intentionally display-session only. It does not write
+        the observation to the historical database or volume session cache.
+        """
+        logger.info(
+            f"📡 Fetching live volume snapshot for {ticker} from yfinance"
+        )
+
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+
+            current_price = (
+                info.get('currentPrice')
+                or info.get('regularMarketPrice')
+            )
+            current_volume = info.get('regularMarketVolume')
+            regular_market_time = info.get('regularMarketTime')
+
+            if (
+                current_price is None
+                or current_volume is None
+                or regular_market_time is None
+            ):
+                logger.warning(
+                    f"⚠️ Incomplete live quote metadata for {ticker}; "
+                    f"falling back to latest daily history row"
+                )
+
+                hist = stock.history(period='2d')
+
+                if hist.empty:
+                    logger.warning(
+                        f"⚠️ No live or daily fallback data available for {ticker}"
+                    )
+                    return None
+
+                latest_row = hist.iloc[-1]
+                latest_index = pd.Timestamp(hist.index[-1])
+
+                if latest_index.tzinfo is not None:
+                    latest_index = latest_index.tz_convert(
+                        'America/New_York'
+                    )
+
+                fallback_price = latest_row.get('Close')
+                fallback_volume = latest_row.get('Volume')
+
+                if (
+                    fallback_price is None
+                    or pd.isna(fallback_price)
+                    or fallback_volume is None
+                    or pd.isna(fallback_volume)
+                    or float(fallback_volume) <= 0
+                ):
+                    logger.warning(
+                        f"⚠️ Unusable daily fallback data for {ticker}"
+                    )
+                    return None
+
+                return {
+                    'current_price': float(fallback_price),
+                    'current_volume': int(fallback_volume),
+                    'effective_timestamp': None,
+                    'effective_date': (
+                        latest_index.date().isoformat()
+                    ),
+                    'source': 'yfinance.history_2d',
+                }
+
+            current_price = float(current_price)
+            current_volume = int(current_volume)
+
+            if current_volume <= 0:
+                logger.warning(
+                    f"⚠️ Non-positive live volume for {ticker}: "
+                    f"{current_volume}"
+                )
+                return None
+
+            effective_timestamp = datetime.fromtimestamp(
+                int(regular_market_time),
+                tz=ZoneInfo('America/New_York'),
+            )
+
+            return {
+                'current_price': current_price,
+                'current_volume': current_volume,
+                'effective_timestamp': (
+                    effective_timestamp.isoformat()
+                ),
+                'effective_date': (
+                    effective_timestamp.date().isoformat()
+                ),
+                'source': 'yfinance.regularMarket',
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Error fetching live volume snapshot for {ticker}: {e}"
+            )
+            return None
+
     def _query_volume_benchmarks_from_db(self, ticker: str, trading_days: List[datetime], save_to_db: bool = True) -> Optional[float]:
         """
         Calculate volume benchmark average with auto-fetch fallback and session cache support
@@ -592,9 +768,15 @@ class DatabaseIntegratedVolumeCalculator:
         self,
         ticker: str,
         save_to_db: bool = True,
+        effective_day: Optional[datetime] = None,
     ) -> Optional[pd.DataFrame]:
         """
-        Return the effective completed session plus 60 prior sessions.
+        Return an effective completed session plus 60 prior sessions.
+
+        When effective_day is omitted, preserve the existing completed-session
+        behavior. An explicit effective_day lets Performance Heatmap live-volume
+        calculations anchor benchmarks to the completed session immediately
+        before the displayed observation.
 
         The method performs one bounded database read. If strict coverage is
         incomplete, it performs one bounded yfinance fallback for the complete
@@ -602,10 +784,11 @@ class DatabaseIntegratedVolumeCalculator:
 
         Database rows take precedence over overlapping fetched rows.
         """
-        effective_day = get_last_completed_trading_day()
+        if effective_day is None:
+            effective_day = get_last_completed_trading_day()
 
         # 61 rows:
-        # - row 61 = displayed completed session
+        # - row 61 = effective completed session
         # - rows 1-60 = prior benchmark sessions
         required_days = get_last_n_trading_days(
             effective_day,
@@ -755,9 +938,14 @@ class DatabaseIntegratedVolumeCalculator:
         self,
         ticker: str,
         save_to_db: bool = True,
+        effective_day: Optional[datetime] = None,
     ) -> Optional[Dict]:
         """
         Build reusable completed-session price and volume hover context.
+
+        When effective_day is supplied, that exact completed trading
+        session becomes the displayed observation. Existing callers that
+        omit it retain the prior behavior.
 
         All averages exclude the displayed completed session:
         - 1D: immediately preceding completed-session volume
@@ -769,6 +957,7 @@ class DatabaseIntegratedVolumeCalculator:
         context = self._get_completed_volume_context_frame(
             ticker,
             save_to_db=save_to_db,
+            effective_day=effective_day,
         )
 
         if context is None or len(context) != 61:
@@ -816,17 +1005,28 @@ class DatabaseIntegratedVolumeCalculator:
             '60d': '3M Avg',
         }
 
-        comparisons = {
-            key: {
+        comparisons = {}
+
+        for key, benchmark_volume in benchmark_values.items():
+            share_pct = (
+                (
+                    float(current_volume)
+                    / benchmark_volume
+                )
+                * 100.0
+                if benchmark_volume
+                else None
+            )
+
+            comparisons[key] = {
                 'label': labels[key],
-                'benchmark_volume': benchmark_value,
+                'benchmark_volume': benchmark_volume,
                 'percentage_change': self._percentage_change(
                     current_volume,
-                    benchmark_value,
+                    benchmark_volume,
                 ),
+                'share_pct': share_pct,
             }
-            for key, benchmark_value in benchmark_values.items()
-        }
 
         return {
             'effective_date': (
@@ -845,11 +1045,15 @@ class DatabaseIntegratedVolumeCalculator:
         ticker: str,
         current_volume: int,
         save_to_db: bool = True,
+        completed_through: Optional[datetime] = None,
     ) -> Optional[Dict]:
         """
         Compare current cumulative volume with completed-session baselines.
 
-        Baselines use the latest completed sessions:
+        Baselines use completed sessions through completed_through when an
+        explicit anchor is supplied. Existing callers that omit it retain the
+        current latest-completed-session behavior.
+
         - 1D: latest completed session
         - 1W: latest 5 completed sessions
         - 2W: latest 10 completed sessions
@@ -862,6 +1066,7 @@ class DatabaseIntegratedVolumeCalculator:
         context = self._get_completed_volume_context_frame(
             ticker,
             save_to_db=save_to_db,
+            effective_day=completed_through,
         )
 
         if context is None or len(context) != 61:
@@ -921,6 +1126,9 @@ class DatabaseIntegratedVolumeCalculator:
         return {
             'effective_date': (
                 context.index[-1].strftime('%Y-%m-%d')
+            ),
+            'benchmark_price': float(
+                context.iloc[-1]['Price']
             ),
             'current_volume': int(current_volume),
             'volume_comparisons': comparisons,
@@ -1051,12 +1259,199 @@ class DatabaseIntegratedVolumeCalculator:
         else:
             logger.warning(f"⚠️ Unable to calculate {period_label} benchmark for {ticker}")
             return None
-    
+
+    def calculate_live_volume_performance(
+        self,
+        ticker: str,
+        benchmark_period: str = '10d',
+        save_to_db: bool = True,
+    ) -> Dict:
+        """
+        Calculate live/latest Volume performance for one ticker.
+
+        The displayed observation comes from Yahoo regular-market metadata.
+        Benchmarks use completed sessions strictly before that observation.
+        The live observation itself is never persisted as historical data.
+        """
+        logger.info(
+            f"🎯 Calculating live volume performance for {ticker} "
+            f"({benchmark_period} benchmark)"
+        )
+
+        if benchmark_period not in self.VOLUME_BENCHMARK_PERIODS:
+            logger.error(
+                f"❌ Invalid benchmark period: {benchmark_period}"
+            )
+
+            return {
+                'ticker': ticker,
+                'current_volume': None,
+                'benchmark_average': None,
+                'volume_change': 0.0,
+                'benchmark_period': benchmark_period,
+                'benchmark_label': benchmark_period,
+                'volume_context': None,
+                'error': True,
+                'data_source': 'error',
+                'observation_mode': 'live',
+            }
+
+        snapshot = self.get_live_volume_snapshot(ticker)
+
+        if snapshot is None:
+            return {
+                'ticker': ticker,
+                'current_volume': None,
+                'benchmark_average': None,
+                'volume_change': 0.0,
+                'benchmark_period': benchmark_period,
+                'benchmark_label': (
+                    self.VOLUME_BENCHMARK_PERIODS[
+                        benchmark_period
+                    ]['label']
+                ),
+                'volume_context': None,
+                'error': True,
+                'data_source': 'error',
+                'observation_mode': 'live',
+            }
+
+        try:
+            observation_date = datetime.strptime(
+                snapshot['effective_date'],
+                '%Y-%m-%d',
+            ).date()
+        except (TypeError, ValueError, KeyError):
+            logger.error(
+                f"❌ Invalid live effective date for {ticker}: "
+                f"{snapshot.get('effective_date')}"
+            )
+
+            return {
+                'ticker': ticker,
+                'current_volume': None,
+                'benchmark_average': None,
+                'volume_change': 0.0,
+                'benchmark_period': benchmark_period,
+                'benchmark_label': (
+                    self.VOLUME_BENCHMARK_PERIODS[
+                        benchmark_period
+                    ]['label']
+                ),
+                'volume_context': None,
+                'error': True,
+                'data_source': 'error',
+                'observation_mode': 'live',
+            }
+
+        completed_through = self._get_prior_trading_day(
+            observation_date
+        )
+
+        volume_context = self.get_live_volume_context(
+            ticker,
+            current_volume=snapshot['current_volume'],
+            save_to_db=save_to_db,
+            completed_through=completed_through,
+        )
+
+        if volume_context is None:
+            return {
+                'ticker': ticker,
+                'current_volume': snapshot['current_volume'],
+                'benchmark_average': None,
+                'volume_change': 0.0,
+                'benchmark_period': benchmark_period,
+                'benchmark_label': (
+                    self.VOLUME_BENCHMARK_PERIODS[
+                        benchmark_period
+                    ]['label']
+                ),
+                'volume_context': None,
+                'error': True,
+                'data_source': 'error',
+                'observation_mode': 'live',
+            }
+
+        prior_price = volume_context.get('benchmark_price')
+        current_price = snapshot.get('current_price')
+
+        if (
+            prior_price is not None
+            and current_price is not None
+        ):
+            price_change = (
+                float(current_price)
+                - float(prior_price)
+            )
+            price_change_pct = self._percentage_change(
+                current_price,
+                prior_price,
+            )
+        else:
+            price_change = None
+            price_change_pct = None
+
+        volume_context.update({
+            'effective_date': snapshot['effective_date'],
+            'effective_timestamp': snapshot.get(
+                'effective_timestamp'
+            ),
+            'current_price': current_price,
+            'prior_price': prior_price,
+            'price_change': price_change,
+            'price_change_pct': price_change_pct,
+            'observation_mode': 'live',
+        })
+
+        selected_comparison = (
+            volume_context['volume_comparisons'][
+                benchmark_period
+            ]
+        )
+
+        current_volume = snapshot['current_volume']
+        benchmark_average = (
+            selected_comparison['benchmark_volume']
+        )
+        volume_change = (
+            selected_comparison['percentage_change']
+        )
+
+        result = {
+            'ticker': ticker,
+            'current_volume': current_volume,
+            'benchmark_average': benchmark_average,
+            'volume_change': volume_change,
+            'benchmark_period': benchmark_period,
+            'benchmark_label': (
+                self.VOLUME_BENCHMARK_PERIODS[
+                    benchmark_period
+                ]['label']
+            ),
+            'volume_context': volume_context,
+            'error': False,
+            'data_source': snapshot.get(
+                'source',
+                'yfinance.live',
+            ),
+            'observation_mode': 'live',
+        }
+
+        logger.info(
+            f"✅ {ticker} live: {current_volume:,} vs "
+            f"{benchmark_average:,.0f} avg = "
+            f"{volume_change:+.2f}%"
+        )
+
+        return result
+
     def calculate_volume_performance(
         self,
         ticker: str,
         benchmark_period: str = '10d',
         save_to_db: bool = True,
+        effective_day: Optional[datetime] = None,
     ) -> Dict:
         """
         Calculate the selected tile comparison and reusable hover context.
@@ -1094,6 +1489,7 @@ class DatabaseIntegratedVolumeCalculator:
         volume_context = self.get_completed_volume_context(
             ticker,
             save_to_db=save_to_db,
+            effective_day=effective_day,
         )
 
         if volume_context is None:
@@ -1154,6 +1550,102 @@ class DatabaseIntegratedVolumeCalculator:
 
         return result
     
+    def calculate_live_volume_performance_for_group(
+        self,
+        tickers: List[str],
+        benchmark_period: str = '10d',
+        save_to_db: bool = True,
+    ) -> List[Dict]:
+        """
+        Calculate live/latest Volume performance for a group of tickers.
+        """
+        logger.info(
+            f"🎯 Calculating live volume performance for "
+            f"{len(tickers)} tickers "
+            f"({benchmark_period} benchmark)"
+        )
+
+        results = []
+
+        for i, ticker in enumerate(tickers, 1):
+            logger.info(
+                f"📊 Processing live {ticker} "
+                f"({i}/{len(tickers)})..."
+            )
+
+            volume_data = self.calculate_live_volume_performance(
+                ticker,
+                benchmark_period,
+                save_to_db=save_to_db,
+            )
+            results.append(volume_data)
+
+        valid_count = len([
+            result
+            for result in results
+            if not result.get('error', True)
+        ])
+        error_count = len([
+            result
+            for result in results
+            if result.get('error', False)
+        ])
+
+        logger.info(
+            "📊 Live volume performance calculation complete:"
+        )
+        logger.info(
+            f"   - Valid calculations: {valid_count} tickers"
+        )
+        logger.info(
+            f"   - Errors: {error_count} tickers"
+        )
+
+        return results
+
+    def calculate_latest_completed_volume_performance_for_group(
+        self,
+        tickers: List[str],
+        benchmark_period: str = '10d',
+        save_to_db: bool = True,
+    ) -> List[Dict]:
+        """
+        Calculate Volume performance for the latest fully completed
+        regular trading session.
+        """
+        effective_day = (
+            self._get_latest_fully_completed_trading_day()
+        )
+
+        logger.info(
+            f"Calculating latest completed volume performance for "
+            f"{len(tickers)} tickers "
+            f"({benchmark_period} benchmark; "
+            f"effective day {effective_day.strftime('%Y-%m-%d')})"
+        )
+
+        results = []
+
+        for i, ticker in enumerate(tickers, 1):
+            logger.info(
+                f"Processing completed {ticker} "
+                f"({i}/{len(tickers)})..."
+            )
+
+            result = self.calculate_volume_performance(
+                ticker,
+                benchmark_period,
+                save_to_db=save_to_db,
+                effective_day=effective_day,
+            )
+
+            if not result.get('error', False):
+                result['observation_mode'] = 'completed'
+
+            results.append(result)
+
+        return results
+
     def calculate_volume_performance_for_group(self, tickers: List[str], benchmark_period: str = '10d', save_to_db: bool = True) -> List[Dict]:
         """
         Calculate volume performance data for a group of tickers

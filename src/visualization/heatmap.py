@@ -387,6 +387,13 @@ class FinvizHeatmapGenerator:
 
                 return f"{float(value):+.1f}%"
 
+            def _format_share(value):
+                """Format benchmark share as a whole-number percentage."""
+                if value is None:
+                    return "N/A"
+
+                return f"{float(value):.0f}%"
+
             # Preserve the prior selected-benchmark fallback if an old or
             # incomplete payload reaches the renderer.
             volume_format = (
@@ -475,7 +482,10 @@ class FinvizHeatmapGenerator:
                     )} "
                     f"({_format_compact_volume(
                         comparison.get('benchmark_volume')
-                    )})"
+                    )}) "
+                    f"| Share: {_format_share(
+                        comparison.get('share_pct')
+                    )}"
                 )
 
             if comparison_lines:
