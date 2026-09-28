@@ -29,6 +29,7 @@ from calculations.performance import (
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
+from data.database_manager import DatabaseManager
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import (
     ASSET_GROUPS,
@@ -11126,6 +11127,126 @@ def show_stock_comparison_dashboard():
     with st.expander("Cache diagnostics", expanded=False):
         _render_scd_cache_diagnostics()
 
+
+def show_data_management():
+    """Render the read-only Data Management database overview."""
+    st.title("Data Management")
+    st.caption(
+        "Inspect stored OHLCV coverage and configured universe membership. "
+        "Read-only inspection does not acquire or modify market data."
+    )
+
+    manager = DatabaseManager()
+
+    try:
+        overview = manager.get_database_overview()
+        inventory = manager.get_ticker_inventory()
+    except Exception as exc:
+        st.error(f"Unable to read the market-data database: {exc}")
+        return
+
+    st.subheader("Database Overview")
+
+    metric_columns = st.columns(4)
+
+    metric_columns[0].metric(
+        "Unique Tickers",
+        f"{overview['unique_tickers']:,}",
+    )
+    metric_columns[1].metric(
+        "Total OHLCV Records",
+        f"{overview['total_records']:,}",
+    )
+    metric_columns[2].metric(
+        "Earliest Stored Record",
+        overview["earliest_date"] or "—",
+    )
+    metric_columns[3].metric(
+        "Latest Stored Record",
+        overview["latest_stored_date"] or "—",
+    )
+
+    st.markdown("---")
+    st.subheader("Ticker Inventory")
+
+    filter_column, search_column = st.columns([1, 2])
+
+    with filter_column:
+        universe_filter = st.selectbox(
+            "Universe",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+                "Unassigned",
+                "All",
+            ],
+            index=0,
+            key="data_management_universe_filter",
+        )
+
+    with search_column:
+        ticker_search = st.text_input(
+            "Search ticker",
+            value="",
+            key="data_management_ticker_search",
+        ).strip().upper()
+
+    filtered_inventory = []
+
+    for row in inventory:
+        buckets = row["buckets"]
+
+        if universe_filter == "All":
+            include_row = True
+        elif universe_filter == "Unassigned":
+            include_row = not buckets
+        else:
+            include_row = universe_filter in buckets
+
+        if ticker_search:
+            include_row = (
+                include_row
+                and ticker_search in row["ticker"]
+            )
+
+        if include_row:
+            filtered_inventory.append(row)
+
+    display_rows = [
+        {
+            "Ticker": row["ticker"],
+            "Bucket(s)": (
+                ", ".join(row["buckets"])
+                if row["buckets"]
+                else "Unassigned"
+            ),
+            "Records": row["records"],
+            "First Date": row["first_date"],
+            "Last Date": row["last_date"],
+        }
+        for row in filtered_inventory
+    ]
+
+    st.caption(
+        f"Showing {len(display_rows):,} of "
+        f"{len(inventory):,} stored tickers."
+    )
+
+    if display_rows:
+        inventory_df = pd.DataFrame(display_rows)
+
+        st.dataframe(
+            inventory_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info(
+            "No stored tickers match the selected universe and search."
+        )
+
+
 def main():
     """Main application function with page navigation"""
     # Page config
@@ -11165,15 +11286,24 @@ def main():
     
     # Page navigation in sidebar
     st.sidebar.title("📊 Navigation")
+
+    page_options = [
+        'performance_heatmaps',
+        'technical_analysis',
+        'stock_comparison',
+        'data_management',
+    ]
+
     st.session_state.selected_page = st.sidebar.selectbox(
         "Choose Dashboard:",
-        options=['performance_heatmaps', 'technical_analysis', 'stock_comparison'],
+        options=page_options,
         format_func=lambda x: {
             'performance_heatmaps': '📈 Performance Heatmaps',
-            'technical_analysis': '🎯 Technical Analysis',  
-            'stock_comparison': '📋 Stock Comparison'
+            'technical_analysis': '🎯 Technical Analysis',
+            'stock_comparison': '📋 Stock Comparison',
+            'data_management': '🗄️ Data Management',
         }[x],
-        index=['performance_heatmaps', 'technical_analysis', 'stock_comparison'].index(
+        index=page_options.index(
             st.session_state.selected_page
         ),
         key='page_navigation'
@@ -11186,6 +11316,8 @@ def main():
         show_technical_analysis_dashboard()
     elif st.session_state.selected_page == 'stock_comparison':
         show_stock_comparison_dashboard()
+    elif st.session_state.selected_page == 'data_management':
+        show_data_management()
 
 if __name__ == "__main__":
     main()
