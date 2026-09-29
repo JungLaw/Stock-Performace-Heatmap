@@ -154,6 +154,63 @@ class DatabaseManager:
             "status": status,
         }
 
+    @staticmethod
+    def _find_large_price_moves(
+        stored_records: List[Dict[str, Any]],
+        expected_sessions: List[date],
+        expected_session_positions: Dict[date, int],
+    ) -> List[Dict[str, Any]]:
+        """
+        Return stored Close moves of at least 25% versus the immediately
+        preceding expected NYSE session.
+
+        A move is evaluated only when both the current session and its
+        immediately preceding expected session are stored for the ticker.
+        Missing prior expected sessions are owned by the internal-gap
+        diagnostic and do not produce multi-session price-move comparisons.
+        """
+        close_by_date = {
+            date.fromisoformat(record["date"]): float(record["close"])
+            for record in stored_records
+        }
+
+        large_price_moves: List[Dict[str, Any]] = []
+
+        for record in stored_records:
+            current_date = date.fromisoformat(record["date"])
+            current_position = expected_session_positions.get(current_date)
+
+            if current_position is None or current_position == 0:
+                continue
+
+            prior_date = expected_sessions[current_position - 1]
+
+            if prior_date not in close_by_date:
+                continue
+
+            prior_close = close_by_date[prior_date]
+            current_close = float(record["close"])
+
+            if prior_close == 0:
+                continue
+
+            change_pct = (
+                (current_close / prior_close) - 1.0
+            ) * 100.0
+
+            if abs(change_pct) >= 25.0:
+                large_price_moves.append(
+                    {
+                        "date": current_date.isoformat(),
+                        "prior_date": prior_date.isoformat(),
+                        "prior_close": prior_close,
+                        "close": current_close,
+                        "change_pct": change_pct,
+                    }
+                )
+
+        return large_price_moves
+
     def get_database_overview(
         self,
         inventory: List[Dict[str, Any]] | None = None,
@@ -197,6 +254,7 @@ class DatabaseManager:
                 "current_tickers": 0,
                 "stale_tickers": 0,
                 "tickers_with_internal_gaps": 0,
+                "tickers_with_large_price_moves": 0,
             }
 
         return {
@@ -215,6 +273,9 @@ class DatabaseManager:
             ),
             "tickers_with_internal_gaps": sum(
                 1 for item in inventory if item["internal_gaps"] > 0
+            ),
+            "tickers_with_large_price_moves": sum(
+                1 for item in inventory if item["large_price_moves"]
             ),
         }
 
@@ -235,7 +296,8 @@ class DatabaseManager:
         query = f"""
             SELECT
                 Ticker AS ticker,
-                Date AS date
+                Date AS date,
+                Close AS close
             FROM "{TABLE_NAME}"
             ORDER BY Ticker, Date
         """
@@ -248,49 +310,64 @@ class DatabaseManager:
         with self._connect_read_only() as connection:
             rows = connection.execute(query).fetchall()
 
-        dates_by_ticker: Dict[str, List[str]] = {}
+        records_by_ticker: Dict[str, List[Dict[str, Any]]] = {}
 
         for row in rows:
             ticker = str(row["ticker"]).upper()
-            dates_by_ticker.setdefault(ticker, []).append(
-                str(row["date"])
+            records_by_ticker.setdefault(ticker, []).append(
+                {
+                    "date": str(row["date"]),
+                    "close": float(row["close"]),
+                }
             )
 
-        if not dates_by_ticker:
+        if not records_by_ticker:
             return []
 
         earliest_stored_date = min(
-            date.fromisoformat(stored_dates[0])
-            for stored_dates in dates_by_ticker.values()
+            date.fromisoformat(stored_records[0]["date"])
+            for stored_records in records_by_ticker.values()
         )
         latest_stored_date = max(
-            date.fromisoformat(stored_dates[-1])
-            for stored_dates in dates_by_ticker.values()
+            date.fromisoformat(stored_records[-1]["date"])
+            for stored_records in records_by_ticker.values()
         )
 
-        expected_sessions = set(
-            get_expected_sessions(
-                earliest_stored_date,
-                latest_stored_date,
-            )
+        expected_sessions = get_expected_sessions(
+            earliest_stored_date,
+            latest_stored_date,
         )
+        expected_session_set = set(expected_sessions)
+        expected_session_positions = {
+            session_date: position
+            for position, session_date in enumerate(expected_sessions)
+        }
 
         inventory: List[Dict[str, Any]] = []
 
-        for ticker in sorted(dates_by_ticker):
-            stored_dates = dates_by_ticker[ticker]
+        for ticker in sorted(records_by_ticker):
+            stored_records = records_by_ticker[ticker]
+            stored_dates = [
+                record["date"]
+                for record in stored_records
+            ]
             bucket_labels = self._bucket_labels_for_ticker(ticker)
             health = self._calculate_ticker_health(
                 stored_dates,
-                expected_sessions,
+                expected_session_set,
                 latest_expected_stored_session,
+            )
+            large_price_moves = self._find_large_price_moves(
+                stored_records,
+                expected_sessions,
+                expected_session_positions,
             )
 
             inventory.append(
                 {
                     "ticker": ticker,
                     "buckets": bucket_labels,
-                    "records": len(stored_dates),
+                    "records": len(stored_records),
                     "first_date": stored_dates[0],
                     "last_date": stored_dates[-1],
                     "coverage": health["coverage"],
@@ -298,6 +375,7 @@ class DatabaseManager:
                     "is_current": health["is_current"],
                     "is_stale": health["is_stale"],
                     "status": health["status"],
+                    "large_price_moves": large_price_moves,
                 }
             )
 

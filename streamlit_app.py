@@ -11168,7 +11168,7 @@ def show_data_management():
         overview["latest_expected_stored_session"] or "—",
     )
 
-    health_metric_columns = st.columns(3)
+    health_metric_columns = st.columns(4)
 
     health_metric_columns[0].metric(
         "Tickers Current",
@@ -11182,13 +11182,17 @@ def show_data_management():
         "Tickers with Internal Gaps",
         f"{overview['tickers_with_internal_gaps']:,}",
     )
+    health_metric_columns[3].metric(
+        "Tickers with Large Price Moves",
+        f"{overview['tickers_with_large_price_moves']:,}",
+    )
 
     st.markdown("---")
     st.subheader("Ticker Inventory")
 
-    filter_column, search_column = st.columns([1, 2])
+    universe_column, health_column, search_column = st.columns([1, 1, 2])
 
-    with filter_column:
+    with universe_column:
         universe_filter = st.selectbox(
             "Universe",
             options=[
@@ -11200,6 +11204,20 @@ def show_data_management():
             ],
             index=0,
             key="data_management_universe_filter",
+        )
+
+    with health_column:
+        health_filter = st.selectbox(
+            "Health Filter",
+            options=[
+                "All",
+                "Current",
+                "Stale",
+                "Internal Gaps",
+                "Large Price Moves",
+            ],
+            index=0,
+            key="data_management_health_filter",
         )
 
     with search_column:
@@ -11220,6 +11238,27 @@ def show_data_management():
             include_row = not buckets
         else:
             include_row = universe_filter in buckets
+
+        if health_filter == "Current":
+            include_row = (
+                include_row
+                and row["is_current"]
+            )
+        elif health_filter == "Stale":
+            include_row = (
+                include_row
+                and row["is_stale"]
+            )
+        elif health_filter == "Internal Gaps":
+            include_row = (
+                include_row
+                and row["internal_gaps"] > 0
+            )
+        elif health_filter == "Large Price Moves":
+            include_row = (
+                include_row
+                and bool(row["large_price_moves"])
+            )
 
         if ticker_search:
             include_row = (
@@ -11248,6 +11287,14 @@ def show_data_management():
             ),
             "Internal Gaps": row["internal_gaps"],
             "Status": row["status"] or "—",
+            "Large Price Moves": (
+                ", ".join(
+                    event["date"]
+                    for event in row["large_price_moves"]
+                )
+                if row["large_price_moves"]
+                else "—"
+            ),
         }
         for row in filtered_inventory
     ]
@@ -11277,7 +11324,11 @@ def show_data_management():
         "First Date and Last Date. "
         "**Status** — Current when Last Date reaches the latest session "
         "expected to be stored under the next-day daily-data policy; "
-        "Stale when Last Date is earlier."
+        "Stale when Last Date is earlier. "
+        "**Large Price Moves** — Dates where Close changed by at least 25% "
+        "versus the immediately preceding expected NYSE session. If that "
+        "prior session is missing from the database, no Large Price Move "
+        "is evaluated."
     )
 
 
