@@ -380,3 +380,63 @@ class DatabaseManager:
             )
 
         return inventory
+
+    def get_ohlcv_records(
+        self,
+        tickers: List[str],
+        start_date: date,
+        end_date: date,
+    ) -> List[Dict[str, Any]]:
+        """
+        Return stored raw OHLCV rows for tickers within an inclusive date range.
+
+        This is a read-only Data Management inspection operation. It does not
+        acquire market data, calculate indicators, or mutate persistent data.
+        """
+        normalized_tickers: List[str] = []
+        seen_tickers = set()
+
+        for ticker in tickers:
+            normalized_ticker = str(ticker).strip().upper()
+            if not normalized_ticker or normalized_ticker in seen_tickers:
+                continue
+            seen_tickers.add(normalized_ticker)
+            normalized_tickers.append(normalized_ticker)
+
+        if not normalized_tickers:
+            raise ValueError("At least one stored ticker is required.")
+
+        if not isinstance(start_date, date) or not isinstance(end_date, date):
+            raise ValueError("Start Date and End Date are required.")
+
+        if start_date > end_date:
+            raise ValueError("Start Date cannot be later than End Date.")
+
+        ticker_placeholders = ", ".join("?" for _ in normalized_tickers)
+        query = f"""
+            SELECT
+                Ticker AS "Ticker",
+                Date AS "Date",
+                Open AS "Open",
+                High AS "High",
+                Low AS "Low",
+                Close AS "Close",
+                "Adj Close" AS "Adj Close",
+                Volume AS "Volume"
+            FROM "{TABLE_NAME}"
+            WHERE Ticker IN ({ticker_placeholders})
+              AND Date >= ?
+              AND Date <= ?
+            ORDER BY Date, Ticker
+        """
+
+        parameters = [
+            *normalized_tickers,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        ]
+
+        with self._connect_read_only() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+
+        return [dict(row) for row in rows]

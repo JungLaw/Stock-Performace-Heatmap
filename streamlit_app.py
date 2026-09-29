@@ -11331,6 +11331,269 @@ def show_data_management():
         "is evaluated."
     )
 
+    st.markdown("---")
+    st.subheader("Data Explorer")
+    st.caption(
+        "Inspect raw stored OHLCV records. Select stored ticker(s), a Start Date, "
+        "and an End Date, then run the query. Calendar endpoints do not need to "
+        "be NYSE trading sessions."
+    )
+
+    stored_tickers = [row["ticker"] for row in inventory]
+    stored_ticker_set = set(stored_tickers)
+
+    def _parse_data_explorer_tickers(raw_value):
+        seen = set()
+        parsed = []
+
+        for value in str(raw_value or "").split(","):
+            ticker = value.strip().upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            parsed.append(ticker)
+
+        return parsed
+
+    def _sync_data_explorer_end_date():
+        selected_start_date = st.session_state.get(
+            "data_management_explorer_start_date"
+        )
+        if selected_start_date is not None:
+            st.session_state[
+                "data_management_explorer_end_date"
+            ] = selected_start_date
+
+    def _add_data_explorer_browse_tickers(candidate_tickers):
+        current_tickers = _parse_data_explorer_tickers(
+            st.session_state.get(
+                "data_management_explorer_ticker_input",
+                "",
+            )
+        )
+        selected_browse_tickers = [
+            ticker
+            for ticker in candidate_tickers
+            if st.session_state.get(
+                f"data_management_explorer_browse_{ticker}",
+                False,
+            )
+        ]
+
+        merged_tickers = []
+        seen = set()
+        for ticker in current_tickers + selected_browse_tickers:
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            merged_tickers.append(ticker)
+
+        st.session_state[
+            "data_management_explorer_ticker_input"
+        ] = ", ".join(merged_tickers)
+
+    if "data_management_explorer_ticker_input" not in st.session_state:
+        st.session_state["data_management_explorer_ticker_input"] = ""
+
+    ticker_input = st.text_input(
+        "Ticker(s)",
+        key="data_management_explorer_ticker_input",
+        placeholder="AAPL, MSFT, NVDA",
+        help=(
+            "Enter one or more stored ticker symbols separated by commas. "
+            "Ticker matching is case-insensitive."
+        ),
+    )
+
+    parsed_tickers = _parse_data_explorer_tickers(ticker_input)
+    invalid_tickers = [
+        ticker
+        for ticker in parsed_tickers
+        if ticker not in stored_ticker_set
+    ]
+    selected_tickers = [
+        ticker
+        for ticker in parsed_tickers
+        if ticker in stored_ticker_set
+    ]
+
+    if invalid_tickers:
+        st.warning(
+            "Not stored in database: "
+            + ", ".join(invalid_tickers)
+        )
+    elif selected_tickers:
+        st.caption(
+            "Selected: "
+            + " · ".join(selected_tickers)
+        )
+
+    with st.expander("Browse / Select Tickers", expanded=False):
+        browse_universe = st.selectbox(
+            "Universe",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+                "Unassigned",
+                "All",
+            ],
+            index=0,
+            key="data_management_explorer_browse_universe",
+        )
+
+        browse_candidates = []
+        for row in inventory:
+            buckets = row["buckets"]
+
+            if browse_universe == "All":
+                include_ticker = True
+            elif browse_universe == "Unassigned":
+                include_ticker = not buckets
+            else:
+                include_ticker = browse_universe in buckets
+
+            if include_ticker:
+                browse_candidates.append(row["ticker"])
+
+        if browse_candidates:
+            browse_columns = st.columns(4)
+            for index, ticker in enumerate(browse_candidates):
+                with browse_columns[index % len(browse_columns)]:
+                    st.checkbox(
+                        ticker,
+                        key=f"data_management_explorer_browse_{ticker}",
+                    )
+
+            st.button(
+                "Add Selected",
+                key="data_management_explorer_add_selected",
+                on_click=_add_data_explorer_browse_tickers,
+                args=(tuple(browse_candidates),),
+            )
+        else:
+            st.info(
+                "No stored tickers are available in the selected universe."
+            )
+
+    if "data_management_explorer_start_date" not in st.session_state:
+        st.session_state["data_management_explorer_start_date"] = None
+    if "data_management_explorer_end_date" not in st.session_state:
+        st.session_state["data_management_explorer_end_date"] = None
+
+    start_date_column, end_date_column = st.columns(2)
+
+    with start_date_column:
+        explorer_start_date = st.date_input(
+            "Start Date",
+            key="data_management_explorer_start_date",
+            on_change=_sync_data_explorer_end_date,
+        )
+
+    with end_date_column:
+        explorer_end_date = st.date_input(
+            "End Date",
+            key="data_management_explorer_end_date",
+        )
+
+    run_explorer_query = st.button(
+        "Run Query",
+        key="data_management_explorer_run_query",
+        type="primary",
+    )
+
+    if run_explorer_query:
+        if invalid_tickers:
+            st.error(
+                "Remove or correct tickers that are not stored in the database "
+                "before running the query."
+            )
+        elif not selected_tickers:
+            st.error("Enter at least one ticker stored in the database.")
+        elif explorer_start_date is None or explorer_end_date is None:
+            st.error("Start Date and End Date are required.")
+        elif explorer_start_date > explorer_end_date:
+            st.error("Start Date cannot be later than End Date.")
+        else:
+            try:
+                explorer_records = manager.get_ohlcv_records(
+                    tickers=selected_tickers,
+                    start_date=explorer_start_date,
+                    end_date=explorer_end_date,
+                )
+                st.session_state[
+                    "data_management_explorer_result"
+                ] = explorer_records
+                st.session_state[
+                    "data_management_explorer_query"
+                ] = {
+                    "tickers": list(selected_tickers),
+                    "start_date": explorer_start_date.isoformat(),
+                    "end_date": explorer_end_date.isoformat(),
+                }
+            except Exception as exc:
+                st.error(f"Unable to read OHLCV records: {exc}")
+
+    explorer_query = st.session_state.get(
+        "data_management_explorer_query"
+    )
+    explorer_records = st.session_state.get(
+        "data_management_explorer_result"
+    )
+
+    if explorer_query is not None and explorer_records is not None:
+        query_tickers = explorer_query.get("tickers", [])
+        query_start_date = explorer_query.get("start_date")
+        query_end_date = explorer_query.get("end_date")
+
+        st.caption(
+            "Last query: "
+            f"{', '.join(query_tickers)} | "
+            f"{query_start_date} → {query_end_date} | "
+            f"{len(explorer_records):,} record(s)"
+        )
+
+        if explorer_records:
+            explorer_columns = [
+                "Ticker",
+                "Date",
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Adj Close",
+                "Volume",
+            ]
+            explorer_df = pd.DataFrame(
+                explorer_records,
+                columns=explorer_columns,
+            )
+
+            st.dataframe(
+                explorer_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            csv_bytes = explorer_df.to_csv(
+                index=False
+            ).encode("utf-8")
+            st.download_button(
+                "Download CSV",
+                data=csv_bytes,
+                file_name=(
+                    "OHLCV_"
+                    f"{query_start_date}_to_{query_end_date}.csv"
+                ),
+                mime="text/csv",
+                key="data_management_explorer_download_csv",
+            )
+        else:
+            st.info(
+                "No stored OHLCV records were found for the selected "
+                "ticker(s) and date range."
+            )
+
 
 def main():
     """Main application function with page navigation"""
