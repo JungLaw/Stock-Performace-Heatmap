@@ -11139,31 +11139,48 @@ def show_data_management():
     manager = DatabaseManager()
 
     try:
-        overview = manager.get_database_overview()
         inventory = manager.get_ticker_inventory()
+        overview = manager.get_database_overview(
+            inventory=inventory
+        )
     except Exception as exc:
         st.error(f"Unable to read the market-data database: {exc}")
         return
 
     st.subheader("Database Overview")
 
-    metric_columns = st.columns(4)
+    primary_metric_columns = st.columns(4)
 
-    metric_columns[0].metric(
+    primary_metric_columns[0].metric(
         "Unique Tickers",
         f"{overview['unique_tickers']:,}",
     )
-    metric_columns[1].metric(
+    primary_metric_columns[1].metric(
         "Total OHLCV Records",
         f"{overview['total_records']:,}",
     )
-    metric_columns[2].metric(
+    primary_metric_columns[2].metric(
         "Earliest Stored Record",
         overview["earliest_date"] or "—",
     )
-    metric_columns[3].metric(
-        "Latest Stored Record",
-        overview["latest_stored_date"] or "—",
+    primary_metric_columns[3].metric(
+        "Latest Expected Stored Session",
+        overview["latest_expected_stored_session"] or "—",
+    )
+
+    health_metric_columns = st.columns(3)
+
+    health_metric_columns[0].metric(
+        "Tickers Current",
+        f"{overview['current_tickers']:,}",
+    )
+    health_metric_columns[1].metric(
+        "Tickers Stale",
+        f"{overview['stale_tickers']:,}",
+    )
+    health_metric_columns[2].metric(
+        "Tickers with Internal Gaps",
+        f"{overview['tickers_with_internal_gaps']:,}",
     )
 
     st.markdown("---")
@@ -11224,6 +11241,13 @@ def show_data_management():
             "Records": row["records"],
             "First Date": row["first_date"],
             "Last Date": row["last_date"],
+            "Coverage": (
+                f"{row['coverage']:.1f}%"
+                if row["coverage"] is not None
+                else "—"
+            ),
+            "Internal Gaps": row["internal_gaps"],
+            "Status": row["status"] or "—",
         }
         for row in filtered_inventory
     ]
@@ -11245,6 +11269,16 @@ def show_data_management():
         st.info(
             "No stored tickers match the selected universe and search."
         )
+
+    st.caption(
+        "**Coverage** — Percentage of expected NYSE sessions present "
+        "between First Date and Last Date. "
+        "**Internal Gaps** — Expected NYSE sessions missing between "
+        "First Date and Last Date. "
+        "**Status** — Current when Last Date reaches the latest session "
+        "expected to be stored under the next-day daily-data policy; "
+        "Stale when Last Date is earlier."
+    )
 
 
 def main():
