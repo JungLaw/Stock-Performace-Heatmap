@@ -211,6 +211,209 @@ class DatabaseManager:
 
         return large_price_moves
 
+    @staticmethod
+    def _group_expected_session_ranges(
+        session_dates: List[date],
+        expected_sessions: List[date],
+    ) -> List[Dict[str, Any]]:
+        """
+        Group selected expected NYSE sessions into contiguous trading-session ranges.
+
+        Contiguity follows the expected-session sequence, not calendar-day
+        adjacency. A Friday and following Monday therefore belong to the same
+        range when both are expected sessions and no expected session lies
+        between them.
+        """
+        if not session_dates:
+            return []
+
+        expected_positions = {
+            session_date: position
+            for position, session_date in enumerate(expected_sessions)
+        }
+
+        ordered_dates = sorted(
+            {
+                session_date
+                for session_date in session_dates
+                if session_date in expected_positions
+            },
+            key=lambda session_date: expected_positions[session_date],
+        )
+
+        if not ordered_dates:
+            return []
+
+        ranges: List[Dict[str, Any]] = []
+        range_start = ordered_dates[0]
+        range_end = ordered_dates[0]
+        range_count = 1
+
+        for session_date in ordered_dates[1:]:
+            previous_position = expected_positions[range_end]
+            current_position = expected_positions[session_date]
+
+            if current_position == previous_position + 1:
+                range_end = session_date
+                range_count += 1
+                continue
+
+            ranges.append(
+                {
+                    "start_date": range_start.isoformat(),
+                    "end_date": range_end.isoformat(),
+                    "missing_sessions": range_count,
+                }
+            )
+            range_start = session_date
+            range_end = session_date
+            range_count = 1
+
+        ranges.append(
+            {
+                "start_date": range_start.isoformat(),
+                "end_date": range_end.isoformat(),
+                "missing_sessions": range_count,
+            }
+        )
+
+        return ranges
+
+    def get_ticker_diagnostics(
+        self,
+        ticker: str,
+    ) -> Dict[str, Any]:
+        """
+        Return detailed read-only database-health diagnostics for one stored ticker.
+
+        This expands existing Data Management health semantics into exact
+        supporting evidence. It does not acquire market data, classify corporate
+        actions, calculate indicators, or mutate persistent data.
+        """
+        normalized_ticker = str(ticker).strip().upper()
+
+        if not normalized_ticker:
+            raise ValueError("Ticker is required.")
+
+        query = f"""
+            SELECT
+                Date AS date,
+                Close AS close
+            FROM "{TABLE_NAME}"
+            WHERE Ticker = ?
+            ORDER BY Date
+        """
+
+        with self._connect_read_only() as connection:
+            rows = connection.execute(
+                query,
+                (normalized_ticker,),
+            ).fetchall()
+
+        if not rows:
+            raise ValueError(
+                f"{normalized_ticker} is not stored in the database."
+            )
+
+        stored_records = [
+            {
+                "date": str(row["date"]),
+                "close": float(row["close"]),
+            }
+            for row in rows
+        ]
+        stored_dates = [
+            record["date"]
+            for record in stored_records
+        ]
+        actual_dates = {
+            date.fromisoformat(stored_date)
+            for stored_date in stored_dates
+        }
+
+        first_date = min(actual_dates)
+        last_date = max(actual_dates)
+        latest_expected_stored_session = (
+            get_latest_expected_stored_session()
+        )
+
+        diagnostic_calendar_end = max(
+            last_date,
+            latest_expected_stored_session,
+        )
+        expected_sessions = get_expected_sessions(
+            first_date,
+            diagnostic_calendar_end,
+        )
+        expected_session_set = set(expected_sessions)
+        expected_session_positions = {
+            session_date: position
+            for position, session_date in enumerate(expected_sessions)
+        }
+
+        health = self._calculate_ticker_health(
+            stored_dates,
+            expected_session_set,
+            latest_expected_stored_session,
+        )
+
+        internal_gap_dates = [
+            session_date
+            for session_date in expected_sessions
+            if (
+                first_date <= session_date <= last_date
+                and session_date not in actual_dates
+            )
+        ]
+
+        missing_tail_dates = [
+            session_date
+            for session_date in expected_sessions
+            if (
+                last_date < session_date <= latest_expected_stored_session
+                and session_date not in actual_dates
+            )
+        ]
+
+        large_price_moves = self._find_large_price_moves(
+            stored_records,
+            expected_sessions,
+            expected_session_positions,
+        )
+
+        return {
+            "ticker": normalized_ticker,
+            "buckets": self._bucket_labels_for_ticker(normalized_ticker),
+            "records": len(stored_records),
+            "first_date": first_date.isoformat(),
+            "last_date": last_date.isoformat(),
+            "coverage": health["coverage"],
+            "internal_gaps": len(internal_gap_dates),
+            "is_current": health["is_current"],
+            "is_stale": health["is_stale"],
+            "status": health["status"],
+            "latest_expected_stored_session": (
+                latest_expected_stored_session.isoformat()
+            ),
+            "internal_gap_dates": [
+                session_date.isoformat()
+                for session_date in internal_gap_dates
+            ],
+            "internal_gap_ranges": self._group_expected_session_ranges(
+                internal_gap_dates,
+                expected_sessions,
+            ),
+            "missing_tail_dates": [
+                session_date.isoformat()
+                for session_date in missing_tail_dates
+            ],
+            "missing_tail_ranges": self._group_expected_session_ranges(
+                missing_tail_dates,
+                expected_sessions,
+            ),
+            "large_price_moves": large_price_moves,
+        }
+
     def get_database_overview(
         self,
         inventory: List[Dict[str, Any]] | None = None,

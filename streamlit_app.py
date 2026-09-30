@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional
 
 # Add src to path for imports
@@ -11592,6 +11592,347 @@ def show_data_management():
             st.info(
                 "No stored OHLCV records were found for the selected "
                 "ticker(s) and date range."
+            )
+
+    st.markdown("---")
+    st.subheader("Ticker Diagnostics")
+    st.caption(
+        "Inspect detailed database-health evidence for one stored ticker."
+    )
+
+    diagnostics_ticker_options = [""] + stored_tickers
+    selected_diagnostics_ticker = st.selectbox(
+        "Ticker",
+        options=diagnostics_ticker_options,
+        index=0,
+        key="data_management_diagnostics_ticker",
+        format_func=lambda ticker: (
+            "Select a stored ticker"
+            if ticker == ""
+            else ticker
+        ),
+    )
+
+    def _set_explorer_from_diagnostics(
+        ticker,
+        start_date_value=None,
+        end_date_value=None,
+    ):
+        st.session_state[
+            "data_management_explorer_ticker_input"
+        ] = str(ticker).strip().upper()
+
+        if start_date_value is not None:
+            st.session_state[
+                "data_management_explorer_start_date"
+            ] = date.fromisoformat(str(start_date_value))
+
+        if end_date_value is not None:
+            st.session_state[
+                "data_management_explorer_end_date"
+            ] = date.fromisoformat(str(end_date_value))
+
+        st.session_state.pop(
+            "data_management_explorer_result",
+            None,
+        )
+        st.session_state.pop(
+            "data_management_explorer_query",
+            None,
+        )
+
+    if not selected_diagnostics_ticker:
+        st.info(
+            "Select a stored ticker to view detailed "
+            "database-health diagnostics."
+        )
+    else:
+        try:
+            diagnostics = manager.get_ticker_diagnostics(
+                selected_diagnostics_ticker
+            )
+        except Exception as exc:
+            st.error(
+                f"Unable to read ticker diagnostics: {exc}"
+            )
+            diagnostics = None
+
+        if diagnostics is not None:
+            st.markdown(
+                f"### Ticker Diagnostics — {diagnostics['ticker']}"
+            )
+
+            bucket_label = (
+                " · ".join(diagnostics["buckets"])
+                if diagnostics["buckets"]
+                else "Unassigned"
+            )
+            st.caption(f"Bucket(s): {bucket_label}")
+
+            summary_row_one = st.columns(4)
+            summary_row_one[0].metric(
+                "Records",
+                f"{diagnostics['records']:,}",
+            )
+            summary_row_one[1].metric(
+                "First Date",
+                diagnostics["first_date"],
+            )
+            summary_row_one[2].metric(
+                "Last Date",
+                diagnostics["last_date"],
+            )
+            summary_row_one[3].metric(
+                "Coverage",
+                (
+                    f"{diagnostics['coverage']:.1f}%"
+                    if diagnostics["coverage"] is not None
+                    else "—"
+                ),
+            )
+
+            summary_row_two = st.columns(4)
+            summary_row_two[0].metric(
+                "Status",
+                diagnostics["status"] or "—",
+            )
+            summary_row_two[1].metric(
+                "Expected Through",
+                diagnostics["latest_expected_stored_session"],
+            )
+            summary_row_two[2].metric(
+                "Internal Gaps",
+                f"{diagnostics['internal_gaps']:,}",
+            )
+            summary_row_two[3].metric(
+                "Large Price Moves",
+                f"{len(diagnostics['large_price_moves']):,}",
+            )
+
+            st.caption(
+                "**Expected Through** = Latest Expected Stored Session "
+                "under the next-calendar-day daily-data policy."
+            )
+
+            st.button(
+                "Inspect This Ticker in Data Explorer",
+                key=(
+                    "data_management_diagnostics_open_explorer_"
+                    f"{diagnostics['ticker']}"
+                ),
+                on_click=_set_explorer_from_diagnostics,
+                args=(diagnostics["ticker"],),
+            )
+
+            st.markdown("#### Internal Gap Diagnostics")
+
+            internal_gap_dates = diagnostics[
+                "internal_gap_dates"
+            ]
+            internal_gap_ranges = diagnostics[
+                "internal_gap_ranges"
+            ]
+
+            if internal_gap_dates:
+                st.write(
+                    f"{len(internal_gap_dates):,} expected NYSE "
+                    "session(s) are missing between First Date "
+                    "and Last Date."
+                )
+
+                internal_gap_range_rows = []
+                for gap_range in internal_gap_ranges:
+                    start_value = gap_range["start_date"]
+                    end_value = gap_range["end_date"]
+                    range_label = (
+                        start_value
+                        if start_value == end_value
+                        else f"{start_value} → {end_value}"
+                    )
+
+                    internal_gap_range_rows.append(
+                        {
+                            "Missing Range": range_label,
+                            "Missing Sessions": (
+                                gap_range["missing_sessions"]
+                            ),
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(internal_gap_range_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                with st.expander(
+                    "Show exact missing sessions",
+                    expanded=False,
+                ):
+                    st.dataframe(
+                        pd.DataFrame(
+                            {
+                                "Missing Session": (
+                                    internal_gap_dates
+                                )
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            else:
+                st.info(
+                    "No missing expected NYSE sessions were found "
+                    "between First Date and Last Date."
+                )
+
+            st.markdown("#### Staleness Diagnostics")
+
+            missing_tail_dates = diagnostics[
+                "missing_tail_dates"
+            ]
+            missing_tail_ranges = diagnostics[
+                "missing_tail_ranges"
+            ]
+
+            staleness_rows = [
+                {
+                    "Field": "Last Stored Date",
+                    "Value": diagnostics["last_date"],
+                },
+                {
+                    "Field": "Latest Expected Stored Session",
+                    "Value": diagnostics[
+                        "latest_expected_stored_session"
+                    ],
+                },
+                {
+                    "Field": "Missing Tail Sessions",
+                    "Value": len(missing_tail_dates),
+                },
+                {
+                    "Field": "Status",
+                    "Value": diagnostics["status"] or "—",
+                },
+            ]
+
+            st.dataframe(
+                pd.DataFrame(staleness_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            if diagnostics["is_current"]:
+                st.info(
+                    "This ticker reaches the latest session currently "
+                    "expected to be stored."
+                )
+            elif diagnostics["is_stale"]:
+                if missing_tail_ranges:
+                    missing_tail_range_rows = []
+
+                    for tail_range in missing_tail_ranges:
+                        start_value = tail_range["start_date"]
+                        end_value = tail_range["end_date"]
+                        range_label = (
+                            start_value
+                            if start_value == end_value
+                            else f"{start_value} → {end_value}"
+                        )
+
+                        missing_tail_range_rows.append(
+                            {
+                                "Missing Tail Range": range_label,
+                                "Missing Sessions": (
+                                    tail_range[
+                                        "missing_sessions"
+                                    ]
+                                ),
+                            }
+                        )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            missing_tail_range_rows
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            else:
+                st.warning(
+                    "The ticker's Last Date does not fit the normal "
+                    "Current/Stale relationship to the Latest Expected "
+                    "Stored Session. Review the stored dates."
+                )
+
+            st.caption(
+                "Missing Tail Sessions occur after Last Date and are "
+                "not counted as Internal Gaps."
+            )
+
+            st.markdown(
+                "#### Large Price Move Diagnostics"
+            )
+
+            large_price_moves = diagnostics[
+                "large_price_moves"
+            ]
+
+            if large_price_moves:
+                st.write(
+                    f"{len(large_price_moves):,} Large Price Move "
+                    "event(s) require inspection."
+                )
+
+                large_move_rows = [
+                    {
+                        "Date": event["date"],
+                        "Prior Expected Session": (
+                            event["prior_date"]
+                        ),
+                        "Prior Close": (
+                            f"{event['prior_close']:.2f}"
+                        ),
+                        "Close": f"{event['close']:.2f}",
+                        "Change": (
+                            f"{event['change_pct']:+.2f}%"
+                        ),
+                    }
+                    for event in large_price_moves
+                ]
+
+                st.dataframe(
+                    pd.DataFrame(large_move_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                for event in large_price_moves:
+                    st.button(
+                        (
+                            f"Inspect {event['date']} "
+                            "in Data Explorer"
+                        ),
+                        key=(
+                            "data_management_diagnostics_lpm_"
+                            f"{diagnostics['ticker']}_"
+                            f"{event['date']}"
+                        ),
+                        on_click=_set_explorer_from_diagnostics,
+                        args=(
+                            diagnostics["ticker"],
+                            event["prior_date"],
+                            event["date"],
+                        ),
+                    )
+            else:
+                st.info("No Large Price Moves found.")
+
+            st.caption(
+                "Large Price Moves are dates where Close changed by "
+                "at least 25% versus the immediately preceding expected "
+                "NYSE session. They are inspection warnings, not "
+                "automatic evidence of bad data or a corporate action."
             )
 
 
