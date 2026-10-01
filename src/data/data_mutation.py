@@ -4,11 +4,13 @@ Canonical mutation planning for Data Management.
 This module owns the controlled administrative mutation boundary for
 daily_prices.
 
-Workstream 5 owns:
+This module owns:
 
 - canonical OHLCV record normalization
 - structural hard validation
-- duplicate incoming-key detection
+- non-blocking validation warnings
+- row-fatal excluded-observation handling
+- plan-fatal duplicate incoming-key detection
 - comparison against authoritative daily_prices
 - New / Unchanged / Changed classification
 - operation-aware proposed actions
@@ -28,7 +30,7 @@ The public Commit boundary accepts only an explicitly confirmed materialized
 Preview plan. It does not refetch or reinterpret the originating request.
 
 Audit-schema initialization is explicit infrastructure setup and is separate
-from the future Preview -> Confirm -> Commit mutation transaction.
+from the Preview -> Confirm -> Commit mutation transaction.
 """
 
 from __future__ import annotations
@@ -172,6 +174,39 @@ class ValidationIssue:
 
 
 @dataclass(frozen=True)
+class ValidationWarning:
+    """
+    One non-blocking validation finding discovered during plan construction.
+
+    Warnings are part of the exact Preview that the user confirms, but they
+    do not make an otherwise valid MutationPlan ineligible for Commit.
+    """
+
+    code: str
+    message: str
+    candidate_index: Optional[int] = None
+    ticker: Optional[str] = None
+    date: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ExcludedObservation:
+    """
+    One returned source candidate excluded from mutation because that
+    individual observation failed canonical validation.
+
+    Exclusion is row-fatal, not plan-fatal. The observation remains visible
+    in Preview and audit but never becomes a PlannedObservation and is never
+    written to daily_prices.
+    """
+
+    candidate_index: int
+    ticker: Optional[str]
+    date: Optional[str]
+    issues: Tuple[ValidationIssue, ...]
+
+
+@dataclass(frozen=True)
 class PlannedObservation:
     """
     Comparison result for one unambiguous canonical candidate record.
@@ -227,9 +262,9 @@ class MutationPlan:
     """
     Materialized read-only Preview plan.
 
-    Later Workstream 5 updates may add Source Missing classification,
-    transaction-safe commit, rollback, and audit persistence without changing
-    the canonical comparison semantics established here.
+    The plan captures exact mutation actions, Source Missing observations,
+    excluded invalid observations, warnings, plan-fatal validation issues,
+    and the authoritative DB baseline used for Preview.
     """
 
     operation: str
@@ -239,7 +274,9 @@ class MutationPlan:
     requested_end_date: Optional[date]
     observations: Tuple[PlannedObservation, ...]
     source_missing: Tuple[SourceMissingObservation, ...]
+    excluded_observations: Tuple[ExcludedObservation, ...]
     validation_issues: Tuple[ValidationIssue, ...]
+    validation_warnings: Tuple[ValidationWarning, ...]
     duplicate_keys: Tuple[Tuple[str, date], ...]
     source_missing_keys: Tuple[Tuple[str, date], ...]
     baseline_fingerprint: str
@@ -250,10 +287,10 @@ class MutationPlan:
     @property
     def can_commit(self) -> bool:
         """
-        Return whether hard validation permits eventual confirmation.
+        Return whether plan-fatal validation permits Commit.
 
-        This does not mean Commit is implemented. Workstream 5 currently uses
-        this only as Preview eligibility.
+        Row-fatal excluded observations and non-blocking warnings remain
+        visible in Preview but do not make the remaining valid plan ineligible.
         """
         return (
             not self.validation_issues
@@ -293,10 +330,18 @@ class MutationPlan:
             if item.planned_action == "unresolved"
         )
 
+        excluded_validation_issues = sum(
+            len(item.issues)
+            for item in self.excluded_observations
+        )
+
         return {
             **classifications,
             **actions,
             "validation_issues": len(self.validation_issues),
+            "validation_warnings": len(self.validation_warnings),
+            "excluded_observations": len(self.excluded_observations),
+            "excluded_validation_issues": excluded_validation_issues,
             "duplicate_keys": len(self.duplicate_keys),
             "source_missing": len(self.source_missing_keys),
             "source_missing_preserved": source_missing_preserved,
@@ -326,7 +371,7 @@ class AuditSchemaStatus:
     Read-only status of the Data Management administrative audit table.
 
     compatible=True means the table exists and exposes every column required
-    by the current Workstream 5 audit contract.
+    by the current Data Management audit contract.
     """
 
     exists: bool
@@ -338,9 +383,10 @@ class AuditSchemaStatus:
 @dataclass(frozen=True)
 class MutationTransactionResult:
     """
-    Result of one successfully committed internal MutationPlan transaction.
+    Result of one successfully committed MutationPlan transaction.
 
-    This is not yet a public Commit API.
+    Returned by the public Commit boundary after atomic data and audit
+    persistence succeeds.
     """
 
     rows_affected: int
@@ -351,11 +397,9 @@ class DataMutationManager:
     """
     Canonical Data Management administrative mutation owner.
 
-    Workstream 5 currently supports read-only Preview planning plus explicit
-    audit-schema infrastructure initialization.
-
-    It does not yet expose persistent daily_prices mutation or MutationPlan
-    Commit behavior.
+    Owns read-only Preview planning, explicit audit-schema infrastructure,
+    exact Preview confirmation, controlled daily_prices mutation, and atomic
+    audit persistence.
     """
 
     def __init__(
@@ -400,7 +444,7 @@ class DataMutationManager:
         """
         Inspect audit-table readiness using an existing SQLite connection.
 
-        This supports both ordinary read-only inspection and the future
+        This supports both ordinary read-only inspection and the controlled
         mutation transaction without opening a second database connection.
         """
         table_row = connection.execute(
@@ -624,15 +668,24 @@ class DataMutationManager:
     ) -> Tuple[
         Optional[CanonicalOHLCVRecord],
         List[ValidationIssue],
+        List[ValidationWarning],
     ]:
         """
         Normalize one candidate into the canonical record contract.
 
-        Exact OHLC plausibility rules remain deferred to Common Validation.
-        This method enforces the structural Workstream 5 hard requirements
-        needed to construct a safe Preview plan.
+        Hard validation:
+        - canonical structure and types
+        - valid persistence date
+        - finite, strictly positive prices
+        - finite non-negative integer Volume
+
+        Non-blocking validation:
+        - raw OHLC envelope inconsistencies
+
+        Warnings remain part of Preview but do not prevent Commit.
         """
         issues: List[ValidationIssue] = []
+        warnings: List[ValidationWarning] = []
 
         if not isinstance(candidate, Mapping):
             return (
@@ -647,6 +700,7 @@ class DataMutationManager:
                         candidate_index=candidate_index,
                     )
                 ],
+                [],
             )
 
         missing_fields = [
@@ -668,6 +722,7 @@ class DataMutationManager:
                         candidate_index=candidate_index,
                     )
                 ],
+                [],
             )
 
         raw_ticker = candidate.get("Ticker")
@@ -741,6 +796,25 @@ class DataMutationManager:
                     )
                 )
 
+        for field_name, numeric_value in normalized_prices.items():
+            if numeric_value <= 0:
+                issues.append(
+                    ValidationIssue(
+                        code="non_positive_price",
+                        message=(
+                            f"{field_name} must be strictly greater than zero; "
+                            f"received {numeric_value}."
+                        ),
+                        candidate_index=candidate_index,
+                        ticker=ticker or None,
+                        date=(
+                            normalized_date.isoformat()
+                            if normalized_date is not None
+                            else None
+                        ),
+                    )
+                )
+
         normalized_volume: Optional[int] = None
 
         try:
@@ -762,8 +836,77 @@ class DataMutationManager:
                 )
             )
 
+        if not issues:
+            open_value = normalized_prices["Open"]
+            high_value = normalized_prices["High"]
+            low_value = normalized_prices["Low"]
+            close_value = normalized_prices["Close"]
+
+            ohlc_warning_specs = (
+                (
+                    high_value < open_value,
+                    "high_below_open",
+                    (
+                        f"High ({high_value}) is below Open "
+                        f"({open_value})."
+                    ),
+                ),
+                (
+                    high_value < close_value,
+                    "high_below_close",
+                    (
+                        f"High ({high_value}) is below Close "
+                        f"({close_value})."
+                    ),
+                ),
+                (
+                    high_value < low_value,
+                    "high_below_low",
+                    (
+                        f"High ({high_value}) is below Low "
+                        f"({low_value})."
+                    ),
+                ),
+                (
+                    low_value > open_value,
+                    "low_above_open",
+                    (
+                        f"Low ({low_value}) is above Open "
+                        f"({open_value})."
+                    ),
+                ),
+                (
+                    low_value > close_value,
+                    "low_above_close",
+                    (
+                        f"Low ({low_value}) is above Close "
+                        f"({close_value})."
+                    ),
+                ),
+            )
+
+            for (
+                condition,
+                warning_code,
+                warning_message,
+            ) in ohlc_warning_specs:
+                if condition:
+                    warnings.append(
+                        ValidationWarning(
+                            code=warning_code,
+                            message=warning_message,
+                            candidate_index=candidate_index,
+                            ticker=ticker or None,
+                            date=(
+                                normalized_date.isoformat()
+                                if normalized_date is not None
+                                else None
+                            ),
+                        )
+                    )
+
         if issues:
-            return None, issues
+            return None, issues, warnings
 
         assert normalized_date is not None
         assert normalized_volume is not None
@@ -780,6 +923,7 @@ class DataMutationManager:
                 volume=normalized_volume,
             ),
             [],
+            warnings,
         )
 
     @classmethod
@@ -816,14 +960,22 @@ class DataMutationManager:
 
     @staticmethod
     def _find_duplicate_keys(
-        indexed_records: List[Tuple[int, CanonicalOHLCVRecord]],
+        indexed_identities: Iterable[
+            Tuple[int, Tuple[str, date]]
+        ],
     ) -> Dict[Tuple[str, date], List[int]]:
-        """Return canonical incoming keys appearing more than once."""
+        """
+        Return usable incoming logical identities appearing more than once.
+
+        Duplicate detection is identity-based rather than dependent on full
+        canonical normalization. Therefore a malformed returned observation
+        cannot hide a duplicate (Ticker, Date) collision.
+        """
         indexes_by_key: Dict[Tuple[str, date], List[int]] = {}
 
-        for candidate_index, record in indexed_records:
+        for candidate_index, candidate_key in indexed_identities:
             indexes_by_key.setdefault(
-                record.key,
+                candidate_key,
                 [],
             ).append(candidate_index)
 
@@ -1027,7 +1179,9 @@ class DataMutationManager:
         requested_end_date: Optional[date],
         observations: Tuple[PlannedObservation, ...],
         source_missing: Tuple[SourceMissingObservation, ...],
+        excluded_observations: Tuple[ExcludedObservation, ...],
         validation_issues: Tuple[ValidationIssue, ...],
+        validation_warnings: Tuple[ValidationWarning, ...],
         duplicate_keys: Tuple[Tuple[str, date], ...],
         source_missing_keys: Tuple[Tuple[str, date], ...],
         baseline_fingerprint: str,
@@ -1087,6 +1241,24 @@ class DataMutationManager:
                 }
                 for observation in source_missing
             ],
+            "excluded_observations": [
+                {
+                    "candidate_index": observation.candidate_index,
+                    "ticker": observation.ticker,
+                    "date": observation.date,
+                    "issues": [
+                        {
+                            "code": issue.code,
+                            "message": issue.message,
+                            "candidate_index": issue.candidate_index,
+                            "ticker": issue.ticker,
+                            "date": issue.date,
+                        }
+                        for issue in observation.issues
+                    ],
+                }
+                for observation in excluded_observations
+            ],
             "validation_issues": [
                 {
                     "code": issue.code,
@@ -1096,6 +1268,16 @@ class DataMutationManager:
                     "date": issue.date,
                 }
                 for issue in validation_issues
+            ],
+            "validation_warnings": [
+                {
+                    "code": warning.code,
+                    "message": warning.message,
+                    "candidate_index": warning.candidate_index,
+                    "ticker": warning.ticker,
+                    "date": warning.date,
+                }
+                for warning in validation_warnings
             ],
             "duplicate_keys": [
                 [ticker, record_date.isoformat()]
@@ -1141,7 +1323,9 @@ class DataMutationManager:
             requested_end_date=plan.requested_end_date,
             observations=plan.observations,
             source_missing=plan.source_missing,
+            excluded_observations=plan.excluded_observations,
             validation_issues=plan.validation_issues,
+            validation_warnings=plan.validation_warnings,
             duplicate_keys=plan.duplicate_keys,
             source_missing_keys=plan.source_missing_keys,
             baseline_fingerprint=plan.baseline_fingerprint,
@@ -1415,6 +1599,34 @@ class DataMutationManager:
             "requested_tickers": list(plan.requested_tickers),
             "baseline_fingerprint": plan.baseline_fingerprint,
             "summary": plan.summary(),
+            "validation_warnings": [
+                {
+                    "code": warning.code,
+                    "message": warning.message,
+                    "candidate_index": warning.candidate_index,
+                    "ticker": warning.ticker,
+                    "date": warning.date,
+                }
+                for warning in plan.validation_warnings
+            ],
+            "excluded_observations": [
+                {
+                    "candidate_index": observation.candidate_index,
+                    "ticker": observation.ticker,
+                    "date": observation.date,
+                    "issues": [
+                        {
+                            "code": issue.code,
+                            "message": issue.message,
+                            "candidate_index": issue.candidate_index,
+                            "ticker": issue.ticker,
+                            "date": issue.date,
+                        }
+                        for issue in observation.issues
+                    ],
+                }
+                for observation in plan.excluded_observations
+            ],
             "mutations": [
                 {
                     "Ticker": observation.candidate.ticker,
@@ -1524,11 +1736,10 @@ class DataMutationManager:
         """
         Execute one already-materialized MutationPlan atomically.
 
-        PRIVATE WORKSTREAM 5 PRIMITIVE.
+        PRIVATE TRANSACTION PRIMITIVE.
 
-        This is intentionally not yet exposed as public commit_plan().
-        Future UI confirmation must call a public boundary that preserves the
-        Preview -> Confirm contract.
+        Public callers must use commit_plan(), which enforces exact Preview
+        confirmation before delegating to this executor.
 
         Transaction:
             BEGIN IMMEDIATE
@@ -1756,8 +1967,13 @@ class DataMutationManager:
         indexed_records: List[
             Tuple[int, CanonicalOHLCVRecord]
         ] = []
+        indexed_identities: List[
+            Tuple[int, Tuple[str, date]]
+        ] = []
         supplied_candidate_keys: set[Tuple[str, date]] = set()
+        excluded_observations: List[ExcludedObservation] = []
         validation_issues: List[ValidationIssue] = []
+        validation_warnings: List[ValidationWarning] = []
 
         for candidate_index, candidate in enumerate(candidate_list):
             candidate_identity = self._extract_candidate_identity(
@@ -1768,14 +1984,43 @@ class DataMutationManager:
                 supplied_candidate_keys.add(
                     candidate_identity
                 )
+                indexed_identities.append(
+                    (candidate_index, candidate_identity)
+                )
 
-            record, issues = self._normalize_candidate(
+            record, issues, warnings = self._normalize_candidate(
                 candidate,
                 candidate_index,
                 latest_expected_stored_session,
             )
 
-            validation_issues.extend(issues)
+            validation_warnings.extend(warnings)
+
+            if issues:
+                excluded_observations.append(
+                    ExcludedObservation(
+                        candidate_index=candidate_index,
+                        ticker=(
+                            candidate_identity[0]
+                            if candidate_identity is not None
+                            else (
+                                issues[0].ticker
+                                if issues
+                                else None
+                            )
+                        ),
+                        date=(
+                            candidate_identity[1].isoformat()
+                            if candidate_identity is not None
+                            else (
+                                issues[0].date
+                                if issues
+                                else None
+                            )
+                        ),
+                        issues=tuple(issues),
+                    )
+                )
 
             if record is not None:
                 indexed_records.append(
@@ -1783,7 +2028,7 @@ class DataMutationManager:
                 )
 
         duplicate_map = self._find_duplicate_keys(
-            indexed_records
+            indexed_identities
         )
 
         for duplicate_key, candidate_indexes in sorted(
@@ -1940,8 +2185,16 @@ class DataMutationManager:
             source_missing_observations
         )
 
+        materialized_excluded_observations = tuple(
+            excluded_observations
+        )
+
         materialized_validation_issues = tuple(
             validation_issues
+        )
+
+        materialized_validation_warnings = tuple(
+            validation_warnings
         )
 
         materialized_duplicate_keys = tuple(
@@ -1966,7 +2219,11 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
             source_missing=materialized_source_missing,
+            excluded_observations=(
+                materialized_excluded_observations
+            ),
             validation_issues=materialized_validation_issues,
+            validation_warnings=materialized_validation_warnings,
             duplicate_keys=materialized_duplicate_keys,
             source_missing_keys=(
                 materialized_source_missing_keys
@@ -1985,7 +2242,11 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
             source_missing=materialized_source_missing,
+            excluded_observations=(
+                materialized_excluded_observations
+            ),
             validation_issues=materialized_validation_issues,
+            validation_warnings=materialized_validation_warnings,
             duplicate_keys=materialized_duplicate_keys,
             source_missing_keys=(
                 materialized_source_missing_keys
