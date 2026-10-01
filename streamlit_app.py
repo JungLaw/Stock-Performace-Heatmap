@@ -29,6 +29,7 @@ from calculations.performance import (
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
+from data.data_mutation import DataMutationManager, MutationPlan
 from data.database_manager import DatabaseManager
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import (
@@ -11128,6 +11129,526 @@ def show_stock_comparison_dashboard():
         _render_scd_cache_diagnostics()
 
 
+# ---------------------------------------------------------------------
+# Data Management mutation Preview / Confirm / Commit UI helpers
+# ---------------------------------------------------------------------
+
+_DATA_MANAGEMENT_MUTATION_PLAN_KEY = (
+    "data_management_mutation_plan"
+)
+_DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY = (
+    "data_management_mutation_confirmed_fingerprint"
+)
+_DATA_MANAGEMENT_MUTATION_RESULT_KEY = (
+    "data_management_mutation_result"
+)
+_DATA_MANAGEMENT_MUTATION_ERROR_KEY = (
+    "data_management_mutation_error"
+)
+
+
+def _set_data_management_mutation_plan(
+    plan: MutationPlan,
+) -> None:
+    """
+    Store one exact materialized MutationPlan as the active Preview.
+
+    A new Preview invalidates any confirmation, prior Commit result, or
+    prior Commit error belonging to an older Preview.
+    """
+    if not isinstance(plan, MutationPlan):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    st.session_state[
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    ] = plan
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+        None,
+    )
+
+
+def _discard_data_management_mutation_plan() -> None:
+    """Discard the active mutation Preview and its confirmation state."""
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+        None,
+    )
+
+
+def _render_data_management_mutation_preview(
+    plan: MutationPlan,
+) -> None:
+    """Render the exact materialized MutationPlan for administrator review."""
+    if not isinstance(plan, MutationPlan):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    summary = plan.summary()
+
+    st.markdown("---")
+    st.subheader("Mutation Preview")
+    st.caption(
+        "Review the exact materialized plan before confirmation. "
+        "Commit uses this Preview as-is; it does not refetch or "
+        "reinterpret the originating request."
+    )
+
+    request_columns = st.columns(4)
+
+    request_columns[0].metric(
+        "Operation",
+        plan.operation,
+    )
+    request_columns[1].metric(
+        "Source",
+        plan.source,
+    )
+    request_columns[2].metric(
+        "Requested Tickers",
+        f"{len(plan.requested_tickers):,}",
+    )
+    request_columns[3].metric(
+        "Latest Expected Session",
+        plan.latest_expected_stored_session.isoformat(),
+    )
+
+    requested_start = (
+        plan.requested_start_date.isoformat()
+        if plan.requested_start_date is not None
+        else "—"
+    )
+    requested_end = (
+        plan.requested_end_date.isoformat()
+        if plan.requested_end_date is not None
+        else "—"
+    )
+
+    st.caption(
+        f"Requested range: {requested_start} through {requested_end}"
+    )
+
+    if plan.requested_tickers:
+        with st.expander(
+            "Requested ticker scope",
+            expanded=False,
+        ):
+            st.write(", ".join(plan.requested_tickers))
+
+    st.markdown("#### Preview Summary")
+
+    summary_columns_1 = st.columns(5)
+
+    summary_columns_1[0].metric(
+        "New",
+        f"{summary.get('new', 0):,}",
+    )
+    summary_columns_1[1].metric(
+        "Unchanged",
+        f"{summary.get('unchanged', 0):,}",
+    )
+    summary_columns_1[2].metric(
+        "Changed",
+        f"{summary.get('changed', 0):,}",
+    )
+    summary_columns_1[3].metric(
+        "Inserts",
+        f"{summary.get('insert', 0):,}",
+    )
+    summary_columns_1[4].metric(
+        "Replacements",
+        f"{summary.get('replacement_candidate', 0):,}",
+    )
+
+    summary_columns_2 = st.columns(5)
+
+    summary_columns_2[0].metric(
+        "Warnings",
+        f"{summary.get('validation_warnings', 0):,}",
+    )
+    summary_columns_2[1].metric(
+        "Excluded",
+        f"{summary.get('excluded_observations', 0):,}",
+    )
+    summary_columns_2[2].metric(
+        "Source Missing",
+        f"{summary.get('source_missing', 0):,}",
+    )
+    summary_columns_2[3].metric(
+        "Plan-Fatal Issues",
+        f"{summary.get('validation_issues', 0):,}",
+    )
+    summary_columns_2[4].metric(
+        "Duplicate Keys",
+        f"{summary.get('duplicate_keys', 0):,}",
+    )
+
+    if plan.observations:
+        st.markdown("#### Planned Observations")
+
+        observation_rows = []
+
+        for observation in plan.observations:
+            observation_rows.append(
+                {
+                    "Ticker": observation.candidate.ticker,
+                    "Date": (
+                        observation.candidate.date.isoformat()
+                    ),
+                    "Classification": (
+                        observation.classification
+                    ),
+                    "Planned Action": (
+                        observation.planned_action
+                    ),
+                    "Collision": (
+                        "Yes"
+                        if observation.collision
+                        else "No"
+                    ),
+                    "Differing Fields": (
+                        ", ".join(
+                            observation.differing_fields
+                        )
+                        if observation.differing_fields
+                        else "—"
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(observation_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.validation_warnings:
+        st.markdown("#### Warnings")
+
+        warning_rows = [
+            {
+                "Ticker": warning.ticker or "—",
+                "Date": warning.date or "—",
+                "Code": warning.code,
+                "Message": warning.message,
+            }
+            for warning in plan.validation_warnings
+        ]
+
+        st.dataframe(
+            pd.DataFrame(warning_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.excluded_observations:
+        st.markdown("#### Excluded Observations")
+        st.caption(
+            "These returned observations failed row-level validation "
+            "and will not be saved."
+        )
+
+        excluded_rows = []
+
+        for observation in plan.excluded_observations:
+            for issue in observation.issues:
+                excluded_rows.append(
+                    {
+                        "Candidate Index": (
+                            observation.candidate_index
+                        ),
+                        "Ticker": (
+                            observation.ticker or "—"
+                        ),
+                        "Date": (
+                            observation.date or "—"
+                        ),
+                        "Code": issue.code,
+                        "Reason": issue.message,
+                    }
+                )
+
+        st.dataframe(
+            pd.DataFrame(excluded_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.source_missing:
+        st.markdown("#### Source Missing")
+
+        source_missing_rows = [
+            {
+                "Ticker": observation.ticker,
+                "Date": observation.date.isoformat(),
+                "Action": observation.planned_action,
+                "Stored Record Exists": (
+                    "Yes"
+                    if observation.existing is not None
+                    else "No"
+                ),
+            }
+            for observation in plan.source_missing
+        ]
+
+        st.dataframe(
+            pd.DataFrame(source_missing_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.validation_issues:
+        st.markdown("#### Plan-Fatal Issues")
+        st.caption(
+            "These issues block Commit for the entire Preview."
+        )
+
+        issue_rows = [
+            {
+                "Ticker": issue.ticker or "—",
+                "Date": issue.date or "—",
+                "Code": issue.code,
+                "Message": issue.message,
+            }
+            for issue in plan.validation_issues
+        ]
+
+        st.dataframe(
+            pd.DataFrame(issue_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        f"Preview fingerprint: {plan.plan_fingerprint}"
+    )
+
+
+def _render_data_management_mutation_controls(
+    plan: MutationPlan,
+) -> None:
+    """Render explicit confirmation and exact-plan Commit controls."""
+    confirmed_fingerprint = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY
+    )
+
+    is_confirmed = (
+        confirmed_fingerprint == plan.plan_fingerprint
+    )
+
+    if not plan.can_commit:
+        st.error(
+            "This Preview contains plan-fatal validation issues. "
+            "Commit is blocked until a new valid Preview is built."
+        )
+    elif is_confirmed:
+        st.success(
+            "This exact Preview is confirmed and eligible for Commit."
+        )
+    else:
+        st.info(
+            "Review the Preview, then explicitly confirm it before Commit."
+        )
+
+    confirm_column, commit_column, discard_column = (
+        st.columns(3)
+    )
+
+    with confirm_column:
+        confirm_clicked = st.button(
+            "Confirm This Preview",
+            key="data_management_mutation_confirm",
+            type="primary",
+            disabled=not plan.can_commit,
+            use_container_width=True,
+        )
+
+    if confirm_clicked:
+        st.session_state[
+            _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY
+        ] = plan.plan_fingerprint
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+            None,
+        )
+        st.rerun()
+
+    with commit_column:
+        commit_clicked = st.button(
+            "Commit Confirmed Preview",
+            key="data_management_mutation_commit",
+            disabled=(
+                not plan.can_commit
+                or not is_confirmed
+            ),
+            use_container_width=True,
+        )
+
+    if commit_clicked:
+        mutation_manager = DataMutationManager()
+
+        try:
+            result = mutation_manager.commit_plan(
+                plan,
+                confirmed_plan_fingerprint=(
+                    confirmed_fingerprint
+                ),
+            )
+        except Exception as exc:
+            st.session_state[
+                _DATA_MANAGEMENT_MUTATION_ERROR_KEY
+            ] = str(exc)
+
+            st.session_state.pop(
+                _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+                None,
+            )
+
+            st.rerun()
+
+        st.session_state[
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY
+        ] = {
+            "operation": plan.operation,
+            "plan_fingerprint": (
+                plan.plan_fingerprint
+            ),
+            "rows_affected": result.rows_affected,
+            "audit_id": result.audit_id,
+        }
+
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_PLAN_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+            None,
+        )
+
+        st.rerun()
+
+    with discard_column:
+        discard_clicked = st.button(
+            "Discard Preview",
+            key="data_management_mutation_discard",
+            use_container_width=True,
+        )
+
+    if discard_clicked:
+        _discard_data_management_mutation_plan()
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+            None,
+        )
+        st.rerun()
+
+
+def _render_data_management_mutation_workflow() -> None:
+    """
+    Render mutation result/error state and the active Preview when present.
+
+    With no active mutation state this helper is intentionally a no-op.
+    """
+    mutation_result = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_RESULT_KEY
+    )
+
+    mutation_error = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY
+    )
+
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if (
+        mutation_result is None
+        and mutation_error is None
+        and active_plan is None
+    ):
+        return
+
+    if mutation_result is not None:
+        st.markdown("---")
+        st.subheader("Mutation Result")
+        st.success(
+            "The confirmed mutation plan was committed successfully."
+        )
+
+        result_columns = st.columns(3)
+
+        result_columns[0].metric(
+            "Operation",
+            mutation_result["operation"],
+        )
+        result_columns[1].metric(
+            "Rows Affected",
+            f"{mutation_result['rows_affected']:,}",
+        )
+        result_columns[2].metric(
+            "Audit ID",
+            str(mutation_result["audit_id"]),
+        )
+
+        st.caption(
+            "Committed Preview fingerprint: "
+            f"{mutation_result['plan_fingerprint']}"
+        )
+
+    if mutation_error is not None:
+        st.markdown("---")
+        st.subheader("Mutation Error")
+        st.error(mutation_error)
+        st.caption(
+            "Confirmation was cleared. Review the error and rebuild "
+            "the Preview when the backend requires a fresh plan."
+        )
+
+    if active_plan is None:
+        return
+
+    if not isinstance(active_plan, MutationPlan):
+        st.error(
+            "Stored Data Management mutation state is invalid. "
+            "Discard the Preview and build a fresh one."
+        )
+        return
+
+    _render_data_management_mutation_preview(
+        active_plan
+    )
+    _render_data_management_mutation_controls(
+        active_plan
+    )
+
+
 def show_data_management():
     """Render the read-only Data Management database overview."""
     st.title("Data Management")
@@ -11934,6 +12455,8 @@ def show_data_management():
                 "NYSE session. They are inspection warnings, not "
                 "automatic evidence of bad data or a corporate action."
             )
+
+    _render_data_management_mutation_workflow()
 
 
 def main():
