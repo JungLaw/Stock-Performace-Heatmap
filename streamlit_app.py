@@ -29,6 +29,10 @@ from calculations.performance import (
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
+from data.data_acquisition import (
+    DataAcquisitionManager,
+    DataAcquisitionResult,
+)
 from data.data_mutation import DataMutationManager, MutationPlan
 from data.database_manager import DatabaseManager
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
@@ -10329,6 +10333,23 @@ def show_stock_comparison_dashboard():
     # routing behavior when switching between analysis modes.
     st.session_state.scd_analysis_mode = analysis_mode
 
+    if st.session_state.get(
+        _DATA_MANAGEMENT_SCD_STALE_KEY,
+        False,
+    ):
+        rebuild_action = (
+            "Rebuild Time-Series Matrix"
+            if analysis_mode == "Single Indicator"
+            else "Rebuild Comparison Matrix"
+        )
+
+        st.warning(
+            "The underlying authoritative OHLCV data has changed since "
+            "the previous Stock Comparison results were built. "
+            f"Click **{rebuild_action}** to rebuild this view from the "
+            "updated data."
+        )
+
     selected_tickers = _render_scd_ticker_controls()
 
     if selected_tickers:
@@ -10371,6 +10392,10 @@ def show_stock_comparison_dashboard():
             selected_tickers
             and selected_single_indicator
             and st.session_state.get("scd_single_indicator_matrix") is None
+            and not st.session_state.get(
+                _DATA_MANAGEMENT_SCD_STALE_KEY,
+                False,
+            )
         )
 
         if build_single_clicked or should_auto_build_single:
@@ -10393,6 +10418,12 @@ def show_stock_comparison_dashboard():
                     )
                 )
                 st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
+
+            if build_single_clicked:
+                st.session_state.pop(
+                    _DATA_MANAGEMENT_SCD_STALE_KEY,
+                    None,
+                )
 
         single_matrix = st.session_state.get("scd_single_indicator_matrix")
 
@@ -11053,6 +11084,11 @@ def show_stock_comparison_dashboard():
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
 
+        st.session_state.pop(
+            _DATA_MANAGEMENT_SCD_STALE_KEY,
+            None,
+        )
+
         refreshed_matrix = st.session_state.get("scd_signal_matrix")
         refreshed_profile = (
             refreshed_matrix.get("profile", {})
@@ -11130,8 +11166,12 @@ def show_stock_comparison_dashboard():
 
 
 # ---------------------------------------------------------------------
-# Data Management mutation Preview / Confirm / Commit UI helpers
+# Data Management acquisition + mutation UI helpers
 # ---------------------------------------------------------------------
+
+_DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY = (
+    "data_management_acquisition_context"
+)
 
 _DATA_MANAGEMENT_MUTATION_PLAN_KEY = (
     "data_management_mutation_plan"
@@ -11145,7 +11185,356 @@ _DATA_MANAGEMENT_MUTATION_RESULT_KEY = (
 _DATA_MANAGEMENT_MUTATION_ERROR_KEY = (
     "data_management_mutation_error"
 )
+_DATA_MANAGEMENT_SCD_STALE_KEY = (
+    "data_management_scd_stale"
+)
 
+
+def _build_data_management_acquisition_context(
+    result: DataAcquisitionResult,
+) -> Dict[str, Any]:
+    """
+    Build UI-only acquisition context for the active mutation Preview.
+
+    This context preserves the distinction between the administrator's
+    original requested interval and the effective persistence scope passed
+    to DataMutationManager. It is display state only; MutationPlan remains
+    authoritative for Preview / Confirm / Commit.
+    """
+    if not isinstance(
+        result,
+        DataAcquisitionResult,
+    ):
+        raise TypeError(
+            "result must be a DataAcquisitionResult."
+        )
+
+    return {
+        "source": result.source,
+        "requested_tickers": list(
+            result.requested_tickers
+        ),
+        "requested_start_date": (
+            result.requested_start_date.isoformat()
+        ),
+        "requested_end_date": (
+            result.requested_end_date.isoformat()
+        ),
+        "effective_start_date": (
+            result.effective_start_date.isoformat()
+            if result.effective_start_date is not None
+            else None
+        ),
+        "effective_end_date": (
+            result.effective_end_date.isoformat()
+            if result.effective_end_date is not None
+            else None
+        ),
+        "latest_expected_stored_session": (
+            result.latest_expected_stored_session.isoformat()
+        ),
+        "yfinance_end_exclusive": (
+            result.yfinance_end_exclusive.isoformat()
+            if result.yfinance_end_exclusive is not None
+            else None
+        ),
+        "candidate_count": len(
+            result.candidates
+        ),
+        "issues": [
+            {
+                "level": issue.level,
+                "code": issue.code,
+                "message": issue.message,
+                "ticker": issue.ticker,
+            }
+            for issue in result.issues
+        ],
+    }
+
+
+def _render_data_management_acquisition_context(
+    context: Dict[str, Any],
+) -> None:
+    """Render the source request and effective persistence scope."""
+    if not isinstance(
+        context,
+        dict,
+    ):
+        return
+
+    st.caption(
+        "Canonical source: "
+        f"{context.get('source') or '—'}"
+    )
+
+    scope_columns = st.columns(4)
+
+    scope_columns[0].metric(
+        "Requested Start",
+        context.get(
+            "requested_start_date"
+        ) or "—",
+    )
+    scope_columns[1].metric(
+        "Requested End",
+        context.get(
+            "requested_end_date"
+        ) or "—",
+    )
+    scope_columns[2].metric(
+        "Effective Start",
+        context.get(
+            "effective_start_date"
+        ) or "—",
+    )
+    scope_columns[3].metric(
+        "Effective End",
+        context.get(
+            "effective_end_date"
+        ) or "—",
+    )
+
+    persistence_columns = st.columns(3)
+
+    persistence_columns[0].metric(
+        "Latest Expected Stored Session",
+        context.get(
+            "latest_expected_stored_session"
+        ) or "—",
+    )
+    persistence_columns[1].metric(
+        "Source Candidates",
+        f"{context.get('candidate_count', 0):,}",
+    )
+    persistence_columns[2].metric(
+        "yFinance Exclusive End",
+        context.get(
+            "yfinance_end_exclusive"
+        ) or "—",
+    )
+
+    acquisition_issues = context.get(
+        "issues",
+        [],
+    )
+
+    for issue in acquisition_issues:
+        ticker = issue.get(
+            "ticker"
+        )
+
+        prefix = (
+            f"{ticker}: "
+            if ticker
+            else ""
+        )
+
+        message = (
+            prefix
+            + str(
+                issue.get(
+                    "message",
+                    "",
+                )
+            )
+        )
+
+        if issue.get(
+            "level"
+        ) == "error":
+            st.error(message)
+        else:
+            st.warning(message)
+
+
+def _render_data_management_acquisition_controls(
+    *,
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render the first canonical Data Management yFinance acquisition workflow.
+
+    WS8 initially exposes the explicit-range Add operation. Acquisition is
+    read-only. Build Preview passes the exact effective source result into
+    DataMutationManager.build_plan(); mutation remains owned by WS7.
+    """
+    st.markdown("---")
+    st.subheader("Acquire Market Data")
+
+    st.caption(
+        "Acquire canonical daily OHLCV from yFinance and preview the exact "
+        "database actions before anything is saved. Review the preview, "
+        "approve it, then apply the approved changes."
+    )
+
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    acquisition_context = st.session_state.get(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    )
+
+    if active_plan is not None:
+        st.info(
+            "A Database Change Preview is active. Approve and apply it, "
+            "or Cancel Preview, before changing the acquisition request."
+        )
+
+        if isinstance(
+            acquisition_context,
+            dict,
+        ):
+            _render_data_management_acquisition_context(
+                acquisition_context
+            )
+
+        return
+
+    try:
+        default_end_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_end_date = date.today()
+
+    with st.form(
+        "data_management_acquisition_form"
+    ):
+        ticker_input = st.text_input(
+            "Ticker(s)",
+            value="",
+            help=(
+                "Enter one or more ticker symbols separated by commas "
+                "or spaces."
+            ),
+        )
+
+        date_columns = st.columns(2)
+
+        with date_columns[0]:
+            requested_start_date = st.date_input(
+                "Start Date",
+                value=default_end_date,
+            )
+
+        with date_columns[1]:
+            requested_end_date = st.date_input(
+                "End Date",
+                value=default_end_date,
+            )
+
+        build_preview_clicked = (
+            st.form_submit_button(
+                "Preview Database Changes",
+                type="primary",
+                use_container_width=True,
+                help=(
+                    "Fetch the requested yFinance data and compare it with "
+                    "the authoritative database. This does not save or "
+                    "replace any records."
+                ),
+            )
+        )
+
+    if not build_preview_clicked:
+        if isinstance(
+            acquisition_context,
+            dict,
+        ):
+            _render_data_management_acquisition_context(
+                acquisition_context
+            )
+
+        return
+
+    requested_tickers = [
+        ticker
+        for ticker in (
+            str(ticker_input)
+            .replace(",", " ")
+            .split()
+        )
+        if ticker
+    ]
+
+    if not requested_tickers:
+        st.error(
+            "Enter at least one ticker before previewing database changes."
+        )
+        return
+
+    acquisition_manager = (
+        DataAcquisitionManager()
+    )
+
+    try:
+        acquisition_result = (
+            acquisition_manager.acquire_daily_ohlcv(
+                tickers=requested_tickers,
+                requested_start_date=(
+                    requested_start_date
+                ),
+                requested_end_date=(
+                    requested_end_date
+                ),
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to acquire canonical market data: "
+            f"{exc}"
+        )
+        return
+
+    acquisition_context = (
+        _build_data_management_acquisition_context(
+            acquisition_result
+        )
+    )
+
+    st.session_state[
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    ] = acquisition_context
+
+    if not acquisition_result.has_effective_scope:
+        _render_data_management_acquisition_context(
+            acquisition_context
+        )
+        return
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        plan = mutation_manager.build_plan(
+            operation="Add",
+            source=acquisition_result.source,
+            candidates=(
+                acquisition_result.candidates
+            ),
+            requested_tickers=(
+                acquisition_result.requested_tickers
+            ),
+            requested_start_date=(
+                acquisition_result.effective_start_date
+            ),
+            requested_end_date=(
+                acquisition_result.effective_end_date
+            ),
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build Database Change Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
 
 def _set_data_management_mutation_plan(
     plan: MutationPlan,
@@ -11194,6 +11583,157 @@ def _discard_data_management_mutation_plan() -> None:
         _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
         None,
     )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+        None,
+    )
+
+
+def _render_data_management_source_data_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render bounded source-data evidence from the exact materialized Preview.
+
+    The displayed/exported rows come only from MutationPlan observations.
+    This helper does not refetch source data, read SQLite, or reinterpret
+    mutation actions.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    source_rows = [
+        observation.candidate.to_dict()
+        for observation in plan.observations
+    ]
+
+    if not source_rows:
+        return
+
+    source_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    source_columns = [
+        "Ticker",
+        "Date",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Adj Close",
+        "Volume",
+    ]
+
+    source_df = pd.DataFrame(
+        source_rows,
+        columns=source_columns,
+    )
+
+    with st.expander(
+        "Incoming Source Data",
+        expanded=False,
+    ):
+        st.caption(
+            "Inspect the canonical source records contained in this exact "
+            "Database Change Preview. These are the eligible source rows "
+            "being evaluated for the actions shown below. Rows Not Eligible "
+            "are listed separately and are not included here."
+        )
+
+        source_tickers = list(
+            dict.fromkeys(
+                source_df["Ticker"].tolist()
+            )
+        )
+
+        for ticker in source_tickers:
+            ticker_df = (
+                source_df.loc[
+                    source_df["Ticker"] == ticker,
+                    source_columns,
+                ]
+                .sort_values("Date")
+                .reset_index(drop=True)
+            )
+
+            ticker_count = len(
+                ticker_df
+            )
+
+            st.markdown(
+                f"**{ticker} — "
+                f"{ticker_count:,} eligible source record(s)**"
+            )
+
+            if ticker_count <= 6:
+                display_df = ticker_df
+                st.caption(
+                    "Showing all eligible source records "
+                    "for this ticker."
+                )
+            else:
+                display_df = pd.concat(
+                    [
+                        ticker_df.head(3),
+                        ticker_df.tail(3),
+                    ],
+                    ignore_index=True,
+                )
+                st.caption(
+                    "Showing the first 3 and last 3 eligible source "
+                    "records for this ticker. Download the CSV below "
+                    "to inspect the complete source dataset."
+                )
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        requested_start = (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "start"
+        )
+        requested_end = (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "end"
+        )
+
+        csv_bytes = source_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "Download All Source Records CSV",
+            data=csv_bytes,
+            file_name=(
+                "data_management_source_"
+                f"{requested_start}_to_{requested_end}.csv"
+            ),
+            mime="text/csv",
+            key=(
+                "data_management_source_preview_csv_"
+                f"{plan.plan_fingerprint[:12]}"
+            ),
+            help=(
+                "Download every eligible canonical source record contained "
+                "in this exact Database Change Preview, not just the rows "
+                "shown in the first/last sample."
+            ),
+        )
 
 
 def _render_data_management_mutation_preview(
@@ -11208,12 +11748,82 @@ def _render_data_management_mutation_preview(
 
     summary = plan.summary()
 
+    new_count = int(
+        summary.get("new", 0) or 0
+    )
+    same_count = int(
+        summary.get("unchanged", 0) or 0
+    )
+    different_count = int(
+        summary.get("changed", 0) or 0
+    )
+    insert_count = int(
+        summary.get("insert", 0) or 0
+    )
+    replacement_count = int(
+        summary.get(
+            "replacement_candidate",
+            0,
+        ) or 0
+    )
+    preserve_count = int(
+        summary.get(
+            "preserve_existing",
+            0,
+        ) or 0
+    )
+    no_change_count = int(
+        summary.get(
+            "no_change",
+            0,
+        ) or 0
+    )
+    warning_count = int(
+        summary.get(
+            "validation_warnings",
+            0,
+        ) or 0
+    )
+    excluded_count = int(
+        summary.get(
+            "excluded_observations",
+            0,
+        ) or 0
+    )
+    source_missing_count = int(
+        summary.get(
+            "source_missing",
+            0,
+        ) or 0
+    )
+    blocking_count = int(
+        summary.get(
+            "validation_issues",
+            0,
+        ) or 0
+    )
+    duplicate_count = int(
+        summary.get(
+            "duplicate_keys",
+            0,
+        ) or 0
+    )
+
+    compared_count = (
+        new_count
+        + same_count
+        + different_count
+    )
+
     st.markdown("---")
-    st.subheader("Mutation Preview")
+    st.subheader("Database Change Preview")
     st.caption(
-        "Review the exact materialized plan before confirmation. "
-        "Commit uses this Preview as-is; it does not refetch or "
-        "reinterpret the originating request."
+        "Review exactly what Data Management would do to the authoritative "
+        "OHLCV database. Nothing is saved by this preview. First approve "
+        "these exact changes; then use Apply Approved Changes to execute "
+        "only the actions shown below. For an Add operation, existing "
+        "records are never overwritten; use a replacement operation when "
+        "you intend to replace stored values."
     )
 
     request_columns = st.columns(4)
@@ -11247,7 +11857,7 @@ def _render_data_management_mutation_preview(
     )
 
     st.caption(
-        f"Requested range: {requested_start} through {requested_end}"
+        f"Effective database range: {requested_start} through {requested_end}"
     )
 
     if plan.requested_tickers:
@@ -11257,78 +11867,192 @@ def _render_data_management_mutation_preview(
         ):
             st.write(", ".join(plan.requested_tickers))
 
-    st.markdown("#### Preview Summary")
+    consequence_text = (
+        f"{compared_count:,} eligible source observations were compared "
+        f"with stored data: {new_count:,} new, {same_count:,} the same, "
+        f"and {different_count:,} different. "
+        f"If applied, {insert_count:,} records will be added, "
+        f"{replacement_count:,} existing records will be replaced, "
+        f"{preserve_count:,} differing existing records will be kept "
+        f"unchanged, and {no_change_count:,} matching records require "
+        "no change."
+    )
+
+    if excluded_count:
+        consequence_text += (
+            f" {excluded_count:,} returned source rows are not eligible "
+            "and will not be applied."
+        )
+
+    if source_missing_count:
+        consequence_text += (
+            f" {source_missing_count:,} expected sessions were missing "
+            "from the source; Data Management will not fabricate or "
+            "delete those records."
+        )
+
+    if blocking_count or duplicate_count:
+        consequence_text += (
+            " This preview contains blocking issues and cannot be applied "
+            "until a new valid preview is built."
+        )
+
+    st.info(
+        "**What this preview will do:** "
+        + consequence_text
+    )
+
+    st.markdown("#### Change Summary")
 
     summary_columns_1 = st.columns(5)
 
     summary_columns_1[0].metric(
-        "New",
-        f"{summary.get('new', 0):,}",
+        "New Records",
+        f"{new_count:,}",
+        help=(
+            "No stored record currently exists for this ticker and date."
+        ),
     )
     summary_columns_1[1].metric(
-        "Unchanged",
-        f"{summary.get('unchanged', 0):,}",
+        "Same as Stored",
+        f"{same_count:,}",
+        help=(
+            "The source OHLCV values exactly match the record already "
+            "stored for the same ticker and date."
+        ),
     )
     summary_columns_1[2].metric(
-        "Changed",
-        f"{summary.get('changed', 0):,}",
+        "Different from Stored",
+        f"{different_count:,}",
+        help=(
+            "The ticker and date already exist, but one or more stored "
+            "OHLCV values differ from the newly acquired source values. "
+            "This does not mean the database has already been changed."
+        ),
     )
     summary_columns_1[3].metric(
-        "Inserts",
-        f"{summary.get('insert', 0):,}",
+        "Records to Add",
+        f"{insert_count:,}",
+        help=(
+            "New records that will be inserted if this preview is "
+            "approved and applied."
+        ),
     )
     summary_columns_1[4].metric(
-        "Replacements",
-        f"{summary.get('replacement_candidate', 0):,}",
+        "Records to Replace",
+        f"{replacement_count:,}",
+        help=(
+            "Existing records explicitly proposed for replacement if "
+            "this preview is approved and applied."
+        ),
     )
 
     summary_columns_2 = st.columns(5)
 
     summary_columns_2[0].metric(
         "Warnings",
-        f"{summary.get('validation_warnings', 0):,}",
+        f"{warning_count:,}",
+        help=(
+            "Items that deserve review but do not, by themselves, block "
+            "the database operation."
+        ),
     )
     summary_columns_2[1].metric(
-        "Excluded",
-        f"{summary.get('excluded_observations', 0):,}",
+        "Rows Not Eligible",
+        f"{excluded_count:,}",
+        help=(
+            "Source rows that were returned but failed required validation. "
+            "They are excluded and will not be saved."
+        ),
     )
     summary_columns_2[2].metric(
-        "Source Missing",
-        f"{summary.get('source_missing', 0):,}",
+        "Missing From Source",
+        f"{source_missing_count:,}",
+        help=(
+            "Expected NYSE sessions for which the source returned no row. "
+            "Data Management does not fabricate these observations or use "
+            "their absence as permission to delete stored data."
+        ),
     )
     summary_columns_2[3].metric(
-        "Plan-Fatal Issues",
-        f"{summary.get('validation_issues', 0):,}",
+        "Blocking Issues",
+        f"{blocking_count:,}",
+        help=(
+            "Problems that prevent the entire preview from being applied. "
+            "A new valid preview must be built before database changes can "
+            "be made."
+        ),
     )
     summary_columns_2[4].metric(
-        "Duplicate Keys",
-        f"{summary.get('duplicate_keys', 0):,}",
+        "Duplicate Incoming Records",
+        f"{duplicate_count:,}",
+        help=(
+            "The same ticker/date appears more than once in the incoming "
+            "source set. Duplicate incoming identities block the preview "
+            "because Data Management cannot safely choose between them."
+        ),
+    )
+
+    _render_data_management_source_data_preview(
+        plan
     )
 
     if plan.observations:
-        st.markdown("#### Planned Observations")
+        st.markdown("#### Record Comparison & Actions")
+        st.caption(
+            "Each row shows how the acquired source observation compares "
+            "with the authoritative stored record and what Data Management "
+            "would actually do if the preview is applied."
+        )
+
+        classification_labels = {
+            "new": "New",
+            "unchanged": "Same",
+            "changed": "Different",
+        }
+
+        action_labels = {
+            "insert": "Add Record",
+            "no_change": "No Change",
+            "preserve_existing": "Keep Stored Record",
+            "replacement_candidate": "Replace Stored Record",
+        }
 
         observation_rows = []
 
         for observation in plan.observations:
+            classification_key = str(
+                observation.classification
+            ).strip().lower()
+
+            action_key = str(
+                observation.planned_action
+            ).strip().lower()
+
             observation_rows.append(
                 {
                     "Ticker": observation.candidate.ticker,
                     "Date": (
                         observation.candidate.date.isoformat()
                     ),
-                    "Classification": (
-                        observation.classification
+                    "Compared with Stored Data": (
+                        classification_labels.get(
+                            classification_key,
+                            observation.classification,
+                        )
                     ),
-                    "Planned Action": (
-                        observation.planned_action
+                    "What Will Happen": (
+                        action_labels.get(
+                            action_key,
+                            observation.planned_action,
+                        )
                     ),
-                    "Collision": (
+                    "Existing Record": (
                         "Yes"
                         if observation.collision
                         else "No"
                     ),
-                    "Differing Fields": (
+                    "Fields That Differ": (
                         ", ".join(
                             observation.differing_fields
                         )
@@ -11342,6 +12066,47 @@ def _render_data_management_mutation_preview(
             pd.DataFrame(observation_rows),
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "Compared with Stored Data": (
+                    st.column_config.TextColumn(
+                        "Compared with Stored Data",
+                        help=(
+                            "New: no stored ticker/date exists. "
+                            "Same: source and stored OHLCV values match. "
+                            "Different: the ticker/date exists but one or "
+                            "more OHLCV values differ."
+                        ),
+                    )
+                ),
+                "What Will Happen": (
+                    st.column_config.TextColumn(
+                        "What Will Happen",
+                        help=(
+                            "The exact database action authorized by this "
+                            "preview: Add Record, No Change, Keep Stored "
+                            "Record, or Replace Stored Record."
+                        ),
+                    )
+                ),
+                "Existing Record": (
+                    st.column_config.TextColumn(
+                        "Existing Record",
+                        help=(
+                            "Yes means the authoritative database already "
+                            "contains this ticker/date. This is not an error."
+                        ),
+                    )
+                ),
+                "Fields That Differ": (
+                    st.column_config.TextColumn(
+                        "Fields That Differ",
+                        help=(
+                            "The stored OHLCV fields whose values differ "
+                            "from the newly acquired source observation."
+                        ),
+                    )
+                ),
+            },
         )
 
     if plan.validation_warnings:
@@ -11364,10 +12129,11 @@ def _render_data_management_mutation_preview(
         )
 
     if plan.excluded_observations:
-        st.markdown("#### Excluded Observations")
+        st.markdown("#### Rows Not Eligible")
         st.caption(
-            "These returned observations failed row-level validation "
-            "and will not be saved."
+            "These source rows were returned, but failed required "
+            "row-level validation. They are excluded from the database "
+            "actions and will not be saved."
         )
 
         excluded_rows = []
@@ -11397,7 +12163,13 @@ def _render_data_management_mutation_preview(
         )
 
     if plan.source_missing:
-        st.markdown("#### Source Missing")
+        st.markdown("#### Missing From Source")
+        st.caption(
+            "These expected NYSE sessions were not returned by the source. "
+            "Data Management will not fabricate missing observations and "
+            "will not delete stored data merely because the source omitted "
+            "a session."
+        )
 
         source_missing_rows = [
             {
@@ -11420,9 +12192,11 @@ def _render_data_management_mutation_preview(
         )
 
     if plan.validation_issues:
-        st.markdown("#### Plan-Fatal Issues")
+        st.markdown("#### Blocking Issues")
         st.caption(
-            "These issues block Commit for the entire Preview."
+            "These problems prevent the entire preview from being applied. "
+            "Correct the request and build a new valid preview before "
+            "making database changes."
         )
 
         issue_rows = [
@@ -11442,8 +12216,77 @@ def _render_data_management_mutation_preview(
         )
 
     st.caption(
-        f"Preview fingerprint: {plan.plan_fingerprint}"
+        "Preview ID: "
+        f"{plan.plan_fingerprint} "
+        "— used internally to bind approval to this exact preview."
     )
+
+
+def _invalidate_data_derived_session_state_after_mutation(
+    *,
+    rows_affected: int,
+) -> bool:
+    """
+    Invalidate session-derived dashboard state after authoritative OHLCV changes.
+
+    This runs only after DataMutationManager.commit_plan() has succeeded.
+    It does not touch database state, source acquisition, indicator formulas,
+    scoring semantics, ticker universes, or user selections.
+
+    Returns True when downstream state was invalidated.
+    """
+    affected = int(
+        rows_affected or 0
+    )
+
+    if affected <= 0:
+        return False
+
+    # Performance Heatmaps / Volume:
+    # Clearing the completed request state causes the existing dashboard
+    # path to fetch/rebuild from current authoritative data on next use.
+    st.session_state.performance_data = None
+    st.session_state.last_update = None
+    st.session_state.performance_request_signature = None
+
+    st.session_state.volume_data = None
+    st.session_state.volume_last_update = None
+    st.session_state.volume_request_signature = None
+
+    # Technical Analysis:
+    # Retain user controls, but retire analysis/results derived from the
+    # superseded OHLCV. Existing compute gating will rebuild on next use.
+    for key in (
+        "technical_analysis_data",
+        "technical_analysis_ticker",
+        "technical_analysis_timestamp",
+        "technical_analysis_rolling_days",
+        "technical_analysis_save_to_db",
+        "price_extremes_data",
+        "rh_last_params",
+        "rh_last_signals",
+    ):
+        st.session_state.pop(
+            key,
+            None,
+        )
+
+    # Stock Comparison:
+    # Clear all session-only data-derived caches plus rendered matrices.
+    # The stale flag intentionally suppresses Single Indicator's normal
+    # first-load auto-build so the administrator explicitly rebuilds.
+    _clear_scd_session_cache()
+
+    st.session_state.scd_signal_matrix = None
+    st.session_state.scd_matrix_last_run = None
+    st.session_state.scd_single_indicator_matrix = None
+    st.session_state.scd_single_indicator_matrix_last_run = None
+
+    st.session_state[
+        _DATA_MANAGEMENT_SCD_STALE_KEY
+    ] = True
+
+    return True
 
 
 def _render_data_management_mutation_controls(
@@ -11460,16 +12303,17 @@ def _render_data_management_mutation_controls(
 
     if not plan.can_commit:
         st.error(
-            "This Preview contains plan-fatal validation issues. "
-            "Commit is blocked until a new valid Preview is built."
+            "This preview contains blocking issues. Changes cannot be "
+            "applied until a new valid preview is built."
         )
     elif is_confirmed:
         st.success(
-            "This exact Preview is confirmed and eligible for Commit."
+            "These exact changes are approved and ready to apply."
         )
     else:
         st.info(
-            "Review the Preview, then explicitly confirm it before Commit."
+            "Review the database changes above, then approve them before "
+            "applying anything to the authoritative database."
         )
 
     confirm_column, commit_column, discard_column = (
@@ -11478,11 +12322,16 @@ def _render_data_management_mutation_controls(
 
     with confirm_column:
         confirm_clicked = st.button(
-            "Confirm This Preview",
+            "Approve These Changes",
             key="data_management_mutation_confirm",
             type="primary",
             disabled=not plan.can_commit,
             use_container_width=True,
+            help=(
+                "Approve this exact Database Change Preview. Approval does "
+                "not change the database. If a new preview is built, this "
+                "approval no longer applies."
+            ),
         )
 
     if confirm_clicked:
@@ -11497,13 +12346,19 @@ def _render_data_management_mutation_controls(
 
     with commit_column:
         commit_clicked = st.button(
-            "Commit Confirmed Preview",
+            "Apply Approved Changes",
             key="data_management_mutation_commit",
             disabled=(
                 not plan.can_commit
                 or not is_confirmed
             ),
             use_container_width=True,
+            help=(
+                "Apply only the approved actions shown in this preview to "
+                "the authoritative OHLCV database. This is the step that "
+                "actually inserts or replaces records when the approved "
+                "plan calls for those actions."
+            ),
         )
 
     if commit_clicked:
@@ -11528,6 +12383,12 @@ def _render_data_management_mutation_controls(
 
             st.rerun()
 
+        derived_state_invalidated = (
+            _invalidate_data_derived_session_state_after_mutation(
+                rows_affected=result.rows_affected,
+            )
+        )
+
         st.session_state[
             _DATA_MANAGEMENT_MUTATION_RESULT_KEY
         ] = {
@@ -11537,6 +12398,9 @@ def _render_data_management_mutation_controls(
             ),
             "rows_affected": result.rows_affected,
             "audit_id": result.audit_id,
+            "derived_state_invalidated": (
+                derived_state_invalidated
+            ),
         }
 
         st.session_state.pop(
@@ -11551,14 +12415,22 @@ def _render_data_management_mutation_controls(
             _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
             None,
         )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+            None,
+        )
 
         st.rerun()
 
     with discard_column:
         discard_clicked = st.button(
-            "Discard Preview",
+            "Cancel Preview",
             key="data_management_mutation_discard",
             use_container_width=True,
+            help=(
+                "Discard this preview and its approval so you can change "
+                "the acquisition request. No database changes are made."
+            ),
         )
 
     if discard_clicked:
@@ -11597,9 +12469,9 @@ def _render_data_management_mutation_workflow() -> None:
 
     if mutation_result is not None:
         st.markdown("---")
-        st.subheader("Mutation Result")
+        st.subheader("Database Update Result")
         st.success(
-            "The confirmed mutation plan was committed successfully."
+            "The approved database changes were applied successfully."
         )
 
         result_columns = st.columns(3)
@@ -11617,6 +12489,27 @@ def _render_data_management_mutation_workflow() -> None:
             str(mutation_result["audit_id"]),
         )
 
+        if mutation_result.get(
+            "derived_state_invalidated"
+        ):
+            st.info(
+                "Authoritative OHLCV changed. Cached or previously rendered "
+                "dashboard results derived from the older data were cleared. "
+                "Performance and Technical Analysis will refresh through their "
+                "existing workflows; Stock Comparison will ask you to rebuild "
+                "its matrix."
+            )
+        elif int(
+            mutation_result.get(
+                "rows_affected",
+                0,
+            ) or 0
+        ) == 0:
+            st.caption(
+                "No OHLCV rows changed, so downstream dashboard state "
+                "did not need to be invalidated."
+            )
+
         st.caption(
             "Committed Preview fingerprint: "
             f"{mutation_result['plan_fingerprint']}"
@@ -11624,11 +12517,11 @@ def _render_data_management_mutation_workflow() -> None:
 
     if mutation_error is not None:
         st.markdown("---")
-        st.subheader("Mutation Error")
+        st.subheader("Database Update Error")
         st.error(mutation_error)
         st.caption(
-            "Confirmation was cleared. Review the error and rebuild "
-            "the Preview when the backend requires a fresh plan."
+            "Approval was cleared. Review the error and build a fresh "
+            "Database Change Preview when required."
         )
 
     if active_plan is None:
@@ -11650,12 +12543,48 @@ def _render_data_management_mutation_workflow() -> None:
 
 
 def show_data_management():
-    """Render the read-only Data Management database overview."""
+    """Render Data Management inspection and controlled mutation workflows."""
     st.title("Data Management")
     st.caption(
-        "Inspect stored OHLCV coverage and configured universe membership. "
-        "Read-only inspection does not acquire or modify market data."
+        "Inspect authoritative OHLCV coverage and use controlled "
+        "Preview → Approve → Apply workflows to manage stored market data."
     )
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        audit_status = (
+            mutation_manager.get_audit_schema_status()
+        )
+
+        if not audit_status.exists:
+            audit_status = (
+                mutation_manager.initialize_audit_schema()
+            )
+
+        if not audit_status.compatible:
+            missing_columns = ", ".join(
+                audit_status.missing_columns
+            )
+
+            st.error(
+                "Data Management audit infrastructure is incompatible. "
+                "Database changes are unavailable until the audit schema "
+                "is corrected."
+                + (
+                    f" Missing required column(s): {missing_columns}."
+                    if missing_columns
+                    else ""
+                )
+            )
+            return
+
+    except Exception as exc:
+        st.error(
+            "Unable to initialize Data Management audit infrastructure: "
+            f"{exc}"
+        )
+        return
 
     manager = DatabaseManager()
 
@@ -12455,6 +13384,14 @@ def show_data_management():
                 "NYSE session. They are inspection warnings, not "
                 "automatic evidence of bad data or a corporate action."
             )
+
+    _render_data_management_acquisition_controls(
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
 
     _render_data_management_mutation_workflow()
 
