@@ -10420,10 +10420,20 @@ def show_stock_comparison_dashboard():
                 st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
 
             if build_single_clicked:
+                stale_rebuild_completed = bool(
+                    st.session_state.get(
+                        _DATA_MANAGEMENT_SCD_STALE_KEY,
+                        False,
+                    )
+                )
+
                 st.session_state.pop(
                     _DATA_MANAGEMENT_SCD_STALE_KEY,
                     None,
                 )
+
+                if stale_rebuild_completed:
+                    st.rerun()
 
         single_matrix = st.session_state.get("scd_single_indicator_matrix")
 
@@ -11084,10 +11094,20 @@ def show_stock_comparison_dashboard():
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
 
+        stale_rebuild_completed = bool(
+            st.session_state.get(
+                _DATA_MANAGEMENT_SCD_STALE_KEY,
+                False,
+            )
+        )
+
         st.session_state.pop(
             _DATA_MANAGEMENT_SCD_STALE_KEY,
             None,
         )
+
+        if stale_rebuild_completed:
+            st.rerun()
 
         refreshed_matrix = st.session_state.get("scd_signal_matrix")
         refreshed_profile = (
@@ -11377,18 +11397,30 @@ def _render_data_management_acquisition_controls(
     )
 
     if active_plan is not None:
-        st.info(
-            "A Database Change Preview is active. Approve and apply it, "
-            "or Cancel Preview, before changing the acquisition request."
+        context_workflow = (
+            acquisition_context.get(
+                "workflow"
+            )
+            if isinstance(
+                acquisition_context,
+                dict,
+            )
+            else None
         )
 
-        if isinstance(
-            acquisition_context,
-            dict,
-        ):
-            _render_data_management_acquisition_context(
-                acquisition_context
+        if context_workflow != "Historical Data Reconciliation":
+            st.info(
+                "A Database Change Preview is active. Approve and apply it, "
+                "or Cancel Preview, before changing the acquisition request."
             )
+
+            if isinstance(
+                acquisition_context,
+                dict,
+            ):
+                _render_data_management_acquisition_context(
+                    acquisition_context
+                )
 
         return
 
@@ -11494,6 +11526,14 @@ def _render_data_management_acquisition_controls(
         )
     )
 
+    acquisition_context[
+        "workflow"
+    ] = "Acquire Market Data"
+
+    acquisition_context[
+        "ui_operation"
+    ] = "Add Market Data"
+
     st.session_state[
         _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
     ] = acquisition_context
@@ -11535,6 +11575,445 @@ def _render_data_management_acquisition_controls(
     )
 
     st.rerun()
+
+
+def _sync_data_management_replace_range_end_date() -> None:
+    """
+    Reset Replace-a-Date-Range End Date to the newly selected Start Date.
+
+    This is UI session state only. The user may subsequently extend End Date
+    before building the reconciliation Preview.
+    """
+    start_key = (
+        "data_management_replace_"
+        "range_start_date"
+    )
+    end_key = (
+        "data_management_replace_"
+        "range_end_date"
+    )
+
+    selected_start_date = (
+        st.session_state.get(
+            start_key
+        )
+    )
+
+    if selected_start_date is not None:
+        st.session_state[
+            end_key
+        ] = selected_start_date
+
+
+def _render_data_management_reconciliation_controls(
+    *,
+    inventory: list[Dict[str, Any]],
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render explicit historical yFinance reconciliation workflows.
+
+    User-facing operations:
+    - Replace a Date Range
+        One or more tickers share one explicit requested date range.
+        Backend MutationPlan operation: Replace Range.
+
+    - Refresh Existing Coverage
+        One stored ticker uses its existing First Date through Last Date.
+        Backend MutationPlan operation: Refresh Existing Coverage.
+
+    Acquisition remains read-only. This helper builds and stores one exact
+    MutationPlan; existing Preview / Approve / Apply controls own mutation.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    acquisition_context = st.session_state.get(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    )
+
+    if active_plan is not None:
+        context_workflow = (
+            acquisition_context.get(
+                "workflow"
+            )
+            if isinstance(
+                acquisition_context,
+                dict,
+            )
+            else None
+        )
+
+        if context_workflow == "Historical Data Reconciliation":
+            st.markdown("---")
+            st.subheader(
+                "Historical Data Reconciliation"
+            )
+            st.info(
+                "A reconciliation Preview is active. Review and approve it, "
+                "apply the approved changes, or Cancel Preview before "
+                "starting another reconciliation request."
+            )
+
+            _render_data_management_acquisition_context(
+                acquisition_context
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader(
+        "Historical Data Reconciliation"
+    )
+
+    st.caption(
+        "Compare fresh canonical yFinance history with authoritative stored "
+        "OHLCV before replacing anything. Nothing is changed until the exact "
+        "preview is approved and applied."
+    )
+
+    operation_labels = [
+        "Replace a Date Range",
+        "Refresh Existing Coverage",
+    ]
+
+    selected_operation = st.radio(
+        "Reconciliation Operation",
+        options=operation_labels,
+        horizontal=True,
+        key="data_management_reconciliation_operation",
+        help=(
+            "Replace a Date Range uses one explicit shared date range for "
+            "one or more tickers. Refresh Existing Coverage checks one stored "
+            "ticker across its entire current First Date through Last Date."
+        ),
+    )
+
+    try:
+        default_end_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_end_date = date.today()
+
+    requested_tickers: list[str] = []
+    requested_start_date: Optional[date] = None
+    requested_end_date: Optional[date] = None
+    backend_operation: Optional[str] = None
+    preview_clicked = False
+
+    if selected_operation == "Replace a Date Range":
+        backend_operation = "Replace Range"
+
+        start_date_key = (
+            "data_management_replace_"
+            "range_start_date"
+        )
+        end_date_key = (
+            "data_management_replace_"
+            "range_end_date"
+        )
+
+        if start_date_key not in st.session_state:
+            st.session_state[
+                start_date_key
+            ] = default_end_date
+
+        if end_date_key not in st.session_state:
+            st.session_state[
+                end_date_key
+            ] = st.session_state[
+                start_date_key
+            ]
+
+        ticker_input = st.text_input(
+            "Ticker(s)",
+            value="",
+            key=(
+                "data_management_replace_"
+                "range_tickers"
+            ),
+            help=(
+                "Enter one or more ticker symbols separated by commas "
+                "or spaces. Every ticker in this request uses the same "
+                "Start Date and End Date."
+            ),
+        )
+
+        date_columns = st.columns(2)
+
+        with date_columns[0]:
+            range_start_date = st.date_input(
+                "Start Date",
+                key=start_date_key,
+                on_change=(
+                    _sync_data_management_replace_range_end_date
+                ),
+            )
+
+        with date_columns[1]:
+            range_end_date = st.date_input(
+                "End Date",
+                key=end_date_key,
+            )
+
+        preview_clicked = st.button(
+            "Preview Changes",
+            key=(
+                "data_management_replace_"
+                "range_preview"
+            ),
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Fetch fresh canonical yFinance history for this "
+                "shared ticker/date scope and compare it with stored "
+                "OHLCV. Nothing is replaced by this preview."
+            ),
+        )
+
+        if preview_clicked:
+            requested_tickers = [
+                ticker
+                for ticker in (
+                    str(ticker_input)
+                    .replace(",", " ")
+                    .split()
+                )
+                if ticker
+            ]
+            requested_start_date = (
+                range_start_date
+            )
+            requested_end_date = (
+                range_end_date
+            )
+
+    else:
+        backend_operation = (
+            "Refresh Existing Coverage"
+        )
+
+        inventory_by_ticker = {
+            str(
+                row.get(
+                    "ticker",
+                    "",
+                )
+            ).strip().upper(): row
+            for row in inventory
+            if str(
+                row.get(
+                    "ticker",
+                    "",
+                )
+            ).strip()
+        }
+
+        stored_tickers = sorted(
+            inventory_by_ticker
+        )
+
+        if not stored_tickers:
+            st.warning(
+                "No stored tickers are available for historical "
+                "reconciliation."
+            )
+            return
+
+        selected_ticker = st.selectbox(
+            "Stored Ticker",
+            options=stored_tickers,
+            key=(
+                "data_management_reconcile_"
+                "stored_ticker"
+            ),
+            help=(
+                "Choose one ticker already stored in daily_prices. "
+                "Its complete current First Date through Last Date "
+                "will be reconciled."
+            ),
+        )
+
+        selected_inventory = (
+            inventory_by_ticker[
+                selected_ticker
+            ]
+        )
+
+        coverage_columns = st.columns(3)
+
+        coverage_columns[0].metric(
+            "Stored Records",
+            f"{int(selected_inventory.get('records', 0) or 0):,}",
+        )
+        coverage_columns[1].metric(
+            "First Stored Date",
+            selected_inventory.get(
+                "first_date"
+            ) or "—",
+        )
+        coverage_columns[2].metric(
+            "Last Stored Date",
+            selected_inventory.get(
+                "last_date"
+            ) or "—",
+        )
+
+        st.caption(
+            "This operation automatically compares fresh canonical "
+            "yFinance history across the ticker's entire currently stored "
+            "date range. The date boundaries are not manually editable."
+        )
+
+        preview_clicked = st.button(
+            "Preview Changes",
+            key=(
+                "data_management_reconcile_"
+                "stored_history_preview"
+            ),
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Fetch fresh canonical yFinance history from the ticker's "
+                "First Stored Date through Last Stored Date and compare it "
+                "with the authoritative database. Nothing is replaced by "
+                "this preview."
+            ),
+        )
+
+        if preview_clicked:
+            requested_tickers = [
+                selected_ticker
+            ]
+
+            try:
+                requested_start_date = (
+                    date.fromisoformat(
+                        str(
+                            selected_inventory[
+                                "first_date"
+                            ]
+                        )
+                    )
+                )
+                requested_end_date = (
+                    date.fromisoformat(
+                        str(
+                            selected_inventory[
+                                "last_date"
+                            ]
+                        )
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored coverage range for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+    if not preview_clicked:
+        return
+
+    if not requested_tickers:
+        st.error(
+            "Enter at least one ticker before previewing changes."
+        )
+        return
+
+    if (
+        requested_start_date is None
+        or requested_end_date is None
+    ):
+        st.error(
+            "A valid Start Date and End Date are required before "
+            "previewing changes."
+        )
+        return
+
+    acquisition_manager = (
+        DataAcquisitionManager()
+    )
+
+    try:
+        acquisition_result = (
+            acquisition_manager.acquire_daily_ohlcv(
+                tickers=requested_tickers,
+                requested_start_date=(
+                    requested_start_date
+                ),
+                requested_end_date=(
+                    requested_end_date
+                ),
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to acquire canonical market data for reconciliation: "
+            f"{exc}"
+        )
+        return
+
+    acquisition_context = (
+        _build_data_management_acquisition_context(
+            acquisition_result
+        )
+    )
+
+    acquisition_context[
+        "workflow"
+    ] = "Historical Data Reconciliation"
+
+    acquisition_context[
+        "ui_operation"
+    ] = selected_operation
+
+    st.session_state[
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    ] = acquisition_context
+
+    if not acquisition_result.has_effective_scope:
+        _render_data_management_acquisition_context(
+            acquisition_context
+        )
+        return
+
+    mutation_manager = (
+        DataMutationManager()
+    )
+
+    try:
+        plan = mutation_manager.build_plan(
+            operation=backend_operation,
+            source=acquisition_result.source,
+            candidates=(
+                acquisition_result.candidates
+            ),
+            requested_tickers=(
+                acquisition_result.requested_tickers
+            ),
+            requested_start_date=(
+                acquisition_result.effective_start_date
+            ),
+            requested_end_date=(
+                acquisition_result.effective_end_date
+            ),
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build reconciliation Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
 
 def _set_data_management_mutation_plan(
     plan: MutationPlan,
@@ -11736,6 +12215,202 @@ def _render_data_management_source_data_preview(
         )
 
 
+def _render_data_management_stored_vs_proposed_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render exact stored-versus-proposed values for replacement candidates.
+
+    Every displayed/exported value comes from the already-materialized
+    MutationPlan. This helper does not refetch source data, reread SQLite,
+    rebuild the plan, or reinterpret mutation actions.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    replacement_observations = [
+        observation
+        for observation in plan.observations
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "replacement_candidate"
+            and observation.existing is not None
+        )
+    ]
+
+    if not replacement_observations:
+        return
+
+    comparison_rows = []
+
+    for observation in replacement_observations:
+        stored = observation.existing.to_dict()
+        proposed = observation.candidate.to_dict()
+
+        comparison_rows.append(
+            {
+                "Ticker": observation.candidate.ticker,
+                "Date": observation.candidate.date.isoformat(),
+                "Stored Open": stored["Open"],
+                "Proposed Open": proposed["Open"],
+                "Stored High": stored["High"],
+                "Proposed High": proposed["High"],
+                "Stored Low": stored["Low"],
+                "Proposed Low": proposed["Low"],
+                "Stored Close": stored["Close"],
+                "Proposed Close": proposed["Close"],
+                "Stored Adj Close": stored["Adj Close"],
+                "Proposed Adj Close": proposed["Adj Close"],
+                "Stored Volume": stored["Volume"],
+                "Proposed Volume": proposed["Volume"],
+                "Fields That Differ": (
+                    ", ".join(
+                        observation.differing_fields
+                    )
+                    if observation.differing_fields
+                    else "—"
+                ),
+            }
+        )
+
+    comparison_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    comparison_columns = [
+        "Ticker",
+        "Date",
+        "Stored Open",
+        "Proposed Open",
+        "Stored High",
+        "Proposed High",
+        "Stored Low",
+        "Proposed Low",
+        "Stored Close",
+        "Proposed Close",
+        "Stored Adj Close",
+        "Proposed Adj Close",
+        "Stored Volume",
+        "Proposed Volume",
+        "Fields That Differ",
+    ]
+
+    comparison_df = pd.DataFrame(
+        comparison_rows,
+        columns=comparison_columns,
+    )
+
+    st.markdown(
+        "#### Preview Changes — Stored vs Proposed"
+    )
+    st.caption(
+        "These are the existing database records that this exact Preview "
+        "would replace. Stored values are what is currently authoritative; "
+        "Proposed values are the canonical source values that would replace "
+        "them only if this Preview is approved and applied."
+    )
+
+    comparison_tickers = list(
+        dict.fromkeys(
+            comparison_df["Ticker"].tolist()
+        )
+    )
+
+    for ticker in comparison_tickers:
+        ticker_df = (
+            comparison_df.loc[
+                comparison_df["Ticker"] == ticker,
+                comparison_columns,
+            ]
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+        ticker_count = len(
+            ticker_df
+        )
+
+        st.markdown(
+            f"**{ticker} — "
+            f"{ticker_count:,} stored record(s) would be replaced**"
+        )
+
+        if ticker_count <= 6:
+            display_df = ticker_df
+
+            st.caption(
+                "Showing all proposed replacements for this ticker."
+            )
+        else:
+            display_df = pd.concat(
+                [
+                    ticker_df.head(3),
+                    ticker_df.tail(3),
+                ],
+                ignore_index=True,
+            )
+
+            st.caption(
+                "Showing the first 3 and last 3 proposed replacements "
+                "for this ticker. Download the full comparison CSV below "
+                "to inspect every proposed replacement."
+            )
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    requested_start = (
+        plan.requested_start_date.isoformat()
+        if plan.requested_start_date is not None
+        else "start"
+    )
+
+    requested_end = (
+        plan.requested_end_date.isoformat()
+        if plan.requested_end_date is not None
+        else "end"
+    )
+
+    comparison_csv_bytes = (
+        comparison_df.to_csv(
+            index=False
+        ).encode("utf-8")
+    )
+
+    st.download_button(
+        "Download Full Comparison CSV",
+        data=comparison_csv_bytes,
+        file_name=(
+            "data_management_stored_vs_proposed_"
+            f"{requested_start}_to_{requested_end}.csv"
+        ),
+        mime="text/csv",
+        key=(
+            "data_management_stored_vs_proposed_csv_"
+            f"{plan.plan_fingerprint[:12]}"
+        ),
+        help=(
+            "Download every stored-versus-proposed replacement contained "
+            "in this exact Preview, including records not shown in the "
+            "first/last sample."
+        ),
+    )
+
+
 def _render_data_management_mutation_preview(
     plan: MutationPlan,
 ) -> None:
@@ -11796,6 +12471,31 @@ def _render_data_management_mutation_preview(
             0,
         ) or 0
     )
+
+    source_missing_preserved_count = sum(
+        1
+        for observation in plan.source_missing
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "preserve_existing"
+            and observation.existing is not None
+        )
+    )
+
+    source_missing_unresolved_count = sum(
+        1
+        for observation in plan.source_missing
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "unresolved"
+            and observation.existing is None
+        )
+    )
+
     blocking_count = int(
         summary.get(
             "validation_issues",
@@ -11887,8 +12587,14 @@ def _render_data_management_mutation_preview(
     if source_missing_count:
         consequence_text += (
             f" {source_missing_count:,} expected sessions were missing "
-            "from the source; Data Management will not fabricate or "
-            "delete those records."
+            "from the current yFinance response. Of those, "
+            f"{source_missing_preserved_count:,} stored records will be "
+            "kept unchanged despite the yFinance omission and "
+            f"{source_missing_unresolved_count:,} sessions remain missing "
+            "because neither the current yFinance response nor the database "
+            "contains a record. Data Management will not fabricate or "
+            "delete observations because yFinance omitted them from this "
+            "request."
         )
 
     if blocking_count or duplicate_count:
@@ -11947,7 +12653,7 @@ def _render_data_management_mutation_preview(
         ),
     )
 
-    summary_columns_2 = st.columns(5)
+    summary_columns_2 = st.columns(4)
 
     summary_columns_2[0].metric(
         "Warnings",
@@ -11966,15 +12672,6 @@ def _render_data_management_mutation_preview(
         ),
     )
     summary_columns_2[2].metric(
-        "Missing From Source",
-        f"{source_missing_count:,}",
-        help=(
-            "Expected NYSE sessions for which the source returned no row. "
-            "Data Management does not fabricate these observations or use "
-            "their absence as permission to delete stored data."
-        ),
-    )
-    summary_columns_2[3].metric(
         "Blocking Issues",
         f"{blocking_count:,}",
         help=(
@@ -11983,7 +12680,7 @@ def _render_data_management_mutation_preview(
             "be made."
         ),
     )
-    summary_columns_2[4].metric(
+    summary_columns_2[3].metric(
         "Duplicate Incoming Records",
         f"{duplicate_count:,}",
         help=(
@@ -11993,7 +12690,44 @@ def _render_data_management_mutation_preview(
         ),
     )
 
+    summary_columns_3 = st.columns(3)
+
+    summary_columns_3[0].metric(
+        "Missing From Current yFinance Response",
+        f"{source_missing_count:,}",
+        help=(
+            "Expected NYSE trading sessions for which the current yFinance "
+            "request returned no ticker-date row. This does not mean "
+            "yFinance never had the record; it means the row was absent "
+            "from the response used to build this Preview."
+        ),
+    )
+    summary_columns_3[1].metric(
+        "Stored Records Kept Despite yFinance Omission",
+        f"{source_missing_preserved_count:,}",
+        help=(
+            "yFinance returned no row for these expected ticker-date "
+            "sessions, but the database already contains one. The stored "
+            "record will be kept unchanged; a missing row in the current "
+            "yFinance response does not authorize deletion."
+        ),
+    )
+    summary_columns_3[2].metric(
+        "Still Missing After yFinance Check",
+        f"{source_missing_unresolved_count:,}",
+        help=(
+            "Neither the current yFinance response nor the database contains "
+            "a record for these expected trading sessions. Data Management "
+            "will not fabricate OHLCV values, so these sessions remain "
+            "missing."
+        ),
+    )
+
     _render_data_management_source_data_preview(
+        plan
+    )
+
+    _render_data_management_stored_vs_proposed_preview(
         plan
     )
 
@@ -12163,32 +12897,74 @@ def _render_data_management_mutation_preview(
         )
 
     if plan.source_missing:
-        st.markdown("#### Missing From Source")
+        st.markdown(
+            "#### Missing From Current yFinance Response"
+        )
         st.caption(
-            "These expected NYSE sessions were not returned by the source. "
-            "Data Management will not fabricate missing observations and "
-            "will not delete stored data merely because the source omitted "
-            "a session."
+            "These expected NYSE trading sessions were not returned in the "
+            "current yFinance response used for this Preview. If the "
+            "database already contains that ticker-date record, Data "
+            "Management keeps it unchanged. If neither yFinance nor the "
+            "database has the record, the session remains missing."
         )
 
-        source_missing_rows = [
-            {
-                "Ticker": observation.ticker,
-                "Date": observation.date.isoformat(),
-                "Action": observation.planned_action,
-                "Stored Record Exists": (
-                    "Yes"
-                    if observation.existing is not None
-                    else "No"
-                ),
-            }
-            for observation in plan.source_missing
-        ]
+        source_missing_action_labels = {
+            "preserve_existing": "Keep Stored Record",
+            "unresolved": "No Record Available",
+        }
+
+        source_missing_rows = []
+
+        for observation in plan.source_missing:
+            action_key = str(
+                observation.planned_action
+            ).strip().lower()
+
+            source_missing_rows.append(
+                {
+                    "Ticker": observation.ticker,
+                    "Date": observation.date.isoformat(),
+                    "Stored Record Exists": (
+                        "Yes"
+                        if observation.existing is not None
+                        else "No"
+                    ),
+                    "What Will Happen": (
+                        source_missing_action_labels.get(
+                            action_key,
+                            observation.planned_action,
+                        )
+                    ),
+                }
+            )
 
         st.dataframe(
             pd.DataFrame(source_missing_rows),
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "Stored Record Exists": (
+                    st.column_config.TextColumn(
+                        "Stored Record Exists",
+                        help=(
+                            "Yes means the authoritative database already "
+                            "contains this ticker/date even though the source "
+                            "did not return it."
+                        ),
+                    )
+                ),
+                "What Will Happen": (
+                    st.column_config.TextColumn(
+                        "What Will Happen",
+                        help=(
+                            "Keep Stored Record: retain the existing database "
+                            "observation unchanged. No Record Available: "
+                            "neither source nor database contains an "
+                            "observation, so nothing can be added."
+                        ),
+                    )
+                ),
+            },
         )
 
     if plan.validation_issues:
@@ -13386,6 +14162,15 @@ def show_data_management():
             )
 
     _render_data_management_acquisition_controls(
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
+
+    _render_data_management_reconciliation_controls(
+        inventory=inventory,
         latest_expected_stored_session=(
             overview[
                 "latest_expected_stored_session"
