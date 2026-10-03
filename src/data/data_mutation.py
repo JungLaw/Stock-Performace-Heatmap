@@ -118,6 +118,13 @@ CANDIDATE_RECORD_OPERATIONS = (
     | REPLACEMENT_ELIGIBLE_OPERATIONS
 )
 
+DELETION_OPERATIONS = frozenset(
+    {
+        "Delete Range",
+        "Delete Ticker",
+    }
+)
+
 
 @dataclass(frozen=True)
 class CanonicalOHLCVRecord:
@@ -232,6 +239,19 @@ class PlannedObservation:
 
 
 @dataclass(frozen=True)
+class PlannedDeletion:
+    """
+    One exact authoritative OHLCV record materialized for explicit deletion.
+
+    The stored record is captured in full so Preview identity is bound to the
+    exact database state reviewed by the administrator.
+    """
+
+    record: CanonicalOHLCVRecord
+    planned_action: str = "delete"
+
+
+@dataclass(frozen=True)
 class SourceMissingObservation:
     """
     One expected NYSE observation absent from the supplied source candidates.
@@ -262,9 +282,10 @@ class MutationPlan:
     """
     Materialized read-only Preview plan.
 
-    The plan captures exact mutation actions, Source Missing observations,
-    excluded invalid observations, warnings, plan-fatal validation issues,
-    and the authoritative DB baseline used for Preview.
+    The plan captures exact mutation actions, materialized deletion targets,
+    Source Missing observations, excluded invalid observations, warnings,
+    plan-fatal validation issues, and the authoritative DB baseline used for
+    Preview.
     """
 
     operation: str
@@ -273,6 +294,7 @@ class MutationPlan:
     requested_start_date: Optional[date]
     requested_end_date: Optional[date]
     observations: Tuple[PlannedObservation, ...]
+    deletions: Tuple[PlannedDeletion, ...]
     source_missing: Tuple[SourceMissingObservation, ...]
     excluded_observations: Tuple[ExcludedObservation, ...]
     validation_issues: Tuple[ValidationIssue, ...]
@@ -291,7 +313,15 @@ class MutationPlan:
 
         Row-fatal excluded observations and non-blocking warnings remain
         visible in Preview but do not make the remaining valid plan ineligible.
+
+        An explicit deletion with no stored rows is not commit-eligible.
         """
+        if (
+            self.operation in DELETION_OPERATIONS
+            and not self.deletions
+        ):
+            return False
+
         return (
             not self.validation_issues
             and not self.duplicate_keys
@@ -309,6 +339,7 @@ class MutationPlan:
             "no_change": 0,
             "preserve_existing": 0,
             "replacement_candidate": 0,
+            "delete": len(self.deletions),
         }
 
         for observation in self.observations:
@@ -1091,6 +1122,105 @@ class DataMutationManager:
         finally:
             connection.close()
 
+    def _load_deletion_scope_from_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        ticker: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Tuple[CanonicalOHLCVRecord, ...]:
+        """
+        Load the complete authoritative OHLCV set for one deletion scope.
+
+        Supplying no dates means the complete stored ticker. Supplying both
+        dates means one inclusive stored ticker/date range.
+        """
+        if (start_date is None) != (end_date is None):
+            raise ValueError(
+                "Deletion scope requires both Start Date and End Date "
+                "or neither."
+            )
+
+        if start_date is None:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    Ticker,
+                    Date,
+                    Open,
+                    High,
+                    Low,
+                    Close,
+                    "Adj Close",
+                    Volume
+                FROM "{self.table_name}"
+                WHERE Ticker = ?
+                ORDER BY Date
+                """,
+                (ticker,),
+            ).fetchall()
+        else:
+            assert end_date is not None
+
+            rows = connection.execute(
+                f"""
+                SELECT
+                    Ticker,
+                    Date,
+                    Open,
+                    High,
+                    Low,
+                    Close,
+                    "Adj Close",
+                    Volume
+                FROM "{self.table_name}"
+                WHERE Ticker = ?
+                  AND Date >= ?
+                  AND Date <= ?
+                ORDER BY Date
+                """,
+                (
+                    ticker,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                ),
+            ).fetchall()
+
+        return tuple(
+            CanonicalOHLCVRecord(
+                ticker=str(row["Ticker"]).strip().upper(),
+                date=date.fromisoformat(str(row["Date"])),
+                open=float(row["Open"]),
+                high=float(row["High"]),
+                low=float(row["Low"]),
+                close=float(row["Close"]),
+                adj_close=float(row["Adj Close"]),
+                volume=int(row["Volume"]),
+            )
+            for row in rows
+        )
+
+    def _load_deletion_scope(
+        self,
+        *,
+        ticker: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Tuple[CanonicalOHLCVRecord, ...]:
+        """Load one deletion scope through a dedicated read-only connection."""
+        connection = self._connect_read_only()
+
+        try:
+            return self._load_deletion_scope_from_connection(
+                connection,
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        finally:
+            connection.close()
+
     @staticmethod
     def _differing_fields(
         candidate: CanonicalOHLCVRecord,
@@ -1178,6 +1308,7 @@ class DataMutationManager:
         requested_start_date: Optional[date],
         requested_end_date: Optional[date],
         observations: Tuple[PlannedObservation, ...],
+        deletions: Tuple[PlannedDeletion, ...],
         source_missing: Tuple[SourceMissingObservation, ...],
         excluded_observations: Tuple[ExcludedObservation, ...],
         validation_issues: Tuple[ValidationIssue, ...],
@@ -1227,6 +1358,13 @@ class DataMutationManager:
                     ),
                 }
                 for observation in observations
+            ],
+            "deletions": [
+                {
+                    "record": deletion.record.to_dict(),
+                    "planned_action": deletion.planned_action,
+                }
+                for deletion in deletions
             ],
             "source_missing": [
                 {
@@ -1322,6 +1460,7 @@ class DataMutationManager:
             requested_start_date=plan.requested_start_date,
             requested_end_date=plan.requested_end_date,
             observations=plan.observations,
+            deletions=plan.deletions,
             source_missing=plan.source_missing,
             excluded_observations=plan.excluded_observations,
             validation_issues=plan.validation_issues,
@@ -1380,6 +1519,112 @@ class DataMutationManager:
 
         return tuple(changed_keys)
 
+    def _verify_deletion_plan_current_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        plan: MutationPlan,
+    ) -> PlanFreshnessCheck:
+        """
+        Verify the complete authoritative scope of one deletion Preview.
+
+        Deletion freshness is scope-based rather than limited to the logical
+        keys that existed when Preview was built. This ensures that a new
+        in-scope row appearing after Preview also invalidates the old plan.
+        """
+        if plan.operation not in DELETION_OPERATIONS:
+            raise ValueError(
+                "Deletion freshness verification requires a deletion plan."
+            )
+
+        if len(plan.requested_tickers) != 1:
+            raise RuntimeError(
+                "Deletion plan must contain exactly one requested ticker."
+            )
+
+        ticker = plan.requested_tickers[0]
+
+        if plan.operation == "Delete Range":
+            if (
+                plan.requested_start_date is None
+                or plan.requested_end_date is None
+            ):
+                raise RuntimeError(
+                    "Delete Range plan is missing its approved date scope."
+                )
+
+            start_date = plan.requested_start_date
+            end_date = plan.requested_end_date
+        else:
+            if (
+                plan.requested_start_date is not None
+                or plan.requested_end_date is not None
+            ):
+                raise RuntimeError(
+                    "Delete Ticker plan must not contain a date scope."
+                )
+
+            start_date = None
+            end_date = None
+
+        current_scope = self._load_deletion_scope_from_connection(
+            connection,
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        expected_records: Dict[
+            Tuple[str, date],
+            CanonicalOHLCVRecord,
+        ] = {
+            deletion.record.key: deletion.record
+            for deletion in plan.deletions
+        }
+
+        current_records: Dict[
+            Tuple[str, date],
+            CanonicalOHLCVRecord,
+        ] = {
+            record.key: record
+            for record in current_scope
+        }
+
+        scope_keys = (
+            set(expected_records)
+            | set(current_records)
+        )
+
+        expected_scope_records: Dict[
+            Tuple[str, date],
+            Optional[CanonicalOHLCVRecord],
+        ] = {
+            key: expected_records.get(key)
+            for key in scope_keys
+        }
+
+        current_fingerprint = (
+            self._build_baseline_fingerprint(
+                scope_keys,
+                current_records,
+            )
+        )
+
+        changed_keys = self._find_changed_baseline_keys(
+            expected_scope_records,
+            current_records,
+        )
+
+        return PlanFreshnessCheck(
+            is_current=(
+                current_fingerprint
+                == plan.baseline_fingerprint
+                and not changed_keys
+            ),
+            expected_fingerprint=plan.baseline_fingerprint,
+            current_fingerprint=current_fingerprint,
+            changed_keys=changed_keys,
+        )
+
     def _verify_plan_current_in_connection(
         self,
         connection: sqlite3.Connection,
@@ -1392,6 +1637,12 @@ class DataMutationManager:
         writer can alter the relevant authoritative baseline between this
         verification and the approved mutation.
         """
+        if plan.operation in DELETION_OPERATIONS:
+            return self._verify_deletion_plan_current_in_connection(
+                connection,
+                plan,
+            )
+
         baseline_keys = [
             observation.candidate.key
             for observation in plan.observations
@@ -1590,6 +1841,117 @@ class DataMutationManager:
 
         return rows_affected
 
+    def _apply_planned_deletions(
+        self,
+        connection: sqlite3.Connection,
+        plan: MutationPlan,
+    ) -> int:
+        """
+        Apply one already-materialized explicit deletion scope.
+
+        Freshness is verified by the transaction executor immediately before
+        this method runs. The DELETE therefore executes only the exact scope
+        represented by the approved plan.
+
+        The affected-row count must equal the number of materialized deletion
+        records or the transaction fails and rolls back.
+        """
+        if plan.operation not in DELETION_OPERATIONS:
+            raise ValueError(
+                "Deletion execution requires a deletion operation."
+            )
+
+        if len(plan.requested_tickers) != 1:
+            raise RuntimeError(
+                "Deletion plan must contain exactly one requested ticker."
+            )
+
+        if not plan.deletions:
+            raise RuntimeError(
+                "Deletion plan contains no materialized rows to delete."
+            )
+
+        if any(
+            deletion.planned_action != "delete"
+            for deletion in plan.deletions
+        ):
+            raise RuntimeError(
+                "Deletion plan contains an unsupported planned action."
+            )
+
+        ticker = plan.requested_tickers[0]
+
+        if any(
+            deletion.record.ticker != ticker
+            for deletion in plan.deletions
+        ):
+            raise RuntimeError(
+                "Deletion plan contains a row outside its approved ticker."
+            )
+
+        if plan.operation == "Delete Range":
+            if (
+                plan.requested_start_date is None
+                or plan.requested_end_date is None
+            ):
+                raise RuntimeError(
+                    "Delete Range plan is missing its approved date scope."
+                )
+
+            if any(
+                not (
+                    plan.requested_start_date
+                    <= deletion.record.date
+                    <= plan.requested_end_date
+                )
+                for deletion in plan.deletions
+            ):
+                raise RuntimeError(
+                    "Delete Range plan contains a row outside its approved "
+                    "date scope."
+                )
+
+            cursor = connection.execute(
+                f"""
+                DELETE FROM "{self.table_name}"
+                WHERE Ticker = ?
+                  AND Date >= ?
+                  AND Date <= ?
+                """,
+                (
+                    ticker,
+                    plan.requested_start_date.isoformat(),
+                    plan.requested_end_date.isoformat(),
+                ),
+            )
+        else:
+            if (
+                plan.requested_start_date is not None
+                or plan.requested_end_date is not None
+            ):
+                raise RuntimeError(
+                    "Delete Ticker plan must not contain a date scope."
+                )
+
+            cursor = connection.execute(
+                f"""
+                DELETE FROM "{self.table_name}"
+                WHERE Ticker = ?
+                """,
+                (ticker,),
+            )
+
+        rows_affected = int(cursor.rowcount)
+
+        if rows_affected != len(plan.deletions):
+            raise RuntimeError(
+                "Deletion affected an unexpected number of daily_prices "
+                "rows. Expected "
+                f"{len(plan.deletions)}, affected {rows_affected}."
+            )
+
+        return rows_affected
+
     @staticmethod
     def _build_audit_details(
         plan: MutationPlan,
@@ -1652,6 +2014,22 @@ class DataMutationManager:
                 }
                 for observation in plan.source_missing
             ],
+            "deletion": (
+                {
+                    "planned_action": "delete",
+                    "materialized_rows": len(plan.deletions),
+                    "first_affected_date": min(
+                        deletion.record.date
+                        for deletion in plan.deletions
+                    ).isoformat(),
+                    "last_affected_date": max(
+                        deletion.record.date
+                        for deletion in plan.deletions
+                    ).isoformat(),
+                }
+                if plan.deletions
+                else None
+            ),
         }
 
         return json.dumps(
@@ -1812,10 +2190,16 @@ class DataMutationManager:
                     )
                 )
 
-            rows_affected = self._apply_planned_observations(
-                connection,
-                plan,
-            )
+            if plan.operation in DELETION_OPERATIONS:
+                rows_affected = self._apply_planned_deletions(
+                    connection,
+                    plan,
+                )
+            else:
+                rows_affected = self._apply_planned_observations(
+                    connection,
+                    plan,
+                )
 
             audit_id = self._insert_audit_event(
                 connection,
@@ -2218,6 +2602,7 @@ class DataMutationManager:
             requested_start_date=normalized_start_date,
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
+            deletions=(),
             source_missing=materialized_source_missing,
             excluded_observations=(
                 materialized_excluded_observations
@@ -2241,6 +2626,7 @@ class DataMutationManager:
             requested_start_date=normalized_start_date,
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
+            deletions=(),
             source_missing=materialized_source_missing,
             excluded_observations=(
                 materialized_excluded_observations
@@ -2251,6 +2637,154 @@ class DataMutationManager:
             source_missing_keys=(
                 materialized_source_missing_keys
             ),
+            baseline_fingerprint=baseline_fingerprint,
+            plan_fingerprint=plan_fingerprint,
+            latest_expected_stored_session=(
+                latest_expected_stored_session
+            ),
+            created_at=datetime.now(),
+        )
+
+    def build_deletion_plan(
+        self,
+        *,
+        operation: str,
+        source: str,
+        ticker: Any,
+        requested_start_date: Any = None,
+        requested_end_date: Any = None,
+    ) -> MutationPlan:
+        """
+        Build one read-only explicit deletion Preview.
+
+        Delete Range materializes every stored record for one ticker inside
+        the inclusive requested date interval.
+
+        Delete Ticker materializes every stored record for one ticker.
+
+        This method does not modify persistent state.
+        """
+        normalized_operation = str(operation or "").strip()
+
+        if normalized_operation not in DELETION_OPERATIONS:
+            raise ValueError(
+                "Unsupported deletion operation: "
+                f"{normalized_operation!r}."
+            )
+
+        normalized_source = str(source or "").strip()
+
+        if not normalized_source:
+            raise ValueError("Source is required.")
+
+        normalized_tickers = self._normalize_requested_tickers(
+            [ticker]
+        )
+
+        if len(normalized_tickers) != 1:
+            raise ValueError(
+                "Exactly one ticker is required for deletion."
+            )
+
+        normalized_ticker = normalized_tickers[0]
+
+        if normalized_operation == "Delete Range":
+            if (
+                requested_start_date is None
+                or requested_end_date is None
+            ):
+                raise ValueError(
+                    "Delete Range requires Start Date and End Date."
+                )
+
+            normalized_start_date = self._normalize_date_value(
+                requested_start_date
+            )
+            normalized_end_date = self._normalize_date_value(
+                requested_end_date
+            )
+
+            if normalized_start_date > normalized_end_date:
+                raise ValueError(
+                    "Requested Start Date cannot be later than End Date."
+                )
+        else:
+            if (
+                requested_start_date is not None
+                or requested_end_date is not None
+            ):
+                raise ValueError(
+                    "Delete Ticker does not accept Start Date or End Date."
+                )
+
+            normalized_start_date = None
+            normalized_end_date = None
+
+        stored_records = self._load_deletion_scope(
+            ticker=normalized_ticker,
+            start_date=normalized_start_date,
+            end_date=normalized_end_date,
+        )
+
+        materialized_deletions = tuple(
+            PlannedDeletion(
+                record=record,
+            )
+            for record in stored_records
+        )
+
+        existing_records = {
+            deletion.record.key: deletion.record
+            for deletion in materialized_deletions
+        }
+
+        baseline_keys = tuple(existing_records)
+
+        baseline_fingerprint = (
+            self._build_baseline_fingerprint(
+                baseline_keys,
+                existing_records,
+            )
+        )
+
+        latest_expected_stored_session = (
+            get_latest_expected_stored_session()
+        )
+
+        plan_fingerprint = self._build_plan_fingerprint(
+            operation=normalized_operation,
+            source=normalized_source,
+            requested_tickers=(normalized_ticker,),
+            requested_start_date=normalized_start_date,
+            requested_end_date=normalized_end_date,
+            observations=(),
+            deletions=materialized_deletions,
+            source_missing=(),
+            excluded_observations=(),
+            validation_issues=(),
+            validation_warnings=(),
+            duplicate_keys=(),
+            source_missing_keys=(),
+            baseline_fingerprint=baseline_fingerprint,
+            latest_expected_stored_session=(
+                latest_expected_stored_session
+            ),
+        )
+
+        return MutationPlan(
+            operation=normalized_operation,
+            source=normalized_source,
+            requested_tickers=(normalized_ticker,),
+            requested_start_date=normalized_start_date,
+            requested_end_date=normalized_end_date,
+            observations=(),
+            deletions=materialized_deletions,
+            source_missing=(),
+            excluded_observations=(),
+            validation_issues=(),
+            validation_warnings=(),
+            duplicate_keys=(),
+            source_missing_keys=(),
             baseline_fingerprint=baseline_fingerprint,
             plan_fingerprint=plan_fingerprint,
             latest_expected_stored_session=(

@@ -12341,6 +12341,253 @@ def _render_data_management_manual_entry_controls(
     st.rerun()
 
 
+def _render_data_management_deletion_controls(
+    *,
+    inventory: list[Dict[str, Any]],
+) -> None:
+    """
+    Render explicit Delete Range / Delete Ticker controls.
+
+    Deletion operates only on stored daily_prices rows and always enters the
+    existing Preview / Approve / Apply mutation lifecycle. It does not alter
+    configured universe or bucket membership.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if active_plan is not None:
+        if (
+            isinstance(
+                active_plan,
+                MutationPlan,
+            )
+            and active_plan.operation
+            in {
+                "Delete Range",
+                "Delete Ticker",
+            }
+        ):
+            st.markdown("---")
+            st.subheader("Data Deletion")
+            st.info(
+                "A deletion Preview is active. Review the exact deletion "
+                "scope below, then approve and apply it, or Cancel Preview "
+                "before starting another deletion request."
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader("Data Deletion")
+
+    st.caption(
+        "Explicitly remove stored OHLCV from daily_prices. Deletion never "
+        "occurs because a source omitted a row, and deleting a ticker does "
+        "not remove it from configured Custom, Sector, or Country membership."
+    )
+
+    if not inventory:
+        st.info(
+            "No stored tickers are available for deletion."
+        )
+        return
+
+    inventory_by_ticker = {
+        str(row["ticker"]).strip().upper(): row
+        for row in inventory
+    }
+
+    stored_tickers = sorted(
+        inventory_by_ticker
+    )
+
+    selected_operation = st.radio(
+        "Deletion Operation",
+        options=[
+            "Delete a Date Range",
+            "Delete a Ticker",
+        ],
+        horizontal=True,
+        key="data_management_deletion_operation",
+        help=(
+            "Delete a Date Range removes stored rows for one ticker inside "
+            "an inclusive date interval. Delete a Ticker removes every "
+            "stored daily_prices row for one ticker."
+        ),
+    )
+
+    selected_ticker = st.selectbox(
+        "Stored Ticker",
+        options=stored_tickers,
+        key="data_management_deletion_ticker",
+        help=(
+            "Only tickers currently stored in daily_prices are available."
+        ),
+    )
+
+    selected_inventory = inventory_by_ticker[
+        selected_ticker
+    ]
+
+    record_count = int(
+        selected_inventory.get(
+            "records",
+            0,
+        ) or 0
+    )
+
+    first_date_text = str(
+        selected_inventory.get(
+            "first_date",
+            "",
+        )
+    )
+    last_date_text = str(
+        selected_inventory.get(
+            "last_date",
+            "",
+        )
+    )
+
+    stored_columns = st.columns(3)
+
+    stored_columns[0].metric(
+        "Stored Records",
+        f"{record_count:,}",
+    )
+    stored_columns[1].metric(
+        "First Stored Date",
+        first_date_text or "—",
+    )
+    stored_columns[2].metric(
+        "Last Stored Date",
+        last_date_text or "—",
+    )
+
+    buckets = selected_inventory.get(
+        "buckets",
+        [],
+    )
+
+    bucket_text = (
+        ", ".join(
+            str(bucket)
+            for bucket in buckets
+        )
+        if buckets
+        else "Unassigned"
+    )
+
+    st.caption(
+        f"Configured universe membership: {bucket_text}. "
+        "Deletion affects daily_prices only; this membership is not changed."
+    )
+
+    backend_operation: str
+    requested_start_date: Optional[date]
+    requested_end_date: Optional[date]
+
+    if selected_operation == "Delete a Date Range":
+        backend_operation = "Delete Range"
+
+        try:
+            default_start_date = pd.Timestamp(
+                first_date_text
+            ).date()
+            default_end_date = pd.Timestamp(
+                last_date_text
+            ).date()
+        except Exception:
+            st.error(
+                "Stored ticker inventory does not contain a usable "
+                "First Date / Last Date range."
+            )
+            return
+
+        date_columns = st.columns(2)
+
+        with date_columns[0]:
+            requested_start_date = st.date_input(
+                "Start Date",
+                value=default_start_date,
+                key=(
+                    "data_management_delete_"
+                    "range_start_date"
+                ),
+                help=(
+                    "Inclusive first calendar date of the deletion scope."
+                ),
+            )
+
+        with date_columns[1]:
+            requested_end_date = st.date_input(
+                "End Date",
+                value=default_end_date,
+                key=(
+                    "data_management_delete_"
+                    "range_end_date"
+                ),
+                help=(
+                    "Inclusive last calendar date of the deletion scope."
+                ),
+            )
+
+        st.warning(
+            "This operation will permanently delete every stored "
+            f"{selected_ticker} OHLCV row inside the selected inclusive "
+            "date range after Preview approval and Apply."
+        )
+    else:
+        backend_operation = "Delete Ticker"
+        requested_start_date = None
+        requested_end_date = None
+
+        st.warning(
+            f"This operation will permanently delete all {record_count:,} "
+            f"stored {selected_ticker} OHLCV record(s) from daily_prices "
+            "after Preview approval and Apply. Configured universe "
+            "membership will remain unchanged."
+        )
+
+    preview_clicked = st.button(
+        "Preview Deletion",
+        key="data_management_deletion_preview",
+        type="primary",
+        use_container_width=True,
+        help=(
+            "Build an exact read-only deletion Preview. This button does "
+            "not delete anything."
+        ),
+    )
+
+    if not preview_clicked:
+        return
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        plan = mutation_manager.build_deletion_plan(
+            operation=backend_operation,
+            source="Data Management Deletion",
+            ticker=selected_ticker,
+            requested_start_date=requested_start_date,
+            requested_end_date=requested_end_date,
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build deletion Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
+
 def _set_data_management_mutation_plan(
     plan: MutationPlan,
 ) -> None:
@@ -12751,6 +12998,218 @@ def _render_data_management_stored_vs_proposed_preview(
     )
 
 
+def _render_data_management_deletion_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render bounded evidence for one exact materialized deletion Preview.
+
+    The complete deletion set remains stored in MutationPlan and participates
+    in the exact plan fingerprint. The table is intentionally bounded for
+    large deletion scopes, while the CSV exposes every affected row.
+    """
+    if plan.operation not in {
+        "Delete Range",
+        "Delete Ticker",
+    }:
+        raise ValueError(
+            "Deletion Preview requires a deletion MutationPlan."
+        )
+
+    deletion_rows = [
+        deletion.record.to_dict()
+        for deletion in plan.deletions
+    ]
+
+    deletion_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    deletion_count = len(
+        deletion_rows
+    )
+
+    st.markdown("---")
+    st.subheader("Database Deletion Preview")
+
+    st.caption(
+        "Review the exact stored OHLCV scope that will be permanently "
+        "removed if this Preview is approved and applied. Nothing has been "
+        "deleted yet."
+    )
+
+    request_columns = st.columns(4)
+
+    request_columns[0].metric(
+        "Operation",
+        plan.operation,
+    )
+    request_columns[1].metric(
+        "Ticker",
+        (
+            plan.requested_tickers[0]
+            if plan.requested_tickers
+            else "—"
+        ),
+    )
+    request_columns[2].metric(
+        "Rows to Delete",
+        f"{deletion_count:,}",
+    )
+    request_columns[3].metric(
+        "Source",
+        plan.source,
+    )
+
+    if deletion_rows:
+        first_affected_date = str(
+            deletion_rows[0]["Date"]
+        )
+        last_affected_date = str(
+            deletion_rows[-1]["Date"]
+        )
+    else:
+        first_affected_date = "—"
+        last_affected_date = "—"
+
+    scope_columns = st.columns(4)
+
+    scope_columns[0].metric(
+        "Requested Start Date",
+        (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "All Stored Dates"
+        ),
+    )
+    scope_columns[1].metric(
+        "Requested End Date",
+        (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "All Stored Dates"
+        ),
+    )
+    scope_columns[2].metric(
+        "First Affected Date",
+        first_affected_date,
+    )
+    scope_columns[3].metric(
+        "Last Affected Date",
+        last_affected_date,
+    )
+
+    st.warning(
+        "Applying this approved Preview permanently removes these rows from "
+        "daily_prices. It does not remove the ticker from Custom, Sector, "
+        "Country, or other configured universe membership, and it does not "
+        "delete prior audit history."
+    )
+
+    if not deletion_rows:
+        st.info(
+            "No stored OHLCV rows match this deletion scope. There is "
+            "nothing to delete, so this Preview cannot be applied."
+        )
+        return
+
+    deletion_columns = [
+        "Ticker",
+        "Date",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Adj Close",
+        "Volume",
+    ]
+
+    deletion_df = pd.DataFrame(
+        deletion_rows,
+        columns=deletion_columns,
+    )
+
+    st.markdown("#### Affected Stored Records")
+
+    if deletion_count <= 20:
+        st.caption(
+            "This deletion affects 20 or fewer records, so every affected "
+            "stored row is shown."
+        )
+
+        display_df = deletion_df
+    else:
+        st.caption(
+            "This deletion affects more than 20 records. The table shows "
+            "the first 3 and last 3 affected rows; the complete deletion "
+            "set is available in the CSV below."
+        )
+
+        first_rows = deletion_df.head(
+            3
+        ).copy()
+        last_rows = deletion_df.tail(
+            3
+        ).copy()
+
+        first_rows.insert(
+            0,
+            "Preview Position",
+            "First 3",
+        )
+        last_rows.insert(
+            0,
+            "Preview Position",
+            "Last 3",
+        )
+
+        display_df = pd.concat(
+            [
+                first_rows,
+                last_rows,
+            ],
+            ignore_index=True,
+        )
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    full_csv = deletion_df.to_csv(
+        index=False
+    ).encode(
+        "utf-8"
+    )
+
+    st.download_button(
+        "Download Full Deletion Preview CSV",
+        data=full_csv,
+        file_name=(
+            "data_management_deletion_preview_"
+            f"{plan.plan_fingerprint[:12]}.csv"
+        ),
+        mime="text/csv",
+        key=(
+            "data_management_deletion_preview_csv_"
+            f"{plan.plan_fingerprint[:12]}"
+        ),
+        help=(
+            "Download every stored OHLCV row contained in this exact "
+            "deletion Preview, including rows not shown in the bounded table."
+        ),
+    )
+
+    st.caption(
+        "Approval is bound to the complete materialized deletion set and "
+        "plan fingerprint, not only to the rows displayed in this table."
+    )
+
+
 def _render_data_management_mutation_preview(
     plan: MutationPlan,
 ) -> None:
@@ -12760,6 +13219,15 @@ def _render_data_management_mutation_preview(
             "plan must be a MutationPlan produced by "
             "DataMutationManager.build_plan()."
         )
+
+    if plan.operation in {
+        "Delete Range",
+        "Delete Ticker",
+    }:
+        _render_data_management_deletion_preview(
+            plan
+        )
+        return
 
     summary = plan.summary()
 
@@ -13514,6 +13982,14 @@ def _render_data_management_mutation_controls(
         confirmed_fingerprint == plan.plan_fingerprint
     )
 
+    is_deletion = (
+        plan.operation
+        in {
+            "Delete Range",
+            "Delete Ticker",
+        }
+    )
+
     if not plan.can_commit:
         st.error(
             "This preview contains blocking issues. Changes cannot be "
@@ -13591,10 +14067,18 @@ def _render_data_management_mutation_controls(
             ),
             use_container_width=True,
             help=(
-                "Apply only the approved actions shown in this preview to "
-                "the authoritative OHLCV database. This is the step that "
-                "actually inserts or replaces records when the approved "
-                "plan calls for those actions."
+                (
+                    "Apply only the approved deletion shown in this preview "
+                    "to the authoritative OHLCV database. This is the step "
+                    "that permanently deletes the approved stored records."
+                )
+                if is_deletion
+                else (
+                    "Apply only the approved actions shown in this preview "
+                    "to the authoritative OHLCV database. This is the step "
+                    "that actually inserts or replaces records when the "
+                    "approved plan calls for those actions."
+                )
             ),
         )
 
@@ -13698,7 +14182,7 @@ def _render_data_management_mutation_controls(
             use_container_width=True,
             help=(
                 "Discard this preview and its approval so you can change "
-                "the acquisition request. No database changes are made."
+                "the Data Management request. No database changes are made."
             ),
         )
 
@@ -13738,7 +14222,7 @@ def _render_data_management_mutation_workflow() -> None:
 
     if mutation_result is not None:
         st.markdown("---")
-        st.subheader("Database Update Result")
+        st.subheader("Database Change Result")
         st.success(
             "The approved database changes were applied successfully."
         )
@@ -13786,7 +14270,7 @@ def _render_data_management_mutation_workflow() -> None:
 
     if mutation_error is not None:
         st.markdown("---")
-        st.subheader("Database Update Error")
+        st.subheader("Database Change Error")
         st.error(mutation_error)
         st.caption(
             "Approval was cleared. Review the error and build a fresh "
@@ -14677,6 +15161,10 @@ def show_data_management():
                 "latest_expected_stored_session"
             ]
         ),
+    )
+
+    _render_data_management_deletion_controls(
+        inventory=inventory,
     )
 
     _render_data_management_mutation_workflow()
