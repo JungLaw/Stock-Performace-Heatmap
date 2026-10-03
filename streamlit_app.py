@@ -11193,6 +11193,10 @@ _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY = (
     "data_management_acquisition_context"
 )
 
+_DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY = (
+    "data_management_manual_entry_context"
+)
+
 _DATA_MANAGEMENT_MUTATION_PLAN_KEY = (
     "data_management_mutation_plan"
 )
@@ -11379,6 +11383,23 @@ def _render_data_management_acquisition_controls(
     read-only. Build Preview passes the exact effective source result into
     DataMutationManager.build_plan(); mutation remains owned by WS7.
     """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if (
+        isinstance(
+            active_plan,
+            MutationPlan,
+        )
+        and active_plan.operation
+        in {
+            "Manual Add",
+            "Manual Replace",
+        }
+    ):
+        return
+
     st.markdown("---")
     st.subheader("Acquire Market Data")
 
@@ -11386,10 +11407,6 @@ def _render_data_management_acquisition_controls(
         "Acquire canonical daily OHLCV from yFinance and preview the exact "
         "database actions before anything is saved. Review the preview, "
         "approve it, then apply the approved changes."
-    )
-
-    active_plan = st.session_state.get(
-        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
     )
 
     acquisition_context = st.session_state.get(
@@ -12015,6 +12032,315 @@ def _render_data_management_reconciliation_controls(
     st.rerun()
 
 
+def _render_data_management_manual_entry_controls(
+    *,
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render one-record Manual Entry controls.
+
+    Manual Entry supplies one candidate observation directly to the existing
+    DataMutationManager planning boundary. It does not acquire yFinance data,
+    write SQLite directly, or bypass Preview / Approve / Apply.
+
+    A session-only draft context preserves the administrator's entered values
+    so an active Manual Entry Preview can be discarded for editing without
+    requiring the complete observation to be re-entered.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    manual_context = st.session_state.get(
+        _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY
+    )
+
+    if not isinstance(
+        manual_context,
+        dict,
+    ):
+        manual_context = {}
+
+    if active_plan is not None:
+        if (
+            isinstance(
+                active_plan,
+                MutationPlan,
+            )
+            and active_plan.operation
+            in {
+                "Manual Add",
+                "Manual Replace",
+            }
+        ):
+            st.markdown("---")
+            st.subheader("Manual Entry")
+            st.info(
+                "A Manual Entry Preview is active. Review the exact values "
+                "and database action below, then use the Preview controls to "
+                "approve, apply, edit, or cancel this manual observation."
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader("Manual Entry")
+
+    st.caption(
+        "Enter one complete daily OHLCV observation and preview the exact "
+        "database action before anything is saved. Manual Add preserves an "
+        "existing ticker/date; Manual Replace explicitly permits replacement "
+        "when stored values differ."
+    )
+
+    try:
+        default_manual_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_manual_date = date.today()
+
+    stored_operation = str(
+        manual_context.get(
+            "ui_operation",
+            "Add a Record",
+        )
+    )
+
+    operation_labels = [
+        "Add a Record",
+        "Replace a Record",
+    ]
+
+    if stored_operation not in operation_labels:
+        stored_operation = "Add a Record"
+
+    try:
+        stored_manual_date = pd.Timestamp(
+            manual_context.get(
+                "date",
+                default_manual_date,
+            )
+        ).date()
+    except Exception:
+        stored_manual_date = default_manual_date
+
+    with st.form(
+        "data_management_manual_entry_form"
+    ):
+        selected_operation = st.radio(
+            "Manual Entry Operation",
+            options=operation_labels,
+            index=operation_labels.index(
+                stored_operation
+            ),
+            horizontal=True,
+            help=(
+                "Add a Record preserves an existing ticker/date if one is "
+                "already stored. Replace a Record explicitly permits replacing "
+                "an existing ticker/date when the entered OHLCV values differ."
+            ),
+        )
+
+        identity_columns = st.columns(2)
+
+        with identity_columns[0]:
+            ticker_input = st.text_input(
+                "Ticker",
+                value=str(
+                    manual_context.get(
+                        "ticker",
+                        "",
+                    )
+                ),
+                help=(
+                    "Enter one ticker symbol. Canonical ticker normalization "
+                    "is performed by the Data Management mutation layer."
+                ),
+            )
+
+        with identity_columns[1]:
+            manual_date = st.date_input(
+                "Date",
+                value=stored_manual_date,
+                help=(
+                    "The observation date. Dates later than the Latest "
+                    "Expected Stored Session are rejected by canonical "
+                    "Data Management validation."
+                ),
+            )
+
+        price_columns_1 = st.columns(3)
+
+        with price_columns_1[0]:
+            manual_open = st.number_input(
+                "Open",
+                value=float(
+                    manual_context.get(
+                        "open",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_1[1]:
+            manual_high = st.number_input(
+                "High",
+                value=float(
+                    manual_context.get(
+                        "high",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_1[2]:
+            manual_low = st.number_input(
+                "Low",
+                value=float(
+                    manual_context.get(
+                        "low",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        price_columns_2 = st.columns(3)
+
+        with price_columns_2[0]:
+            manual_close = st.number_input(
+                "Close",
+                value=float(
+                    manual_context.get(
+                        "close",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_2[1]:
+            manual_adj_close = st.number_input(
+                "Adj Close",
+                value=float(
+                    manual_context.get(
+                        "adj_close",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+                help=(
+                    "Adjusted Close is required. Manual Entry does not "
+                    "silently substitute Close for Adj Close."
+                ),
+            )
+
+        with price_columns_2[2]:
+            manual_volume = st.number_input(
+                "Volume",
+                value=int(
+                    manual_context.get(
+                        "volume",
+                        0,
+                    )
+                ),
+                step=1,
+                help=(
+                    "Enter whole-share daily volume. Canonical validation "
+                    "owns final eligibility."
+                ),
+            )
+
+        preview_clicked = st.form_submit_button(
+            "Preview Changes",
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Compare this manually entered observation with the "
+                "authoritative database. Nothing is saved by this preview."
+            ),
+        )
+
+    if not preview_clicked:
+        return
+
+    if not str(
+        ticker_input
+    ).strip():
+        st.error(
+            "Enter a ticker before previewing the manual observation."
+        )
+        return
+
+    operation_map = {
+        "Add a Record": "Manual Add",
+        "Replace a Record": "Manual Replace",
+    }
+
+    backend_operation = operation_map[
+        selected_operation
+    ]
+
+    manual_context = {
+        "ui_operation": selected_operation,
+        "backend_operation": backend_operation,
+        "ticker": ticker_input,
+        "date": manual_date,
+        "open": manual_open,
+        "high": manual_high,
+        "low": manual_low,
+        "close": manual_close,
+        "adj_close": manual_adj_close,
+        "volume": manual_volume,
+    }
+
+    st.session_state[
+        _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY
+    ] = manual_context
+
+    candidate = {
+        "Ticker": ticker_input,
+        "Date": manual_date,
+        "Open": manual_open,
+        "High": manual_high,
+        "Low": manual_low,
+        "Close": manual_close,
+        "Adj Close": manual_adj_close,
+        "Volume": manual_volume,
+    }
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        plan = mutation_manager.build_plan(
+            operation=backend_operation,
+            source="Manual Entry",
+            candidates=[
+                candidate
+            ],
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build Manual Entry Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
+
 def _set_data_management_mutation_plan(
     plan: MutationPlan,
 ) -> None:
@@ -12048,8 +12374,16 @@ def _set_data_management_mutation_plan(
     )
 
 
-def _discard_data_management_mutation_plan() -> None:
-    """Discard the active mutation Preview and its confirmation state."""
+def _discard_data_management_mutation_plan(
+    *,
+    preserve_manual_entry_context: bool = False,
+) -> None:
+    """
+    Discard the active mutation Preview and its confirmation state.
+
+    Manual Entry may explicitly preserve its session-only draft while editing
+    the values that produced a Preview. Ordinary Cancel discards that draft.
+    """
     st.session_state.pop(
         _DATA_MANAGEMENT_MUTATION_PLAN_KEY,
         None,
@@ -12066,6 +12400,12 @@ def _discard_data_management_mutation_plan() -> None:
         _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
         None,
     )
+
+    if not preserve_manual_entry_context:
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY,
+            None,
+        )
 
 
 def _render_data_management_source_data_preview(
@@ -12526,39 +12866,69 @@ def _render_data_management_mutation_preview(
         "you intend to replace stored values."
     )
 
-    request_columns = st.columns(4)
-
-    request_columns[0].metric(
-        "Operation",
-        plan.operation,
-    )
-    request_columns[1].metric(
-        "Source",
-        plan.source,
-    )
-    request_columns[2].metric(
-        "Requested Tickers",
-        f"{len(plan.requested_tickers):,}",
-    )
-    request_columns[3].metric(
-        "Latest Expected Session",
-        plan.latest_expected_stored_session.isoformat(),
+    is_manual_entry = (
+        str(
+            plan.source
+        ).strip()
+        == "Manual Entry"
     )
 
-    requested_start = (
-        plan.requested_start_date.isoformat()
-        if plan.requested_start_date is not None
-        else "—"
-    )
-    requested_end = (
-        plan.requested_end_date.isoformat()
-        if plan.requested_end_date is not None
-        else "—"
-    )
+    if is_manual_entry:
+        request_columns = st.columns(3)
 
-    st.caption(
-        f"Effective database range: {requested_start} through {requested_end}"
-    )
+        request_columns[0].metric(
+            "Operation",
+            plan.operation,
+        )
+        request_columns[1].metric(
+            "Source",
+            plan.source,
+        )
+        request_columns[2].metric(
+            "Latest Expected Session",
+            plan.latest_expected_stored_session.isoformat(),
+        )
+
+        st.caption(
+            "Manual Entry evaluates only the explicitly entered observation. "
+            "Source Missing inference is not used for this Preview."
+        )
+
+    else:
+        request_columns = st.columns(4)
+
+        request_columns[0].metric(
+            "Operation",
+            plan.operation,
+        )
+        request_columns[1].metric(
+            "Source",
+            plan.source,
+        )
+        request_columns[2].metric(
+            "Requested Tickers",
+            f"{len(plan.requested_tickers):,}",
+        )
+        request_columns[3].metric(
+            "Latest Expected Session",
+            plan.latest_expected_stored_session.isoformat(),
+        )
+
+        requested_start = (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "—"
+        )
+        requested_end = (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "—"
+        )
+
+        st.caption(
+            f"Effective database range: {requested_start} through "
+            f"{requested_end}"
+        )
 
     if plan.requested_tickers:
         with st.expander(
@@ -12690,38 +13060,39 @@ def _render_data_management_mutation_preview(
         ),
     )
 
-    summary_columns_3 = st.columns(3)
+    if not is_manual_entry:
+        summary_columns_3 = st.columns(3)
 
-    summary_columns_3[0].metric(
-        "Missing From Current yFinance Response",
-        f"{source_missing_count:,}",
-        help=(
-            "Expected NYSE trading sessions for which the current yFinance "
-            "request returned no ticker-date row. This does not mean "
-            "yFinance never had the record; it means the row was absent "
-            "from the response used to build this Preview."
-        ),
-    )
-    summary_columns_3[1].metric(
-        "Stored Records Kept Despite yFinance Omission",
-        f"{source_missing_preserved_count:,}",
-        help=(
-            "yFinance returned no row for these expected ticker-date "
-            "sessions, but the database already contains one. The stored "
-            "record will be kept unchanged; a missing row in the current "
-            "yFinance response does not authorize deletion."
-        ),
-    )
-    summary_columns_3[2].metric(
-        "Still Missing After yFinance Check",
-        f"{source_missing_unresolved_count:,}",
-        help=(
-            "Neither the current yFinance response nor the database contains "
-            "a record for these expected trading sessions. Data Management "
-            "will not fabricate OHLCV values, so these sessions remain "
-            "missing."
-        ),
-    )
+        summary_columns_3[0].metric(
+            "Missing From Current yFinance Response",
+            f"{source_missing_count:,}",
+            help=(
+                "Expected NYSE trading sessions for which the current "
+                "yFinance request returned no ticker-date row. This does not "
+                "mean yFinance never had the record; it means the row was "
+                "absent from the response used to build this Preview."
+            ),
+        )
+        summary_columns_3[1].metric(
+            "Stored Records Kept Despite yFinance Omission",
+            f"{source_missing_preserved_count:,}",
+            help=(
+                "yFinance returned no row for these expected ticker-date "
+                "sessions, but the database already contains one. The stored "
+                "record will be kept unchanged; a missing row in the current "
+                "yFinance response does not authorize deletion."
+            ),
+        )
+        summary_columns_3[2].metric(
+            "Still Missing After yFinance Check",
+            f"{source_missing_unresolved_count:,}",
+            help=(
+                "Neither the current yFinance response nor the database "
+                "contains a record for these expected trading sessions. "
+                "Data Management will not fabricate OHLCV values, so these "
+                "sessions remain missing."
+            ),
+        )
 
     _render_data_management_source_data_preview(
         plan
@@ -12842,6 +13213,72 @@ def _render_data_management_mutation_preview(
                 ),
             },
         )
+
+        if is_manual_entry:
+            manual_value_rows = []
+
+            for observation in plan.observations:
+                candidate_values = (
+                    observation.candidate.to_dict()
+                )
+
+                manual_value_rows.append(
+                    {
+                        "Open": candidate_values["Open"],
+                        "High": candidate_values["High"],
+                        "Low": candidate_values["Low"],
+                        "Close": candidate_values["Close"],
+                        "Adj Close": candidate_values["Adj Close"],
+                        "Volume": candidate_values["Volume"],
+                    }
+                )
+
+            if manual_value_rows:
+                st.caption(
+                    "Manual Entry values bound to this exact Preview:"
+                )
+
+                st.dataframe(
+                    pd.DataFrame(
+                        manual_value_rows,
+                        columns=[
+                            "Open",
+                            "High",
+                            "Low",
+                            "Close",
+                            "Adj Close",
+                            "Volume",
+                        ],
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Open": st.column_config.NumberColumn(
+                            "Open",
+                            format="%.3f",
+                        ),
+                        "High": st.column_config.NumberColumn(
+                            "High",
+                            format="%.3f",
+                        ),
+                        "Low": st.column_config.NumberColumn(
+                            "Low",
+                            format="%.3f",
+                        ),
+                        "Close": st.column_config.NumberColumn(
+                            "Close",
+                            format="%.3f",
+                        ),
+                        "Adj Close": st.column_config.NumberColumn(
+                            "Adj Close",
+                            format="%.3f",
+                        ),
+                        "Volume": st.column_config.NumberColumn(
+                            "Volume",
+                            format="%d",
+                        ),
+                    },
+                )
 
     if plan.validation_warnings:
         st.markdown("#### Warnings")
@@ -13092,9 +13529,33 @@ def _render_data_management_mutation_controls(
             "applying anything to the authoritative database."
         )
 
-    confirm_column, commit_column, discard_column = (
-        st.columns(3)
+    is_manual_entry = (
+        str(
+            plan.source
+        ).strip()
+        == "Manual Entry"
+        and plan.operation
+        in {
+            "Manual Add",
+            "Manual Replace",
+        }
     )
+
+    if is_manual_entry:
+        (
+            confirm_column,
+            commit_column,
+            edit_column,
+            discard_column,
+        ) = st.columns(4)
+    else:
+        (
+            confirm_column,
+            commit_column,
+            discard_column,
+        ) = st.columns(3)
+
+        edit_column = None
 
     with confirm_column:
         confirm_clicked = st.button(
@@ -13195,7 +13656,39 @@ def _render_data_management_mutation_controls(
             _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
             None,
         )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY,
+            None,
+        )
 
+        st.rerun()
+
+    edit_clicked = False
+
+    if edit_column is not None:
+        with edit_column:
+            edit_clicked = st.button(
+                "Edit Manual Inputs",
+                key=(
+                    "data_management_manual_entry_"
+                    "edit_inputs"
+                ),
+                use_container_width=True,
+                help=(
+                    "Discard this Preview and its approval while preserving "
+                    "the Manual Entry values so they can be corrected and "
+                    "previewed again. No database changes are made."
+                ),
+            )
+
+    if edit_clicked:
+        _discard_data_management_mutation_plan(
+            preserve_manual_entry_context=True,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+            None,
+        )
         st.rerun()
 
     with discard_column:
@@ -14171,6 +14664,14 @@ def show_data_management():
 
     _render_data_management_reconciliation_controls(
         inventory=inventory,
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
+
+    _render_data_management_manual_entry_controls(
         latest_expected_stored_session=(
             overview[
                 "latest_expected_stored_session"
