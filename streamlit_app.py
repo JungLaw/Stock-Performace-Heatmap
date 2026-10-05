@@ -11213,6 +11213,92 @@ _DATA_MANAGEMENT_SCD_STALE_KEY = (
     "data_management_scd_stale"
 )
 
+_DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY = (
+    "data_management_maintenance_request"
+)
+
+
+def _prepare_data_management_maintenance_request(
+    request: Dict[str, Any],
+) -> None:
+    """
+    Prepare one session-only Ticker Diagnostics maintenance handoff.
+
+    This helper may preselect the existing acquisition operation and stored
+    ticker controls. It does not acquire source data, build a MutationPlan,
+    approve changes, commit changes, or write to SQLite.
+    """
+    if not isinstance(
+        request,
+        dict,
+    ):
+        return
+
+    operation = str(
+        request.get(
+            "operation",
+            "",
+        )
+    ).strip()
+
+    if operation not in {
+        "Update to Current",
+        "Repair Missing",
+        "Repair Duplicate Stored Keys",
+    }:
+        return
+
+    ticker = str(
+        request.get(
+            "ticker",
+            "",
+        )
+    ).strip().upper()
+
+    if not ticker:
+        return
+
+    if st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    ) is not None:
+        return
+
+    normalized_request = dict(
+        request
+    )
+
+    normalized_request[
+        "operation"
+    ] = operation
+    normalized_request[
+        "ticker"
+    ] = ticker
+    normalized_request[
+        "origin"
+    ] = str(
+        normalized_request.get(
+            "origin",
+            "Ticker Diagnostics",
+        )
+    ).strip() or "Ticker Diagnostics"
+
+    st.session_state[
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY
+    ] = normalized_request
+
+    st.session_state[
+        "data_management_acquisition_operation"
+    ] = operation
+
+    st.session_state[
+        "data_management_acquisition_maintenance_ticker"
+    ] = ticker
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+        None,
+    )
+
 
 def _build_data_management_acquisition_context(
     result: DataAcquisitionResult,
@@ -11374,14 +11460,23 @@ def _render_data_management_acquisition_context(
 
 def _render_data_management_acquisition_controls(
     *,
+    inventory: list[Dict[str, Any]],
+    database_manager: DatabaseManager,
     latest_expected_stored_session: Any,
 ) -> None:
     """
-    Render the first canonical Data Management yFinance acquisition workflow.
+    Render canonical Data Management acquisition and maintenance workflows.
 
-    WS8 initially exposes the explicit-range Add operation. Acquisition is
-    read-only. Build Preview passes the exact effective source result into
-    DataMutationManager.build_plan(); mutation remains owned by WS7.
+    Supported operations:
+    - Add Market Data
+    - Update to Current
+    - Repair Missing
+    - Repair Duplicate Stored Keys
+    - Backfill Earlier
+
+    Acquisition remains read-only. Build Preview passes the exact effective
+    source result into DataMutationManager.build_plan(); the existing mutation
+    workflow continues to own Preview / Approve / Apply.
     """
     active_plan = st.session_state.get(
         _DATA_MANAGEMENT_MUTATION_PLAN_KEY
@@ -11411,6 +11506,10 @@ def _render_data_management_acquisition_controls(
 
     acquisition_context = st.session_state.get(
         _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    )
+
+    maintenance_request = st.session_state.get(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY
     )
 
     if active_plan is not None:
@@ -11448,43 +11547,690 @@ def _render_data_management_acquisition_controls(
     except Exception:
         default_end_date = date.today()
 
-    with st.form(
-        "data_management_acquisition_form"
-    ):
-        ticker_input = st.text_input(
-            "Ticker(s)",
-            value="",
+    operation_labels = [
+        "Add Market Data",
+        "Update to Current",
+        "Repair Missing",
+        "Repair Duplicate Stored Keys",
+        "Backfill Earlier",
+    ]
+
+    selected_operation = st.radio(
+        "Acquisition Operation",
+        options=operation_labels,
+        horizontal=True,
+        key="data_management_acquisition_operation",
+        help=(
+            "Add Market Data uses an explicit ticker/date request. "
+            "Update to Current fills the stale tail after a stored ticker's "
+            "Last Date. Repair Missing reacquires the envelope containing "
+            "known Internal Gaps while preserving existing rows. Repair "
+            "Duplicate Stored Keys reacquires canonical source observations "
+            "for exact duplicate ticker/date keys and replaces every stored "
+            "physical copy with one canonical row. Backfill Earlier extends "
+            "stored history before the current First Date."
+        ),
+    )
+
+    inventory_by_ticker = {
+        str(
+            row.get(
+                "ticker",
+                "",
+            )
+        ).strip().upper(): row
+        for row in inventory
+        if str(
+            row.get(
+                "ticker",
+                "",
+            )
+        ).strip()
+    }
+
+    stored_tickers = sorted(
+        inventory_by_ticker
+    )
+
+    requested_tickers: list[str] = []
+    requested_start_date: Optional[date] = None
+    requested_end_date: Optional[date] = None
+    backend_operation: Optional[str] = None
+    build_preview_clicked = False
+
+    if selected_operation == "Add Market Data":
+        backend_operation = "Add"
+
+        with st.form(
+            "data_management_acquisition_form"
+        ):
+            ticker_input = st.text_input(
+                "Ticker(s)",
+                value="",
+                help=(
+                    "Enter one or more ticker symbols separated by commas "
+                    "or spaces."
+                ),
+            )
+
+            date_columns = st.columns(2)
+
+            with date_columns[0]:
+                requested_start_date = st.date_input(
+                    "Start Date",
+                    value=default_end_date,
+                )
+
+            with date_columns[1]:
+                requested_end_date = st.date_input(
+                    "End Date",
+                    value=default_end_date,
+                )
+
+            build_preview_clicked = (
+                st.form_submit_button(
+                    "Preview Database Changes",
+                    type="primary",
+                    use_container_width=True,
+                    help=(
+                        "Fetch the requested yFinance data and compare it with "
+                        "the authoritative database. This does not save or "
+                        "replace any records."
+                    ),
+                )
+            )
+
+        if build_preview_clicked:
+            requested_tickers = [
+                ticker
+                for ticker in (
+                    str(ticker_input)
+                    .replace(",", " ")
+                    .split()
+                )
+                if ticker
+            ]
+
+    else:
+        if not stored_tickers:
+            st.warning(
+                "No stored tickers are available for this maintenance "
+                "operation."
+            )
+            return
+
+        selected_ticker = st.selectbox(
+            "Stored Ticker",
+            options=stored_tickers,
+            key="data_management_acquisition_maintenance_ticker",
             help=(
-                "Enter one or more ticker symbols separated by commas "
-                "or spaces."
+                "Choose one ticker currently stored in daily_prices."
             ),
         )
 
-        date_columns = st.columns(2)
+        selected_inventory = (
+            inventory_by_ticker[
+                selected_ticker
+            ]
+        )
 
-        with date_columns[0]:
+        if isinstance(
+            maintenance_request,
+            dict,
+        ):
+            prepared_operation = str(
+                maintenance_request.get(
+                    "operation",
+                    "",
+                )
+            ).strip()
+            prepared_ticker = str(
+                maintenance_request.get(
+                    "ticker",
+                    "",
+                )
+            ).strip().upper()
+
+            if (
+                prepared_operation
+                == selected_operation
+                and prepared_ticker
+                == selected_ticker
+            ):
+                reason = str(
+                    maintenance_request.get(
+                        "reason",
+                        "",
+                    )
+                ).strip()
+
+                suggested_start = (
+                    maintenance_request.get(
+                        "suggested_start_date"
+                    )
+                )
+                suggested_end = (
+                    maintenance_request.get(
+                        "suggested_end_date"
+                    )
+                )
+
+                prepared_message = (
+                    "Prepared from Ticker Diagnostics"
+                )
+
+                if reason:
+                    prepared_message += (
+                        f": {reason}"
+                    )
+
+                st.info(
+                    prepared_message
+                )
+
+                if (
+                    suggested_start
+                    and suggested_end
+                ):
+                    st.caption(
+                        "Diagnostic-derived request scope: "
+                        f"{suggested_start} → "
+                        f"{suggested_end}. "
+                        "Review the authoritative scope below, then explicitly "
+                        "build the Preview when ready."
+                    )
+
+                evidence = (
+                    maintenance_request.get(
+                        "evidence",
+                        {},
+                    )
+                )
+
+                if isinstance(
+                    evidence,
+                    dict,
+                ):
+                    if (
+                        selected_operation
+                        == "Repair Missing"
+                    ):
+                        gap_count = int(
+                            evidence.get(
+                                "internal_gap_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        gap_range_count = len(
+                            evidence.get(
+                                "internal_gap_ranges",
+                                [],
+                            )
+                            or []
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{gap_count:,} missing expected session(s) "
+                            f"across {gap_range_count:,} Internal Gap "
+                            "range(s)."
+                        )
+
+                    elif (
+                        selected_operation
+                        == "Update to Current"
+                    ):
+                        tail_count = int(
+                            evidence.get(
+                                "missing_tail_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        tail_range_count = len(
+                            evidence.get(
+                                "missing_tail_ranges",
+                                [],
+                            )
+                            or []
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{tail_count:,} missing expected tail session(s) "
+                            f"across {tail_range_count:,} tail range(s)."
+                        )
+
+                    elif (
+                        selected_operation
+                        == "Repair Duplicate Stored Keys"
+                    ):
+                        duplicate_key_count = int(
+                            evidence.get(
+                                "duplicate_stored_key_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        excess_row_count = int(
+                            evidence.get(
+                                "duplicate_stored_excess_rows",
+                                0,
+                            )
+                            or 0
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{duplicate_key_count:,} duplicate stored "
+                            "(Ticker, Date) key(s), representing "
+                            f"{excess_row_count:,} excess physical row(s)."
+                        )
+            else:
+                st.session_state.pop(
+                    _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+                    None,
+                )
+                maintenance_request = None
+
+        stored_columns = st.columns(4)
+
+        stored_columns[0].metric(
+            "Stored Records",
+            f"{int(selected_inventory.get('records', 0) or 0):,}",
+        )
+        stored_columns[1].metric(
+            "First Stored Date",
+            selected_inventory.get(
+                "first_date"
+            ) or "—",
+        )
+        stored_columns[2].metric(
+            "Last Stored Date",
+            selected_inventory.get(
+                "last_date"
+            ) or "—",
+        )
+        stored_columns[3].metric(
+            "Status",
+            selected_inventory.get(
+                "status"
+            ) or "—",
+        )
+
+        requested_tickers = [
+            selected_ticker
+        ]
+
+        maintenance_request_ready = True
+
+        if selected_operation == "Update to Current":
+            backend_operation = "Update to Current"
+
+            try:
+                last_stored_date = date.fromisoformat(
+                    str(
+                        selected_inventory[
+                            "last_date"
+                        ]
+                    )
+                )
+                requested_start_date = (
+                    last_stored_date
+                    + timedelta(days=1)
+                )
+                requested_end_date = (
+                    default_end_date
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored Last Date for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            scope_columns = st.columns(2)
+
+            scope_columns[0].metric(
+                "Update From",
+                requested_start_date.isoformat(),
+            )
+            scope_columns[1].metric(
+                "Update Through",
+                requested_end_date.isoformat(),
+            )
+
+            if (
+                requested_start_date
+                > requested_end_date
+            ):
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} already reaches the Latest Expected "
+                    "Stored Session. There is no stale tail to update."
+                )
+            else:
+                st.caption(
+                    "Update to Current acquires the calendar interval after "
+                    "the current Last Date through the Latest Expected Stored "
+                    "Session. Existing stored observations are preserved."
+                )
+
+        elif selected_operation == "Repair Missing":
+            backend_operation = "Repair Missing"
+
+            try:
+                diagnostics = (
+                    database_manager.get_ticker_diagnostics(
+                        selected_ticker
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to read Internal Gap diagnostics for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            internal_gap_dates = (
+                list(
+                    diagnostics.get(
+                        "internal_gap_dates",
+                        [],
+                    )
+                )
+                if isinstance(
+                    diagnostics,
+                    dict,
+                )
+                else []
+            )
+
+            if not internal_gap_dates:
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} has no known Internal Gaps to repair."
+                )
+            else:
+                try:
+                    requested_start_date = (
+                        date.fromisoformat(
+                            str(
+                                internal_gap_dates[
+                                    0
+                                ]
+                            )
+                        )
+                    )
+                    requested_end_date = (
+                        date.fromisoformat(
+                            str(
+                                internal_gap_dates[
+                                    -1
+                                ]
+                            )
+                        )
+                    )
+                except Exception as exc:
+                    st.error(
+                        "Unable to resolve the Internal Gap repair scope for "
+                        f"{selected_ticker}: {exc}"
+                    )
+                    return
+
+                gap_columns = st.columns(3)
+
+                gap_columns[0].metric(
+                    "Missing Sessions",
+                    f"{len(internal_gap_dates):,}",
+                )
+                gap_columns[1].metric(
+                    "Repair From",
+                    requested_start_date.isoformat(),
+                )
+                gap_columns[2].metric(
+                    "Repair Through",
+                    requested_end_date.isoformat(),
+                )
+
+                st.caption(
+                    "Repair Missing reacquires the continuous envelope from "
+                    "the first known Internal Gap through the last known "
+                    "Internal Gap. Existing stored rows inside that envelope "
+                    "are preserved; only eligible missing observations can "
+                    "be added."
+                )
+
+        elif (
+            selected_operation
+            == "Repair Duplicate Stored Keys"
+        ):
+            backend_operation = (
+                "Repair Duplicate Stored Keys"
+            )
+
+            try:
+                diagnostics = (
+                    database_manager.get_ticker_diagnostics(
+                        selected_ticker
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to read Duplicate Stored Key diagnostics for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            duplicate_stored_keys = (
+                list(
+                    diagnostics.get(
+                        "duplicate_stored_keys",
+                        [],
+                    )
+                )
+                if isinstance(
+                    diagnostics,
+                    dict,
+                )
+                else []
+            )
+
+            duplicate_dates = [
+                str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+                for duplicate_key
+                in duplicate_stored_keys
+                if str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+            ]
+
+            if not duplicate_dates:
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} has no Duplicate Stored Keys "
+                    "to repair."
+                )
+            else:
+                try:
+                    requested_start_date = (
+                        date.fromisoformat(
+                            duplicate_dates[
+                                0
+                            ]
+                        )
+                    )
+                    requested_end_date = (
+                        date.fromisoformat(
+                            duplicate_dates[
+                                -1
+                            ]
+                        )
+                    )
+                except Exception as exc:
+                    st.error(
+                        "Unable to resolve the Duplicate Stored Key "
+                        f"repair scope for {selected_ticker}: {exc}"
+                    )
+                    return
+
+                duplicate_physical_rows = sum(
+                    int(
+                        duplicate_key.get(
+                            "physical_rows",
+                            0,
+                        )
+                        or 0
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                )
+
+                duplicate_excess_rows = sum(
+                    int(
+                        duplicate_key.get(
+                            "excess_rows",
+                            0,
+                        )
+                        or 0
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                )
+
+                duplicate_columns = st.columns(
+                    5
+                )
+
+                duplicate_columns[0].metric(
+                    "Duplicate Keys",
+                    f"{len(duplicate_dates):,}",
+                )
+                duplicate_columns[1].metric(
+                    "Physical Rows",
+                    f"{duplicate_physical_rows:,}",
+                )
+                duplicate_columns[2].metric(
+                    "Excess Rows",
+                    f"{duplicate_excess_rows:,}",
+                )
+                duplicate_columns[3].metric(
+                    "Acquire From",
+                    requested_start_date.isoformat(),
+                )
+                duplicate_columns[4].metric(
+                    "Acquire Through",
+                    requested_end_date.isoformat(),
+                )
+
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Duplicate Date": (
+                                    duplicate_key[
+                                        "date"
+                                    ]
+                                ),
+                                "Physical Rows": (
+                                    duplicate_key[
+                                        "physical_rows"
+                                    ]
+                                ),
+                                "Excess Rows": (
+                                    duplicate_key[
+                                        "excess_rows"
+                                    ]
+                                ),
+                            }
+                            for duplicate_key
+                            in duplicate_stored_keys
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.caption(
+                    "Canonical yFinance data is acquired over the continuous "
+                    "calendar envelope from the first duplicate date through "
+                    "the last duplicate date. Only the exact Duplicate Dates "
+                    "shown above are repair targets; intervening non-duplicate "
+                    "stored dates are not eligible for mutation."
+                )
+
+        else:
+            backend_operation = "Backfill Earlier"
+
+            try:
+                first_stored_date = date.fromisoformat(
+                    str(
+                        selected_inventory[
+                            "first_date"
+                        ]
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored First Date for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            requested_end_date = (
+                first_stored_date
+                - timedelta(days=1)
+            )
+
             requested_start_date = st.date_input(
-                "Start Date",
-                value=default_end_date,
-            )
-
-        with date_columns[1]:
-            requested_end_date = st.date_input(
-                "End Date",
-                value=default_end_date,
-            )
-
-        build_preview_clicked = (
-            st.form_submit_button(
-                "Preview Database Changes",
-                type="primary",
-                use_container_width=True,
+                "Backfill Start Date",
+                value=requested_end_date,
+                max_value=requested_end_date,
+                key="data_management_backfill_start_date",
                 help=(
-                    "Fetch the requested yFinance data and compare it with "
-                    "the authoritative database. This does not save or "
-                    "replace any records."
+                    "Choose how far back to extend stored history. "
+                    "The backfill ends on the calendar day immediately before "
+                    "the ticker's current First Stored Date."
                 ),
             )
+
+            backfill_columns = st.columns(2)
+
+            backfill_columns[0].metric(
+                "Backfill From",
+                requested_start_date.isoformat(),
+            )
+            backfill_columns[1].metric(
+                "Backfill Through",
+                requested_end_date.isoformat(),
+            )
+
+            st.caption(
+                "Backfill Earlier preserves every existing stored observation "
+                "and only adds eligible observations before the current "
+                "First Stored Date."
+            )
+
+        build_preview_clicked = st.button(
+            "Preview Database Changes",
+            key="data_management_acquisition_maintenance_preview",
+            type="primary",
+            use_container_width=True,
+            disabled=not maintenance_request_ready,
+            help=(
+                "Fetch canonical yFinance data for this maintenance scope and "
+                "compare it with the authoritative database. Nothing is "
+                "changed until the resulting Preview is approved and applied."
+            ),
         )
 
     if not build_preview_clicked:
@@ -11498,19 +12244,31 @@ def _render_data_management_acquisition_controls(
 
         return
 
-    requested_tickers = [
-        ticker
-        for ticker in (
-            str(ticker_input)
-            .replace(",", " ")
-            .split()
-        )
-        if ticker
-    ]
-
     if not requested_tickers:
         st.error(
             "Enter at least one ticker before previewing database changes."
+        )
+        return
+
+    if (
+        requested_start_date is None
+        or requested_end_date is None
+    ):
+        st.error(
+            "A valid Start Date and End Date are required before "
+            "previewing database changes."
+        )
+        return
+
+    if requested_start_date > requested_end_date:
+        st.error(
+            "Requested Start Date cannot be later than End Date."
+        )
+        return
+
+    if backend_operation is None:
+        st.error(
+            "Unable to resolve the selected acquisition operation."
         )
         return
 
@@ -11549,7 +12307,7 @@ def _render_data_management_acquisition_controls(
 
     acquisition_context[
         "ui_operation"
-    ] = "Add Market Data"
+    ] = selected_operation
 
     st.session_state[
         _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
@@ -11564,22 +12322,57 @@ def _render_data_management_acquisition_controls(
     mutation_manager = DataMutationManager()
 
     try:
-        plan = mutation_manager.build_plan(
-            operation="Add",
-            source=acquisition_result.source,
-            candidates=(
-                acquisition_result.candidates
-            ),
-            requested_tickers=(
-                acquisition_result.requested_tickers
-            ),
-            requested_start_date=(
-                acquisition_result.effective_start_date
-            ),
-            requested_end_date=(
-                acquisition_result.effective_end_date
-            ),
-        )
+        if (
+            backend_operation
+            == "Repair Duplicate Stored Keys"
+        ):
+            duplicate_repair_dates = [
+                str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+                for duplicate_key
+                in duplicate_stored_keys
+                if str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+            ]
+
+            plan = (
+                mutation_manager.build_duplicate_repair_plan(
+                    operation=backend_operation,
+                    source=acquisition_result.source,
+                    ticker=requested_tickers[0],
+                    duplicate_dates=(
+                        duplicate_repair_dates
+                    ),
+                    candidates=(
+                        acquisition_result.candidates
+                    ),
+                )
+            )
+        else:
+            plan = mutation_manager.build_plan(
+                operation=backend_operation,
+                source=acquisition_result.source,
+                candidates=(
+                    acquisition_result.candidates
+                ),
+                requested_tickers=(
+                    acquisition_result.requested_tickers
+                ),
+                requested_start_date=(
+                    acquisition_result.effective_start_date
+                ),
+                requested_end_date=(
+                    acquisition_result.effective_end_date
+                ),
+            )
     except Exception as exc:
         st.error(
             "Unable to build Database Change Preview: "
@@ -11589,6 +12382,11 @@ def _render_data_management_acquisition_controls(
 
     _set_data_management_mutation_plan(
         plan
+    )
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+        None,
     )
 
     st.rerun()
@@ -11691,8 +12489,8 @@ def _render_data_management_reconciliation_controls(
     )
 
     operation_labels = [
-        "Replace a Date Range",
         "Refresh Existing Coverage",
+        "Replace a Date Range",
     ]
 
     selected_operation = st.radio(
@@ -11701,9 +12499,10 @@ def _render_data_management_reconciliation_controls(
         horizontal=True,
         key="data_management_reconciliation_operation",
         help=(
-            "Replace a Date Range uses one explicit shared date range for "
-            "one or more tickers. Refresh Existing Coverage checks one stored "
-            "ticker across its entire current First Date through Last Date."
+            "Refresh Existing Coverage checks one stored ticker across its "
+            "entire current First Date through Last Date. Replace a Date "
+            "Range uses one explicit shared date range for one or more "
+            "tickers."
         ),
     )
 
@@ -12647,6 +13446,10 @@ def _discard_data_management_mutation_plan(
         _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
         None,
     )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+        None,
+    )
 
     if not preserve_manual_entry_context:
         st.session_state.pop(
@@ -13209,6 +14012,360 @@ def _render_data_management_deletion_preview(
         "plan fingerprint, not only to the rows displayed in this table."
     )
 
+def _render_data_management_duplicate_repair_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render one exact materialized Duplicate Stored Key repair Preview.
+
+    All stored and proposed values come from MutationPlan.duplicate_repairs.
+    This helper does not refetch source data or reread SQLite.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_duplicate_repair_plan()."
+        )
+
+    repair_count = len(
+        plan.duplicate_repairs
+    )
+    physical_rows_to_remove = sum(
+        repair.physical_row_count
+        for repair
+        in plan.duplicate_repairs
+    )
+    canonical_rows_to_insert = (
+        repair_count
+    )
+    net_rows_removed = (
+        physical_rows_to_remove
+        - canonical_rows_to_insert
+    )
+
+    st.markdown("---")
+    st.subheader(
+        "Database Change Preview"
+    )
+
+    st.caption(
+        "Review the exact Duplicate Stored Key repair. Nothing is changed by "
+        "this Preview. Approval is bound to every physical stored duplicate "
+        "row plus the exact canonical replacement observation."
+    )
+
+    request_columns = st.columns(
+        4
+    )
+
+    request_columns[0].metric(
+        "Operation",
+        plan.operation,
+    )
+    request_columns[1].metric(
+        "Source",
+        plan.source,
+    )
+    request_columns[2].metric(
+        "Duplicate Keys to Repair",
+        f"{repair_count:,}",
+    )
+    request_columns[3].metric(
+        "Latest Expected Session",
+        plan.latest_expected_stored_session.isoformat(),
+    )
+
+    requested_start = (
+        plan.requested_start_date.isoformat()
+        if plan.requested_start_date
+        is not None
+        else "—"
+    )
+    requested_end = (
+        plan.requested_end_date.isoformat()
+        if plan.requested_end_date
+        is not None
+        else "—"
+    )
+
+    st.caption(
+        "Acquisition envelope represented by this Preview: "
+        f"{requested_start} through {requested_end}. "
+        "Only the exact duplicate keys materialized below can be changed."
+    )
+
+    summary_columns = st.columns(
+        4
+    )
+
+    summary_columns[0].metric(
+        "Duplicate Keys",
+        f"{repair_count:,}",
+    )
+    summary_columns[1].metric(
+        "Stored Physical Rows",
+        f"{physical_rows_to_remove:,}",
+        help=(
+            "Every physical stored row captured for the duplicate keys "
+            "in this exact Preview."
+        ),
+    )
+    summary_columns[2].metric(
+        "Canonical Rows to Insert",
+        f"{canonical_rows_to_insert:,}",
+        help=(
+            "Exactly one validated canonical source observation will remain "
+            "for each successfully repaired logical key."
+        ),
+    )
+    summary_columns[3].metric(
+        "Net Excess Rows Removed",
+        f"{net_rows_removed:,}",
+        help=(
+            "Stored physical rows removed minus canonical rows inserted."
+        ),
+    )
+
+    if plan.duplicate_repairs:
+        st.info(
+            "**What this preview will do:** "
+            f"{repair_count:,} duplicate logical key(s) contain "
+            f"{physical_rows_to_remove:,} stored physical row(s). "
+            "If approved and applied, Data Management will atomically remove "
+            "all stored physical copies for each exact key and insert exactly "
+            f"{canonical_rows_to_insert:,} validated canonical source row(s), "
+            f"removing {net_rows_removed:,} net excess row(s)."
+        )
+
+        st.markdown(
+            "#### Duplicate Repair Actions"
+        )
+
+        action_rows = []
+
+        for repair in plan.duplicate_repairs:
+            action_rows.append(
+                {
+                    "Ticker": (
+                        repair.candidate.ticker
+                    ),
+                    "Date": (
+                        repair.candidate.date.isoformat()
+                    ),
+                    "Stored Physical Rows": (
+                        repair.physical_row_count
+                    ),
+                    "Canonical Rows After Repair": 1,
+                    "What Will Happen": (
+                        f"Replace {repair.physical_row_count} stored "
+                        "physical rows with 1 canonical row"
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(
+                action_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        for repair in plan.duplicate_repairs:
+            st.markdown(
+                f"##### {repair.candidate.ticker} — "
+                f"{repair.candidate.date.isoformat()}"
+            )
+
+            stored_rows = []
+
+            for row_number, stored_record in enumerate(
+                repair.stored_records,
+                start=1,
+            ):
+                stored_values = (
+                    stored_record.to_dict()
+                )
+
+                stored_rows.append(
+                    {
+                        "Stored Copy": row_number,
+                        "Open": stored_values[
+                            "Open"
+                        ],
+                        "High": stored_values[
+                            "High"
+                        ],
+                        "Low": stored_values[
+                            "Low"
+                        ],
+                        "Close": stored_values[
+                            "Close"
+                        ],
+                        "Adj Close": stored_values[
+                            "Adj Close"
+                        ],
+                        "Volume": stored_values[
+                            "Volume"
+                        ],
+                    }
+                )
+
+            st.caption(
+                "Physical stored copies captured by this exact Preview:"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    stored_rows
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            candidate_values = (
+                repair.candidate.to_dict()
+            )
+
+            st.caption(
+                "Canonical source observation that will replace all stored "
+                "copies for this logical key:"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Open": candidate_values[
+                                "Open"
+                            ],
+                            "High": candidate_values[
+                                "High"
+                            ],
+                            "Low": candidate_values[
+                                "Low"
+                            ],
+                            "Close": candidate_values[
+                                "Close"
+                            ],
+                            "Adj Close": candidate_values[
+                                "Adj Close"
+                            ],
+                            "Volume": candidate_values[
+                                "Volume"
+                            ],
+                        }
+                    ]
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+    else:
+        st.warning(
+            "No valid duplicate repair actions were materialized."
+        )
+
+    if plan.validation_warnings:
+        st.markdown(
+            "#### Warnings"
+        )
+
+        warning_rows = [
+            {
+                "Ticker": warning.ticker
+                or "—",
+                "Date": warning.date
+                or "—",
+                "Code": warning.code,
+                "Message": warning.message,
+            }
+            for warning
+            in plan.validation_warnings
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                warning_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.excluded_observations:
+        st.markdown(
+            "#### Rows Not Eligible"
+        )
+
+        excluded_rows = []
+
+        for observation in plan.excluded_observations:
+            for issue in observation.issues:
+                excluded_rows.append(
+                    {
+                        "Ticker": (
+                            observation.ticker
+                            or "—"
+                        ),
+                        "Date": (
+                            observation.date
+                            or "—"
+                        ),
+                        "Code": issue.code,
+                        "Reason": (
+                            issue.message
+                        ),
+                    }
+                )
+
+        st.dataframe(
+            pd.DataFrame(
+                excluded_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.validation_issues:
+        st.markdown(
+            "#### Blocking Issues"
+        )
+
+        st.caption(
+            "These issues prevent this duplicate-repair Preview from being "
+            "applied. Build a fresh valid Preview before making database "
+            "changes."
+        )
+
+        issue_rows = [
+            {
+                "Ticker": issue.ticker
+                or "—",
+                "Date": issue.date
+                or "—",
+                "Code": issue.code,
+                "Message": issue.message,
+            }
+            for issue
+            in plan.validation_issues
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                issue_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "Preview ID: "
+        f"{plan.plan_fingerprint} "
+        "— used internally to bind approval to this exact duplicate repair."
+    )
+
 
 def _render_data_management_mutation_preview(
     plan: MutationPlan,
@@ -13225,6 +14382,15 @@ def _render_data_management_mutation_preview(
         "Delete Ticker",
     }:
         _render_data_management_deletion_preview(
+            plan
+        )
+        return
+
+    if (
+        plan.operation
+        == "Repair Duplicate Stored Keys"
+    ):
+        _render_data_management_duplicate_repair_preview(
             plan
         )
         return
@@ -13635,52 +14801,241 @@ def _render_data_management_mutation_preview(
                 }
             )
 
-        st.dataframe(
-            pd.DataFrame(observation_rows),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Compared with Stored Data": (
-                    st.column_config.TextColumn(
-                        "Compared with Stored Data",
-                        help=(
-                            "New: no stored ticker/date exists. "
-                            "Same: source and stored OHLCV values match. "
-                            "Different: the ticker/date exists but one or "
-                            "more OHLCV values differ."
-                        ),
-                    )
-                ),
-                "What Will Happen": (
-                    st.column_config.TextColumn(
-                        "What Will Happen",
-                        help=(
-                            "The exact database action authorized by this "
-                            "preview: Add Record, No Change, Keep Stored "
-                            "Record, or Replace Stored Record."
-                        ),
-                    )
-                ),
-                "Existing Record": (
-                    st.column_config.TextColumn(
-                        "Existing Record",
-                        help=(
-                            "Yes means the authoritative database already "
-                            "contains this ticker/date. This is not an error."
-                        ),
-                    )
-                ),
-                "Fields That Differ": (
-                    st.column_config.TextColumn(
-                        "Fields That Differ",
-                        help=(
-                            "The stored OHLCV fields whose values differ "
-                            "from the newly acquired source observation."
-                        ),
-                    )
-                ),
-            },
+        comparison_df = pd.DataFrame(
+            observation_rows
         )
+
+        filter_row_one = st.columns(
+            [1.2, 1.4, 1.0]
+        )
+
+        with filter_row_one[0]:
+            comparison_filter = st.selectbox(
+                "Compared with Stored Data",
+                options=[
+                    "All",
+                    "New",
+                    "Same",
+                    "Different",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "classification_filter"
+                ),
+            )
+
+        with filter_row_one[1]:
+            action_filter = st.selectbox(
+                "What Will Happen",
+                options=[
+                    "All",
+                    "Add Record",
+                    "No Change",
+                    "Keep Stored Record",
+                    "Replace Stored Record",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "action_filter"
+                ),
+            )
+
+        with filter_row_one[2]:
+            existing_record_filter = st.selectbox(
+                "Existing Record",
+                options=[
+                    "All",
+                    "Yes",
+                    "No",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "existing_record_filter"
+                ),
+            )
+
+        filter_row_two = st.columns(
+            [1.2, 1.8]
+        )
+
+        with filter_row_two[0]:
+            differing_field_filter = st.selectbox(
+                "Fields That Differ",
+                options=[
+                    "All",
+                    "Any Difference",
+                    "Open",
+                    "High",
+                    "Low",
+                    "Close",
+                    "Adj Close",
+                    "Volume",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "differing_field_filter"
+                ),
+            )
+
+        with filter_row_two[1]:
+            date_search = st.text_input(
+                "Search Date",
+                value="",
+                key=(
+                    "data_management_record_comparison_"
+                    "date_search"
+                ),
+                placeholder="Examples: 2024, 2024-12, 2024-12-18",
+                help=(
+                    "Filters the ISO Date column using partial text matching. "
+                    "For example, 2024-12 shows all December 2024 records."
+                ),
+            ).strip()
+
+        filtered_comparison_df = (
+            comparison_df.copy()
+        )
+
+        if comparison_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Compared with Stored Data"
+                    ]
+                    == comparison_filter
+                ]
+            )
+
+        if action_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "What Will Happen"
+                    ]
+                    == action_filter
+                ]
+            )
+
+        if existing_record_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Existing Record"
+                    ]
+                    == existing_record_filter
+                ]
+            )
+
+        if differing_field_filter == "Any Difference":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Fields That Differ"
+                    ]
+                    != "—"
+                ]
+            )
+        elif differing_field_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Fields That Differ"
+                    ].apply(
+                        lambda value: (
+                            differing_field_filter
+                            in {
+                                field.strip()
+                                for field in str(
+                                    value
+                                ).split(",")
+                                if field.strip()
+                                and field.strip()
+                                != "—"
+                            }
+                        )
+                    )
+                ]
+            )
+
+        if date_search:
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Date"
+                    ]
+                    .astype(str)
+                    .str.contains(
+                        date_search,
+                        case=False,
+                        regex=False,
+                        na=False,
+                    )
+                ]
+            )
+
+        st.caption(
+            f"Showing {len(filtered_comparison_df):,} of "
+            f"{len(comparison_df):,} comparison row(s). "
+            "Filters affect display only; approval and Apply remain bound "
+            "to the complete unfiltered Database Change Preview."
+        )
+
+        if filtered_comparison_df.empty:
+            st.info(
+                "No comparison rows match the selected filters."
+            )
+        else:
+            st.dataframe(
+                filtered_comparison_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Compared with Stored Data": (
+                        st.column_config.TextColumn(
+                            "Compared with Stored Data",
+                            help=(
+                                "New: no stored ticker/date exists. "
+                                "Same: source and stored OHLCV values match. "
+                                "Different: the ticker/date exists but one or "
+                                "more OHLCV values differ."
+                            ),
+                        )
+                    ),
+                    "What Will Happen": (
+                        st.column_config.TextColumn(
+                            "What Will Happen",
+                            help=(
+                                "The exact database action authorized by this "
+                                "preview: Add Record, No Change, Keep Stored "
+                                "Record, or Replace Stored Record."
+                            ),
+                        )
+                    ),
+                    "Existing Record": (
+                        st.column_config.TextColumn(
+                            "Existing Record",
+                            help=(
+                                "Yes means the authoritative database already "
+                                "contains this ticker/date. This is not an "
+                                "error."
+                            ),
+                        )
+                    ),
+                    "Fields That Differ": (
+                        st.column_config.TextColumn(
+                            "Fields That Differ",
+                            help=(
+                                "The stored OHLCV fields whose values differ "
+                                "from the newly acquired source observation."
+                            ),
+                        )
+                    ),
+                },
+            )
 
         if is_manual_entry:
             manual_value_rows = []
@@ -14138,6 +15493,10 @@ def _render_data_management_mutation_controls(
         )
         st.session_state.pop(
             _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
             None,
         )
         st.session_state.pop(
@@ -14844,6 +16203,13 @@ def show_data_management():
             None,
         )
 
+    maintenance_handoff_disabled = (
+        st.session_state.get(
+            _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+        )
+        is not None
+    )
+
     if not selected_diagnostics_ticker:
         st.info(
             "Select a stored ticker to view detailed "
@@ -14927,6 +16293,154 @@ def show_data_management():
                 args=(diagnostics["ticker"],),
             )
 
+            st.markdown(
+                "#### Duplicate Stored Key Diagnostics"
+            )
+
+            duplicate_stored_keys = diagnostics[
+                "duplicate_stored_keys"
+            ]
+
+            if duplicate_stored_keys:
+                st.warning(
+                    f"{len(duplicate_stored_keys):,} duplicate stored "
+                    "(Ticker, Date) key(s) were found, representing "
+                    f"{diagnostics['duplicate_stored_excess_rows']:,} "
+                    "excess physical row(s)."
+                )
+
+                duplicate_key_rows = [
+                    {
+                        "Date": duplicate_key[
+                            "date"
+                        ],
+                        "Physical Rows": (
+                            duplicate_key[
+                                "physical_rows"
+                            ]
+                        ),
+                        "Excess Rows": (
+                            duplicate_key[
+                                "excess_rows"
+                            ]
+                        ),
+                    }
+                    for duplicate_key
+                    in duplicate_stored_keys
+                ]
+
+                st.dataframe(
+                    pd.DataFrame(
+                        duplicate_key_rows
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                duplicate_dates = [
+                    str(
+                        duplicate_key[
+                            "date"
+                        ]
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                ]
+
+                duplicate_repair_request = {
+                    "operation": (
+                        "Repair Duplicate Stored Keys"
+                    ),
+                    "ticker": diagnostics[
+                        "ticker"
+                    ],
+                    "origin": (
+                        "Ticker Diagnostics"
+                    ),
+                    "reason": (
+                        f"{len(duplicate_stored_keys):,} duplicate stored "
+                        "(Ticker, Date) key(s) were detected, representing "
+                        f"{diagnostics['duplicate_stored_excess_rows']:,} "
+                        "excess physical row(s)."
+                    ),
+                    "suggested_start_date": (
+                        duplicate_dates[0]
+                    ),
+                    "suggested_end_date": (
+                        duplicate_dates[-1]
+                    ),
+                    "evidence": {
+                        "duplicate_stored_key_count": (
+                            len(
+                                duplicate_stored_keys
+                            )
+                        ),
+                        "duplicate_stored_excess_rows": (
+                            diagnostics[
+                                "duplicate_stored_excess_rows"
+                            ]
+                        ),
+                        "duplicate_dates": list(
+                            duplicate_dates
+                        ),
+                        "duplicate_stored_keys": [
+                            dict(
+                                duplicate_key
+                            )
+                            for duplicate_key
+                            in duplicate_stored_keys
+                        ],
+                    },
+                }
+
+                st.info(
+                    "Recommended maintenance: Repair Duplicate Stored Keys. "
+                    "The repair will reacquire canonical yFinance history "
+                    "covering the affected dates, but only the exact duplicate "
+                    "(Ticker, Date) keys shown above are eligible for repair. "
+                    "Every physical copy for an approved duplicate key will "
+                    "be replaced atomically with one validated canonical "
+                    "source observation."
+                )
+
+                st.button(
+                    "Prepare Duplicate Repair",
+                    key=(
+                        "data_management_diagnostics_prepare_"
+                        "duplicate_repair_"
+                        f"{diagnostics['ticker']}"
+                    ),
+                    on_click=(
+                        _prepare_data_management_maintenance_request
+                    ),
+                    args=(
+                        duplicate_repair_request,
+                    ),
+                    disabled=maintenance_handoff_disabled,
+                    help=(
+                        "Prepare the canonical duplicate-repair workflow "
+                        "below. This does not fetch source data, build a "
+                        "Preview, approve changes, or modify the database."
+                    ),
+                )
+
+                st.caption(
+                    "Continue below in Acquire Market Data to review the "
+                    "exact duplicate-key repair scope, then explicitly build "
+                    "the Preview."
+                )
+            else:
+                st.info(
+                    "No duplicate stored (Ticker, Date) keys found."
+                )
+
+            st.caption(
+                "Duplicate Stored Keys are detected by logical identity "
+                "only: the same ticker and date appearing in more than one "
+                "physical database row. OHLCV and Adj Close values do not "
+                "need to match for the rows to be duplicates."
+            )
+
             st.markdown("#### Internal Gap Diagnostics")
 
             internal_gap_dates = diagnostics[
@@ -14983,6 +16497,73 @@ def show_data_management():
                         use_container_width=True,
                         hide_index=True,
                     )
+
+                repair_request = {
+                    "operation": "Repair Missing",
+                    "ticker": diagnostics["ticker"],
+                    "origin": "Ticker Diagnostics",
+                    "reason": (
+                        f"{len(internal_gap_dates):,} expected NYSE "
+                        "session(s) are missing inside stored coverage."
+                    ),
+                    "suggested_start_date": (
+                        internal_gap_dates[0]
+                    ),
+                    "suggested_end_date": (
+                        internal_gap_dates[-1]
+                    ),
+                    "evidence": {
+                        "internal_gap_count": (
+                            len(
+                                internal_gap_dates
+                            )
+                        ),
+                        "internal_gap_dates": (
+                            list(
+                                internal_gap_dates
+                            )
+                        ),
+                        "internal_gap_ranges": [
+                            dict(
+                                gap_range
+                            )
+                            for gap_range
+                            in internal_gap_ranges
+                        ],
+                    },
+                }
+
+                st.info(
+                    "Recommended maintenance: Repair Missing. "
+                    "This operation reacquires the envelope containing the "
+                    "known Internal Gaps while preserving existing stored rows."
+                )
+
+                st.button(
+                    "Prepare Repair Missing",
+                    key=(
+                        "data_management_diagnostics_prepare_repair_"
+                        f"{diagnostics['ticker']}"
+                    ),
+                    on_click=(
+                        _prepare_data_management_maintenance_request
+                    ),
+                    args=(
+                        repair_request,
+                    ),
+                    disabled=maintenance_handoff_disabled,
+                    help=(
+                        "Prepare the existing Repair Missing workflow below. "
+                        "This does not fetch source data, build a Preview, "
+                        "approve changes, or modify the database."
+                    ),
+                )
+
+                st.caption(
+                    "Continue below in Acquire Market Data to review the "
+                    "prepared ticker and repair scope, then explicitly build "
+                    "the Preview."
+                )
             else:
                 st.info(
                     "No missing expected NYSE sessions were found "
@@ -15061,6 +16642,93 @@ def show_data_management():
                         use_container_width=True,
                         hide_index=True,
                     )
+
+                if missing_tail_dates:
+                    try:
+                        update_start_date = (
+                            date.fromisoformat(
+                                str(
+                                    diagnostics[
+                                        "last_date"
+                                    ]
+                                )
+                            )
+                            + timedelta(days=1)
+                        ).isoformat()
+                    except Exception:
+                        update_start_date = None
+
+                    if update_start_date is not None:
+                        update_request = {
+                            "operation": "Update to Current",
+                            "ticker": diagnostics["ticker"],
+                            "origin": "Ticker Diagnostics",
+                            "reason": (
+                                f"{len(missing_tail_dates):,} expected NYSE "
+                                "session(s) are missing after Last Date."
+                            ),
+                            "suggested_start_date": (
+                                update_start_date
+                            ),
+                            "suggested_end_date": (
+                                diagnostics[
+                                    "latest_expected_stored_session"
+                                ]
+                            ),
+                            "evidence": {
+                                "missing_tail_count": (
+                                    len(
+                                        missing_tail_dates
+                                    )
+                                ),
+                                "missing_tail_dates": (
+                                    list(
+                                        missing_tail_dates
+                                    )
+                                ),
+                                "missing_tail_ranges": [
+                                    dict(
+                                        tail_range
+                                    )
+                                    for tail_range
+                                    in missing_tail_ranges
+                                ],
+                            },
+                        }
+
+                        st.info(
+                            "Recommended maintenance: Update to Current. "
+                            "This operation acquires the stale tail after the "
+                            "current Last Date through the Latest Expected "
+                            "Stored Session while preserving existing rows."
+                        )
+
+                        st.button(
+                            "Prepare Update to Current",
+                            key=(
+                                "data_management_diagnostics_prepare_update_"
+                                f"{diagnostics['ticker']}"
+                            ),
+                            on_click=(
+                                _prepare_data_management_maintenance_request
+                            ),
+                            args=(
+                                update_request,
+                            ),
+                            disabled=maintenance_handoff_disabled,
+                            help=(
+                                "Prepare the existing Update to Current "
+                                "workflow below. This does not fetch source "
+                                "data, build a Preview, approve changes, or "
+                                "modify the database."
+                            ),
+                        )
+
+                        st.caption(
+                            "Continue below in Acquire Market Data to review "
+                            "the prepared ticker and stale-tail scope, then "
+                            "explicitly build the Preview."
+                        )
             else:
                 st.warning(
                     "The ticker's Last Date does not fit the normal "
@@ -15111,6 +16779,24 @@ def show_data_management():
                 )
 
                 for event in large_price_moves:
+                    event_date = date.fromisoformat(
+                        str(
+                            event[
+                                "date"
+                            ]
+                        )
+                    )
+
+                    explorer_start_date = (
+                        event_date
+                        - timedelta(days=2)
+                    ).isoformat()
+
+                    explorer_end_date = (
+                        event_date
+                        + timedelta(days=2)
+                    ).isoformat()
+
                     st.button(
                         (
                             f"Inspect {event['date']} "
@@ -15124,8 +16810,13 @@ def show_data_management():
                         on_click=_set_explorer_from_diagnostics,
                         args=(
                             diagnostics["ticker"],
-                            event["prior_date"],
-                            event["date"],
+                            explorer_start_date,
+                            explorer_end_date,
+                        ),
+                        help=(
+                            "Open Data Explorer for the Large Price Move "
+                            "event date plus two calendar days before and "
+                            "two calendar days after."
                         ),
                     )
             else:
@@ -15139,6 +16830,8 @@ def show_data_management():
             )
 
     _render_data_management_acquisition_controls(
+        inventory=inventory,
+        database_manager=manager,
         latest_expected_stored_session=(
             overview[
                 "latest_expected_stored_session"

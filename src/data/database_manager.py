@@ -326,6 +326,39 @@ class DatabaseManager:
             record["date"]
             for record in stored_records
         ]
+
+        stored_date_counts: Dict[str, int] = {}
+
+        for stored_date in stored_dates:
+            stored_date_counts[
+                stored_date
+            ] = (
+                stored_date_counts.get(
+                    stored_date,
+                    0,
+                )
+                + 1
+            )
+
+        duplicate_stored_keys = [
+            {
+                "date": stored_date,
+                "physical_rows": row_count,
+                "excess_rows": row_count - 1,
+            }
+            for stored_date, row_count
+            in sorted(
+                stored_date_counts.items()
+            )
+            if row_count > 1
+        ]
+
+        duplicate_stored_excess_rows = sum(
+            duplicate_key["excess_rows"]
+            for duplicate_key
+            in duplicate_stored_keys
+        )
+
         actual_dates = {
             date.fromisoformat(stored_date)
             for stored_date in stored_dates
@@ -410,6 +443,17 @@ class DatabaseManager:
             "missing_tail_ranges": self._group_expected_session_ranges(
                 missing_tail_dates,
                 expected_sessions,
+            ),
+            "duplicate_stored_keys": (
+                duplicate_stored_keys
+            ),
+            "duplicate_stored_key_count": (
+                len(
+                    duplicate_stored_keys
+                )
+            ),
+            "duplicate_stored_excess_rows": (
+                duplicate_stored_excess_rows
             ),
             "large_price_moves": large_price_moves,
         }

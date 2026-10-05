@@ -125,6 +125,12 @@ DELETION_OPERATIONS = frozenset(
     }
 )
 
+DUPLICATE_REPAIR_OPERATIONS = frozenset(
+    {
+        "Repair Duplicate Stored Keys",
+    }
+)
+
 
 @dataclass(frozen=True)
 class CanonicalOHLCVRecord:
@@ -252,6 +258,38 @@ class PlannedDeletion:
 
 
 @dataclass(frozen=True)
+class PlannedDuplicateRepair:
+    """
+    One exact duplicate stored logical key prepared for canonical repair.
+
+    stored_records preserves every physical authoritative row found for the
+    same logical (Ticker, Date) key at Preview time.
+
+    candidate is the one validated canonical source observation that will
+    replace all stored physical copies if the approved repair is committed.
+    """
+
+    candidate: CanonicalOHLCVRecord
+    stored_records: Tuple[
+        CanonicalOHLCVRecord,
+        ...,
+    ]
+    planned_action: str = "replace_duplicate_key"
+
+    @property
+    def key(self) -> Tuple[str, date]:
+        """Return the logical daily_prices identity being repaired."""
+        return self.candidate.key
+
+    @property
+    def physical_row_count(self) -> int:
+        """Return the number of stored physical rows being collapsed."""
+        return len(
+            self.stored_records
+        )
+
+
+@dataclass(frozen=True)
 class SourceMissingObservation:
     """
     One expected NYSE observation absent from the supplied source candidates.
@@ -295,6 +333,10 @@ class MutationPlan:
     requested_end_date: Optional[date]
     observations: Tuple[PlannedObservation, ...]
     deletions: Tuple[PlannedDeletion, ...]
+    duplicate_repairs: Tuple[
+        PlannedDuplicateRepair,
+        ...,
+    ]
     source_missing: Tuple[SourceMissingObservation, ...]
     excluded_observations: Tuple[ExcludedObservation, ...]
     validation_issues: Tuple[ValidationIssue, ...]
@@ -322,6 +364,12 @@ class MutationPlan:
         ):
             return False
 
+        if (
+            self.operation in DUPLICATE_REPAIR_OPERATIONS
+            and not self.duplicate_repairs
+        ):
+            return False
+
         return (
             not self.validation_issues
             and not self.duplicate_keys
@@ -340,6 +388,9 @@ class MutationPlan:
             "preserve_existing": 0,
             "replacement_candidate": 0,
             "delete": len(self.deletions),
+            "duplicate_repair": len(
+                self.duplicate_repairs
+            ),
         }
 
         for observation in self.observations:
@@ -1122,6 +1173,129 @@ class DataMutationManager:
         finally:
             connection.close()
 
+    def _load_physical_records_for_keys_from_connection(
+        self,
+        connection: sqlite3.Connection,
+        keys: Iterable[Tuple[str, date]],
+    ) -> Dict[
+        Tuple[str, date],
+        Tuple[CanonicalOHLCVRecord, ...],
+    ]:
+        """
+        Load every physical stored row for exact logical (Ticker, Date) keys.
+
+        Unlike ordinary comparison loading, this method preserves multiplicity.
+        It is therefore suitable for duplicate-stored-key Preview and freshness
+        verification.
+        """
+        key_set = set(keys)
+
+        if not key_set:
+            return {}
+
+        dates_by_ticker: Dict[str, List[date]] = {}
+
+        for ticker, record_date in key_set:
+            dates_by_ticker.setdefault(
+                ticker,
+                [],
+            ).append(record_date)
+
+        records_by_key: Dict[
+            Tuple[str, date],
+            List[CanonicalOHLCVRecord],
+        ] = {
+            key: []
+            for key in key_set
+        }
+
+        query = f"""
+            SELECT
+                Ticker,
+                Date,
+                Open,
+                High,
+                Low,
+                Close,
+                "Adj Close",
+                Volume
+            FROM "{self.table_name}"
+            WHERE Ticker = ?
+              AND Date >= ?
+              AND Date <= ?
+            ORDER BY Date
+        """
+
+        for ticker, ticker_dates in dates_by_ticker.items():
+            range_start = min(ticker_dates)
+            range_end = max(ticker_dates)
+
+            rows = connection.execute(
+                query,
+                (
+                    ticker,
+                    range_start.isoformat(),
+                    range_end.isoformat(),
+                ),
+            ).fetchall()
+
+            for row in rows:
+                row_date = date.fromisoformat(
+                    str(row["Date"])
+                )
+                row_key = (
+                    str(row["Ticker"]).strip().upper(),
+                    row_date,
+                )
+
+                if row_key not in key_set:
+                    continue
+
+                records_by_key[
+                    row_key
+                ].append(
+                    CanonicalOHLCVRecord(
+                        ticker=row_key[0],
+                        date=row_date,
+                        open=float(row["Open"]),
+                        high=float(row["High"]),
+                        low=float(row["Low"]),
+                        close=float(row["Close"]),
+                        adj_close=float(row["Adj Close"]),
+                        volume=int(row["Volume"]),
+                    )
+                )
+
+        return {
+            key: tuple(
+                sorted(
+                    records,
+                    key=lambda record: (
+                        record.persisted_values()
+                    ),
+                )
+            )
+            for key, records in records_by_key.items()
+        }
+
+    def _load_physical_records_for_keys(
+        self,
+        keys: Iterable[Tuple[str, date]],
+    ) -> Dict[
+        Tuple[str, date],
+        Tuple[CanonicalOHLCVRecord, ...],
+    ]:
+        """Load exact physical rows through a dedicated read-only connection."""
+        connection = self._connect_read_only()
+
+        try:
+            return self._load_physical_records_for_keys_from_connection(
+                connection,
+                keys,
+            )
+        finally:
+            connection.close()
+
     def _load_deletion_scope_from_connection(
         self,
         connection: sqlite3.Connection,
@@ -1254,6 +1428,69 @@ class DataMutationManager:
         return "replacement_candidate"
 
     @staticmethod
+    def _build_duplicate_repair_baseline_fingerprint(
+        keys: Iterable[Tuple[str, date]],
+        records_by_key: Mapping[
+            Tuple[str, date],
+            Tuple[CanonicalOHLCVRecord, ...],
+        ],
+    ) -> str:
+        """
+        Fingerprint every physical stored row for duplicate-repair keys.
+
+        Row multiplicity is part of identity. Two identical physical rows are
+        therefore distinguishable from one physical row because both copies
+        remain represented in the serialized baseline.
+        """
+        baseline_rows: List[Dict[str, Any]] = []
+
+        for ticker, record_date in sorted(
+            set(keys),
+            key=lambda item: (
+                item[0],
+                item[1],
+            ),
+        ):
+            key = (
+                ticker,
+                record_date,
+            )
+
+            stored_records = tuple(
+                sorted(
+                    records_by_key.get(
+                        key,
+                        (),
+                    ),
+                    key=lambda record: (
+                        record.persisted_values()
+                    ),
+                )
+            )
+
+            baseline_rows.append(
+                {
+                    "Ticker": ticker,
+                    "Date": record_date.isoformat(),
+                    "PhysicalRows": [
+                        record.to_dict()
+                        for record in stored_records
+                    ],
+                }
+            )
+
+        serialized = json.dumps(
+            baseline_rows,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+
+        return hashlib.sha256(
+            serialized.encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
     def _build_baseline_fingerprint(
         candidate_keys: Iterable[Tuple[str, date]],
         existing_records: Mapping[
@@ -1309,6 +1546,10 @@ class DataMutationManager:
         requested_end_date: Optional[date],
         observations: Tuple[PlannedObservation, ...],
         deletions: Tuple[PlannedDeletion, ...],
+        duplicate_repairs: Tuple[
+            PlannedDuplicateRepair,
+            ...,
+        ],
         source_missing: Tuple[SourceMissingObservation, ...],
         excluded_observations: Tuple[ExcludedObservation, ...],
         validation_issues: Tuple[ValidationIssue, ...],
@@ -1365,6 +1606,17 @@ class DataMutationManager:
                     "planned_action": deletion.planned_action,
                 }
                 for deletion in deletions
+            ],
+            "duplicate_repairs": [
+                {
+                    "candidate": repair.candidate.to_dict(),
+                    "stored_records": [
+                        record.to_dict()
+                        for record in repair.stored_records
+                    ],
+                    "planned_action": repair.planned_action,
+                }
+                for repair in duplicate_repairs
             ],
             "source_missing": [
                 {
@@ -1461,6 +1713,7 @@ class DataMutationManager:
             requested_end_date=plan.requested_end_date,
             observations=plan.observations,
             deletions=plan.deletions,
+            duplicate_repairs=plan.duplicate_repairs,
             source_missing=plan.source_missing,
             excluded_observations=plan.excluded_observations,
             validation_issues=plan.validation_issues,
@@ -1518,6 +1771,109 @@ class DataMutationManager:
                 changed_keys.append(key)
 
         return tuple(changed_keys)
+
+    def _verify_duplicate_repair_plan_current_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        plan: MutationPlan,
+    ) -> PlanFreshnessCheck:
+        """
+        Verify every physical stored row for an approved duplicate repair.
+
+        Multiplicity and persisted values must still exactly match Preview.
+        """
+        if plan.operation not in DUPLICATE_REPAIR_OPERATIONS:
+            raise ValueError(
+                "Duplicate-repair freshness verification requires a "
+                "duplicate-repair plan."
+            )
+
+        if len(plan.requested_tickers) != 1:
+            raise RuntimeError(
+                "Duplicate-repair plan must contain exactly one ticker."
+            )
+
+        expected_by_key: Dict[
+            Tuple[str, date],
+            Tuple[CanonicalOHLCVRecord, ...],
+        ] = {
+            repair.key: tuple(
+                sorted(
+                    repair.stored_records,
+                    key=lambda record: (
+                        record.persisted_values()
+                    ),
+                )
+            )
+            for repair in plan.duplicate_repairs
+        }
+
+        repair_keys = tuple(
+            expected_by_key
+        )
+
+        current_by_key = (
+            self._load_physical_records_for_keys_from_connection(
+                connection,
+                repair_keys,
+            )
+        )
+
+        current_fingerprint = (
+            self._build_duplicate_repair_baseline_fingerprint(
+                repair_keys,
+                current_by_key,
+            )
+        )
+
+        changed_keys: List[
+            Tuple[str, date]
+        ] = []
+
+        for key in sorted(
+            repair_keys,
+            key=lambda item: (
+                item[0],
+                item[1],
+            ),
+        ):
+            expected_records = expected_by_key.get(
+                key,
+                (),
+            )
+            current_records = current_by_key.get(
+                key,
+                (),
+            )
+
+            expected_values = tuple(
+                record.persisted_values()
+                for record in expected_records
+            )
+            current_values = tuple(
+                record.persisted_values()
+                for record in current_records
+            )
+
+            if expected_values != current_values:
+                changed_keys.append(
+                    key
+                )
+
+        return PlanFreshnessCheck(
+            is_current=(
+                current_fingerprint
+                == plan.baseline_fingerprint
+                and not changed_keys
+            ),
+            expected_fingerprint=(
+                plan.baseline_fingerprint
+            ),
+            current_fingerprint=current_fingerprint,
+            changed_keys=tuple(
+                changed_keys
+            ),
+        )
 
     def _verify_deletion_plan_current_in_connection(
         self,
@@ -1641,6 +1997,14 @@ class DataMutationManager:
             return self._verify_deletion_plan_current_in_connection(
                 connection,
                 plan,
+            )
+
+        if plan.operation in DUPLICATE_REPAIR_OPERATIONS:
+            return (
+                self._verify_duplicate_repair_plan_current_in_connection(
+                    connection,
+                    plan,
+                )
             )
 
         baseline_keys = [
@@ -1841,6 +2205,137 @@ class DataMutationManager:
 
         return rows_affected
 
+    def _apply_planned_duplicate_repairs(
+        self,
+        connection: sqlite3.Connection,
+        plan: MutationPlan,
+    ) -> int:
+        """
+        Atomically collapse each approved duplicate logical key to one
+        canonical source observation.
+
+        Freshness has already been verified inside the same BEGIN IMMEDIATE
+        transaction before this method is called.
+        """
+        if plan.operation not in DUPLICATE_REPAIR_OPERATIONS:
+            raise ValueError(
+                "Duplicate repair execution requires a duplicate-repair "
+                "operation."
+            )
+
+        if len(plan.requested_tickers) != 1:
+            raise RuntimeError(
+                "Duplicate-repair plan must contain exactly one ticker."
+            )
+
+        if not plan.duplicate_repairs:
+            raise RuntimeError(
+                "Duplicate-repair plan contains no materialized repairs."
+            )
+
+        ticker = plan.requested_tickers[0]
+        rows_affected = 0
+
+        for repair in plan.duplicate_repairs:
+            if (
+                repair.planned_action
+                != "replace_duplicate_key"
+            ):
+                raise RuntimeError(
+                    "Duplicate-repair plan contains an unsupported "
+                    "planned action."
+                )
+
+            if repair.candidate.ticker != ticker:
+                raise RuntimeError(
+                    "Duplicate-repair candidate lies outside the approved "
+                    "ticker."
+                )
+
+            if len(repair.stored_records) < 2:
+                raise RuntimeError(
+                    "Duplicate-repair plan does not contain at least two "
+                    "stored physical rows for an affected key."
+                )
+
+            if any(
+                record.key != repair.key
+                for record in repair.stored_records
+            ):
+                raise RuntimeError(
+                    "Duplicate-repair plan contains stored rows outside "
+                    "the affected logical key."
+                )
+
+            delete_cursor = connection.execute(
+                f"""
+                DELETE FROM "{self.table_name}"
+                WHERE Ticker = ?
+                  AND Date = ?
+                """,
+                (
+                    repair.candidate.ticker,
+                    repair.candidate.date.isoformat(),
+                ),
+            )
+
+            deleted_rows = int(
+                delete_cursor.rowcount
+            )
+
+            if deleted_rows != len(
+                repair.stored_records
+            ):
+                raise RuntimeError(
+                    "Duplicate repair deleted an unexpected number of "
+                    "physical rows. Expected "
+                    f"{len(repair.stored_records)}, "
+                    f"deleted {deleted_rows}."
+                )
+
+            self._insert_canonical_record(
+                connection,
+                repair.candidate,
+            )
+
+            post_records_by_key = (
+                self._load_physical_records_for_keys_from_connection(
+                    connection,
+                    (
+                        repair.key,
+                    ),
+                )
+            )
+
+            post_records = (
+                post_records_by_key.get(
+                    repair.key,
+                    (),
+                )
+            )
+
+            if len(post_records) != 1:
+                raise RuntimeError(
+                    "Duplicate repair postcondition failed: exactly one "
+                    "physical row must remain for the repaired key."
+                )
+
+            if (
+                post_records[0].persisted_values()
+                != repair.candidate.persisted_values()
+            ):
+                raise RuntimeError(
+                    "Duplicate repair postcondition failed: the remaining "
+                    "row does not match the approved canonical candidate."
+                )
+
+            rows_affected += (
+                deleted_rows
+                + 1
+            )
+
+        return rows_affected
+
     def _apply_planned_deletions(
         self,
         connection: sqlite3.Connection,
@@ -2030,6 +2525,27 @@ class DataMutationManager:
                 if plan.deletions
                 else None
             ),
+            "duplicate_repairs": [
+                {
+                    "Ticker": repair.candidate.ticker,
+                    "Date": repair.candidate.date.isoformat(),
+                    "planned_action": repair.planned_action,
+                    "physical_rows_removed": (
+                        len(
+                            repair.stored_records
+                        )
+                    ),
+                    "canonical_candidate": (
+                        repair.candidate.to_dict()
+                    ),
+                    "stored_records": [
+                        record.to_dict()
+                        for record
+                        in repair.stored_records
+                    ],
+                }
+                for repair in plan.duplicate_repairs
+            ],
         }
 
         return json.dumps(
@@ -2192,6 +2708,11 @@ class DataMutationManager:
 
             if plan.operation in DELETION_OPERATIONS:
                 rows_affected = self._apply_planned_deletions(
+                    connection,
+                    plan,
+                )
+            elif plan.operation in DUPLICATE_REPAIR_OPERATIONS:
+                rows_affected = self._apply_planned_duplicate_repairs(
                     connection,
                     plan,
                 )
@@ -2603,6 +3124,7 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
             deletions=(),
+            duplicate_repairs=(),
             source_missing=materialized_source_missing,
             excluded_observations=(
                 materialized_excluded_observations
@@ -2627,6 +3149,7 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=materialized_observations,
             deletions=(),
+            duplicate_repairs=(),
             source_missing=materialized_source_missing,
             excluded_observations=(
                 materialized_excluded_observations
@@ -2639,6 +3162,426 @@ class DataMutationManager:
             ),
             baseline_fingerprint=baseline_fingerprint,
             plan_fingerprint=plan_fingerprint,
+            latest_expected_stored_session=(
+                latest_expected_stored_session
+            ),
+            created_at=datetime.now(),
+        )
+
+    def build_duplicate_repair_plan(
+        self,
+        *,
+        operation: str,
+        source: str,
+        ticker: Any,
+        duplicate_dates: Iterable[Any],
+        candidates: Iterable[Mapping[str, Any]],
+    ) -> MutationPlan:
+        """
+        Build one read-only canonical duplicate-repair Preview.
+
+        Only exact requested duplicate (Ticker, Date) keys are repair targets.
+        Source candidates outside those exact keys are ignored.
+
+        Each target must currently contain at least two physical stored rows
+        and must have exactly one valid canonical source candidate.
+        """
+        normalized_operation = str(
+            operation or ""
+        ).strip()
+
+        if normalized_operation not in DUPLICATE_REPAIR_OPERATIONS:
+            raise ValueError(
+                "Unsupported duplicate-repair operation: "
+                f"{normalized_operation!r}."
+            )
+
+        normalized_source = str(
+            source or ""
+        ).strip()
+
+        if not normalized_source:
+            raise ValueError(
+                "Source is required."
+            )
+
+        normalized_tickers = (
+            self._normalize_requested_tickers(
+                [
+                    ticker,
+                ]
+            )
+        )
+
+        if len(normalized_tickers) != 1:
+            raise ValueError(
+                "Exactly one ticker is required for duplicate repair."
+            )
+
+        normalized_ticker = (
+            normalized_tickers[0]
+        )
+
+        normalized_dates = tuple(
+            sorted(
+                {
+                    self._normalize_date_value(
+                        value
+                    )
+                    for value
+                    in duplicate_dates
+                }
+            )
+        )
+
+        if not normalized_dates:
+            raise ValueError(
+                "At least one duplicate stored date is required."
+            )
+
+        requested_start_date = (
+            normalized_dates[0]
+        )
+        requested_end_date = (
+            normalized_dates[-1]
+        )
+
+        repair_keys = tuple(
+            (
+                normalized_ticker,
+                record_date,
+            )
+            for record_date
+            in normalized_dates
+        )
+        repair_key_set = set(
+            repair_keys
+        )
+
+        latest_expected_stored_session = (
+            get_latest_expected_stored_session()
+        )
+
+        candidate_records_by_key: Dict[
+            Tuple[str, date],
+            List[CanonicalOHLCVRecord],
+        ] = {
+            key: []
+            for key in repair_keys
+        }
+
+        excluded_observations: List[
+            ExcludedObservation
+        ] = []
+        validation_issues: List[
+            ValidationIssue
+        ] = []
+        validation_warnings: List[
+            ValidationWarning
+        ] = []
+
+        candidate_list = list(
+            candidates
+        )
+
+        for candidate_index, candidate in enumerate(
+            candidate_list
+        ):
+            candidate_identity = (
+                self._extract_candidate_identity(
+                    candidate
+                )
+            )
+
+            if (
+                candidate_identity is None
+                or candidate_identity
+                not in repair_key_set
+            ):
+                continue
+
+            record, issues, warnings = (
+                self._normalize_candidate(
+                    candidate,
+                    candidate_index,
+                    latest_expected_stored_session,
+                )
+            )
+
+            validation_warnings.extend(
+                warnings
+            )
+
+            if issues:
+                excluded_observations.append(
+                    ExcludedObservation(
+                        candidate_index=(
+                            candidate_index
+                        ),
+                        ticker=(
+                            candidate_identity[0]
+                        ),
+                        date=(
+                            candidate_identity[
+                                1
+                            ].isoformat()
+                        ),
+                        issues=tuple(
+                            issues
+                        ),
+                    )
+                )
+                validation_issues.extend(
+                    issues
+                )
+                continue
+
+            assert record is not None
+
+            candidate_records_by_key[
+                record.key
+            ].append(
+                record
+            )
+
+        source_missing_keys: List[
+            Tuple[str, date]
+        ] = []
+        duplicate_incoming_keys: List[
+            Tuple[str, date]
+        ] = []
+
+        for key in repair_keys:
+            source_records = (
+                candidate_records_by_key[
+                    key
+                ]
+            )
+
+            if not source_records:
+                source_missing_keys.append(
+                    key
+                )
+
+                validation_issues.append(
+                    ValidationIssue(
+                        code=(
+                            "duplicate_repair_source_missing"
+                        ),
+                        message=(
+                            "Canonical source returned no valid observation "
+                            "for duplicate-repair key "
+                            f"{key[0]} / {key[1].isoformat()}."
+                        ),
+                        ticker=key[0],
+                        date=(
+                            key[1].isoformat()
+                        ),
+                    )
+                )
+                continue
+
+            if len(source_records) > 1:
+                duplicate_incoming_keys.append(
+                    key
+                )
+
+                validation_issues.append(
+                    ValidationIssue(
+                        code="duplicate_incoming_key",
+                        message=(
+                            "Canonical source returned more than one "
+                            "observation for duplicate-repair key "
+                            f"{key[0]} / {key[1].isoformat()}."
+                        ),
+                        ticker=key[0],
+                        date=(
+                            key[1].isoformat()
+                        ),
+                    )
+                )
+
+        stored_records_by_key = (
+            self._load_physical_records_for_keys(
+                repair_keys
+            )
+        )
+
+        planned_repairs: List[
+            PlannedDuplicateRepair
+        ] = []
+
+        for key in repair_keys:
+            stored_records = (
+                stored_records_by_key.get(
+                    key,
+                    (),
+                )
+            )
+
+            if len(stored_records) < 2:
+                validation_issues.append(
+                    ValidationIssue(
+                        code=(
+                            "duplicate_stored_key_not_present"
+                        ),
+                        message=(
+                            "The requested duplicate stored key is no "
+                            "longer duplicated: "
+                            f"{key[0]} / {key[1].isoformat()}."
+                        ),
+                        ticker=key[0],
+                        date=(
+                            key[1].isoformat()
+                        ),
+                    )
+                )
+                continue
+
+            source_records = (
+                candidate_records_by_key[
+                    key
+                ]
+            )
+
+            if len(source_records) != 1:
+                continue
+
+            planned_repairs.append(
+                PlannedDuplicateRepair(
+                    candidate=(
+                        source_records[0]
+                    ),
+                    stored_records=(
+                        stored_records
+                    ),
+                )
+            )
+
+        baseline_fingerprint = (
+            self._build_duplicate_repair_baseline_fingerprint(
+                repair_keys,
+                stored_records_by_key,
+            )
+        )
+
+        materialized_repairs = tuple(
+            planned_repairs
+        )
+        materialized_excluded = tuple(
+            excluded_observations
+        )
+        materialized_issues = tuple(
+            validation_issues
+        )
+        materialized_warnings = tuple(
+            validation_warnings
+        )
+        materialized_duplicate_keys = tuple(
+            sorted(
+                set(
+                    duplicate_incoming_keys
+                ),
+                key=lambda item: (
+                    item[0],
+                    item[1],
+                ),
+            )
+        )
+        materialized_source_missing_keys = tuple(
+            sorted(
+                set(
+                    source_missing_keys
+                ),
+                key=lambda item: (
+                    item[0],
+                    item[1],
+                ),
+            )
+        )
+
+        plan_fingerprint = (
+            self._build_plan_fingerprint(
+                operation=normalized_operation,
+                source=normalized_source,
+                requested_tickers=(
+                    normalized_ticker,
+                ),
+                requested_start_date=(
+                    requested_start_date
+                ),
+                requested_end_date=(
+                    requested_end_date
+                ),
+                observations=(),
+                deletions=(),
+                duplicate_repairs=(
+                    materialized_repairs
+                ),
+                source_missing=(),
+                excluded_observations=(
+                    materialized_excluded
+                ),
+                validation_issues=(
+                    materialized_issues
+                ),
+                validation_warnings=(
+                    materialized_warnings
+                ),
+                duplicate_keys=(
+                    materialized_duplicate_keys
+                ),
+                source_missing_keys=(
+                    materialized_source_missing_keys
+                ),
+                baseline_fingerprint=(
+                    baseline_fingerprint
+                ),
+                latest_expected_stored_session=(
+                    latest_expected_stored_session
+                ),
+            )
+        )
+
+        return MutationPlan(
+            operation=normalized_operation,
+            source=normalized_source,
+            requested_tickers=(
+                normalized_ticker,
+            ),
+            requested_start_date=(
+                requested_start_date
+            ),
+            requested_end_date=(
+                requested_end_date
+            ),
+            observations=(),
+            deletions=(),
+            duplicate_repairs=(
+                materialized_repairs
+            ),
+            source_missing=(),
+            excluded_observations=(
+                materialized_excluded
+            ),
+            validation_issues=(
+                materialized_issues
+            ),
+            validation_warnings=(
+                materialized_warnings
+            ),
+            duplicate_keys=(
+                materialized_duplicate_keys
+            ),
+            source_missing_keys=(
+                materialized_source_missing_keys
+            ),
+            baseline_fingerprint=(
+                baseline_fingerprint
+            ),
+            plan_fingerprint=(
+                plan_fingerprint
+            ),
             latest_expected_stored_session=(
                 latest_expected_stored_session
             ),
@@ -2759,6 +3702,7 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=(),
             deletions=materialized_deletions,
+            duplicate_repairs=(),
             source_missing=(),
             excluded_observations=(),
             validation_issues=(),
@@ -2779,6 +3723,7 @@ class DataMutationManager:
             requested_end_date=normalized_end_date,
             observations=(),
             deletions=materialized_deletions,
+            duplicate_repairs=(),
             source_missing=(),
             excluded_observations=(),
             validation_issues=(),
