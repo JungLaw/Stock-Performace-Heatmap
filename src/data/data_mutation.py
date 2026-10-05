@@ -475,6 +475,47 @@ class MutationTransactionResult:
     audit_id: int
 
 
+@dataclass(frozen=True)
+class AuditHistoryRecord:
+    """
+    Read-only representation of one persisted Data Management audit event.
+
+    Stored audit columns remain authoritative. Derived ticker and affected-scope
+    fields are presentation/query aids reconstructed only from persisted audit
+    evidence; they do not rewrite the stored request scope.
+    """
+
+    audit_id: int
+    timestamp: str
+    commit_date: Optional[date]
+    action: str
+    ticker: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+    source: str
+    rows_affected: int
+    plan_fingerprint: str
+    raw_details: Optional[str]
+    details: Mapping[str, Any]
+    details_parse_error: Optional[str]
+    requested_tickers: Tuple[str, ...]
+    involved_tickers: Tuple[str, ...]
+    affected_tickers: Tuple[str, ...]
+    affected_start_date: Optional[str]
+    affected_end_date: Optional[str]
+
+    @property
+    def display_ticker(self) -> str:
+        """Return the concise ticker label used by Audit History presentation."""
+        if len(self.involved_tickers) == 1:
+            return self.involved_tickers[0]
+
+        if len(self.involved_tickers) > 1:
+            return f"Multiple ({len(self.involved_tickers)})"
+
+        return "\u2014"
+
+
 class DataMutationManager:
     """
     Canonical Data Management administrative mutation owner.
@@ -645,6 +686,674 @@ class DataMutationManager:
             )
 
         return created_status
+
+    @staticmethod
+    def _parse_audit_details(
+        raw_details: Optional[str],
+    ) -> Tuple[Dict[str, Any], Optional[str]]:
+        """
+        Parse one persisted audit details payload without hiding its raw value.
+
+        NULL / empty details are treated as an empty structured payload.
+        Malformed JSON or a non-object JSON root remains inspectable through
+        raw_details and is reported through details_parse_error rather than
+        causing the audit event itself to disappear.
+        """
+        if raw_details is None:
+            return {}, None
+
+        normalized_raw = str(raw_details)
+
+        if not normalized_raw.strip():
+            return {}, None
+
+        try:
+            parsed = json.loads(
+                normalized_raw
+            )
+        except (TypeError, ValueError) as exc:
+            return (
+                {},
+                f"{type(exc).__name__}: {exc}",
+            )
+
+        if not isinstance(
+            parsed,
+            dict,
+        ):
+            return (
+                {},
+                "Audit details JSON root is not an object.",
+            )
+
+        return dict(parsed), None
+
+    @classmethod
+    def _build_audit_history_record(
+        cls,
+        row: sqlite3.Row,
+    ) -> AuditHistoryRecord:
+        """
+        Normalize one stored audit row into the read-only Audit History model.
+
+        Stored request scope is preserved exactly. Involved ticker and affected
+        scope are derived only from evidence already persisted in the audit row.
+        """
+        raw_details = (
+            None
+            if row["details"] is None
+            else str(
+                row["details"]
+            )
+        )
+
+        (
+            details,
+            details_parse_error,
+        ) = cls._parse_audit_details(
+            raw_details
+        )
+
+        raw_ticker = row["ticker"]
+
+        stored_ticker = (
+            str(
+                raw_ticker
+            ).strip().upper()
+            if raw_ticker is not None
+            else None
+        )
+
+        if not stored_ticker:
+            stored_ticker = None
+
+        requested_tickers: List[str] = []
+        involved_tickers: List[str] = []
+        affected_tickers: List[str] = []
+        affected_dates: List[date] = []
+
+        requested_seen = set()
+        involved_seen = set()
+        affected_seen = set()
+
+        def normalize_ticker(
+            value: Any,
+        ) -> Optional[str]:
+            normalized = str(
+                value or ""
+            ).strip().upper()
+
+            if not normalized:
+                return None
+
+            return normalized
+
+        def add_requested_ticker(
+            value: Any,
+        ) -> None:
+            normalized = normalize_ticker(
+                value
+            )
+
+            if (
+                normalized is None
+                or normalized in requested_seen
+            ):
+                return
+
+            requested_seen.add(
+                normalized
+            )
+            requested_tickers.append(
+                normalized
+            )
+
+        def add_involved_ticker(
+            value: Any,
+        ) -> None:
+            normalized = normalize_ticker(
+                value
+            )
+
+            if (
+                normalized is None
+                or normalized in involved_seen
+            ):
+                return
+
+            involved_seen.add(
+                normalized
+            )
+            involved_tickers.append(
+                normalized
+            )
+
+        def add_affected_ticker(
+            value: Any,
+        ) -> None:
+            normalized = normalize_ticker(
+                value
+            )
+
+            if (
+                normalized is None
+                or normalized in affected_seen
+            ):
+                return
+
+            affected_seen.add(
+                normalized
+            )
+            affected_tickers.append(
+                normalized
+            )
+
+        def add_affected_date(
+            value: Any,
+        ) -> None:
+            normalized = str(
+                value or ""
+            ).strip()
+
+            if not normalized:
+                return
+
+            try:
+                parsed_date = date.fromisoformat(
+                    normalized
+                )
+            except ValueError:
+                return
+
+            affected_dates.append(
+                parsed_date
+            )
+
+        if stored_ticker is not None:
+            add_involved_ticker(
+                stored_ticker
+            )
+
+        stored_requested_tickers = details.get(
+            "requested_tickers",
+            [],
+        )
+
+        if isinstance(
+            stored_requested_tickers,
+            (list, tuple),
+        ):
+            for value in stored_requested_tickers:
+                add_requested_ticker(
+                    value
+                )
+                add_involved_ticker(
+                    value
+                )
+
+        mutations = details.get(
+            "mutations",
+            [],
+        )
+
+        if isinstance(
+            mutations,
+            list,
+        ):
+            for mutation in mutations:
+                if not isinstance(
+                    mutation,
+                    dict,
+                ):
+                    continue
+
+                mutation_ticker = mutation.get(
+                    "Ticker"
+                )
+
+                add_involved_ticker(
+                    mutation_ticker
+                )
+                add_affected_ticker(
+                    mutation_ticker
+                )
+                add_affected_date(
+                    mutation.get(
+                        "Date"
+                    )
+                )
+
+        source_missing = details.get(
+            "source_missing",
+            [],
+        )
+
+        if isinstance(
+            source_missing,
+            list,
+        ):
+            for observation in source_missing:
+                if not isinstance(
+                    observation,
+                    dict,
+                ):
+                    continue
+
+                add_involved_ticker(
+                    observation.get(
+                        "Ticker"
+                    )
+                )
+
+        duplicate_repairs = details.get(
+            "duplicate_repairs",
+            [],
+        )
+
+        if isinstance(
+            duplicate_repairs,
+            list,
+        ):
+            for repair in duplicate_repairs:
+                if not isinstance(
+                    repair,
+                    dict,
+                ):
+                    continue
+
+                repair_ticker = repair.get(
+                    "Ticker"
+                )
+
+                add_involved_ticker(
+                    repair_ticker
+                )
+                add_affected_ticker(
+                    repair_ticker
+                )
+                add_affected_date(
+                    repair.get(
+                        "Date"
+                    )
+                )
+
+        deletion = details.get(
+            "deletion"
+        )
+
+        if isinstance(
+            deletion,
+            dict,
+        ):
+            if stored_ticker is not None:
+                add_affected_ticker(
+                    stored_ticker
+                )
+
+            add_affected_date(
+                deletion.get(
+                    "first_affected_date"
+                )
+            )
+            add_affected_date(
+                deletion.get(
+                    "last_affected_date"
+                )
+            )
+
+        timestamp = str(
+            row["timestamp"]
+        )
+
+        try:
+            commit_date = datetime.fromisoformat(
+                timestamp
+            ).date()
+        except ValueError:
+            commit_date = None
+
+        affected_start_date = (
+            min(
+                affected_dates
+            ).isoformat()
+            if affected_dates
+            else None
+        )
+
+        affected_end_date = (
+            max(
+                affected_dates
+            ).isoformat()
+            if affected_dates
+            else None
+        )
+
+        return AuditHistoryRecord(
+            audit_id=int(
+                row["id"]
+            ),
+            timestamp=timestamp,
+            commit_date=commit_date,
+            action=str(
+                row["action"]
+            ),
+            ticker=stored_ticker,
+            start_date=(
+                None
+                if row["start_date"] is None
+                else str(
+                    row["start_date"]
+                )
+            ),
+            end_date=(
+                None
+                if row["end_date"] is None
+                else str(
+                    row["end_date"]
+                )
+            ),
+            source=str(
+                row["source"]
+            ),
+            rows_affected=int(
+                row["rows_affected"]
+            ),
+            plan_fingerprint=str(
+                row["plan_fingerprint"]
+            ),
+            raw_details=raw_details,
+            details=details,
+            details_parse_error=(
+                details_parse_error
+            ),
+            requested_tickers=tuple(
+                requested_tickers
+            ),
+            involved_tickers=tuple(
+                involved_tickers
+            ),
+            affected_tickers=tuple(
+                affected_tickers
+            ),
+            affected_start_date=(
+                affected_start_date
+            ),
+            affected_end_date=(
+                affected_end_date
+            ),
+        )
+
+    def get_audit_actions(
+        self,
+    ) -> Tuple[str, ...]:
+        """
+        Return distinct stored Audit History action values.
+
+        This is a read-only metadata query used to populate the Audit History
+        Action filter from persisted history rather than a duplicated UI list.
+        """
+        connection = self._connect_read_only()
+
+        try:
+            schema_status = (
+                self._get_audit_schema_status_from_connection(
+                    connection
+                )
+            )
+
+            if not schema_status.exists:
+                raise RuntimeError(
+                    "Data Management audit table does not exist."
+                )
+
+            if not schema_status.compatible:
+                raise RuntimeError(
+                    "Data Management audit table is incompatible. "
+                    "Missing required column(s): "
+                    + ", ".join(
+                        schema_status.missing_columns
+                    )
+                )
+
+            rows = connection.execute(
+                f"""
+                SELECT DISTINCT action
+                FROM "{self.audit_table_name}"
+                WHERE action IS NOT NULL
+                  AND TRIM(action) <> ''
+                ORDER BY action COLLATE NOCASE, action
+                """
+            ).fetchall()
+
+            return tuple(
+                str(
+                    row["action"]
+                )
+                for row in rows
+            )
+        finally:
+            connection.close()
+
+    def get_audit_history(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        action: Optional[str] = None,
+        start_commit_date: Optional[Any] = None,
+        end_commit_date: Optional[Any] = None,
+        limit: int = 100,
+    ) -> Tuple[AuditHistoryRecord, ...]:
+        """
+        Return newest-first successful committed Data Management audit events.
+
+        Action and commit-date predicates are applied directly to authoritative
+        audit columns. Ticker filtering is applied after details normalization
+        because Manual Entry may store its involved ticker only inside mutation
+        evidence rather than in the top-level request-scope ticker column.
+
+        Retrieval is bounded in SQLite batches and returns at most `limit`
+        matching events.
+        """
+        if (
+            isinstance(
+                limit,
+                bool,
+            )
+            or not isinstance(
+                limit,
+                int,
+            )
+            or limit < 1
+        ):
+            raise ValueError(
+                "Audit History limit must be a positive integer."
+            )
+
+        if limit > 500:
+            raise ValueError(
+                "Audit History limit cannot exceed 500."
+            )
+
+        normalized_ticker = str(
+            ticker or ""
+        ).strip().upper()
+
+        normalized_action = str(
+            action or ""
+        ).strip()
+
+        normalized_start_date = (
+            self._normalize_date_value(
+                start_commit_date
+            )
+            if start_commit_date is not None
+            else None
+        )
+
+        normalized_end_date = (
+            self._normalize_date_value(
+                end_commit_date
+            )
+            if end_commit_date is not None
+            else None
+        )
+
+        if (
+            normalized_start_date is not None
+            and normalized_end_date is not None
+            and normalized_start_date > normalized_end_date
+        ):
+            raise ValueError(
+                "Audit History Commit Date From cannot be later than "
+                "Commit Date To."
+            )
+
+        where_clauses: List[str] = []
+        query_parameters: List[Any] = []
+
+        if normalized_action:
+            where_clauses.append(
+                "action = ?"
+            )
+            query_parameters.append(
+                normalized_action
+            )
+
+        if normalized_start_date is not None:
+            where_clauses.append(
+                "substr(timestamp, 1, 10) >= ?"
+            )
+            query_parameters.append(
+                normalized_start_date.isoformat()
+            )
+
+        if normalized_end_date is not None:
+            where_clauses.append(
+                "substr(timestamp, 1, 10) <= ?"
+            )
+            query_parameters.append(
+                normalized_end_date.isoformat()
+            )
+
+        where_sql = (
+            "WHERE "
+            + " AND ".join(
+                where_clauses
+            )
+            if where_clauses
+            else ""
+        )
+
+        batch_size = max(
+            100,
+            min(
+                500,
+                limit * 2,
+            ),
+        )
+
+        records: List[
+            AuditHistoryRecord
+        ] = []
+
+        offset = 0
+
+        connection = self._connect_read_only()
+
+        try:
+            schema_status = (
+                self._get_audit_schema_status_from_connection(
+                    connection
+                )
+            )
+
+            if not schema_status.exists:
+                raise RuntimeError(
+                    "Data Management audit table does not exist."
+                )
+
+            if not schema_status.compatible:
+                raise RuntimeError(
+                    "Data Management audit table is incompatible. "
+                    "Missing required column(s): "
+                    + ", ".join(
+                        schema_status.missing_columns
+                    )
+                )
+
+            query = f"""
+                SELECT
+                    id,
+                    timestamp,
+                    action,
+                    ticker,
+                    start_date,
+                    end_date,
+                    source,
+                    rows_affected,
+                    plan_fingerprint,
+                    details
+                FROM "{self.audit_table_name}"
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT ?
+                OFFSET ?
+            """
+
+            while len(
+                records
+            ) < limit:
+                batch_parameters = (
+                    *query_parameters,
+                    batch_size,
+                    offset,
+                )
+
+                rows = connection.execute(
+                    query,
+                    batch_parameters,
+                ).fetchall()
+
+                if not rows:
+                    break
+
+                for row in rows:
+                    record = (
+                        self._build_audit_history_record(
+                            row
+                        )
+                    )
+
+                    if (
+                        normalized_ticker
+                        and normalized_ticker
+                        not in record.involved_tickers
+                    ):
+                        continue
+
+                    records.append(
+                        record
+                    )
+
+                    if len(
+                        records
+                    ) >= limit:
+                        break
+
+                offset += len(
+                    rows
+                )
+
+                if len(
+                    rows
+                ) < batch_size:
+                    break
+
+            return tuple(
+                records
+            )
+        finally:
+            connection.close()
 
     @staticmethod
     def _normalize_date_value(value: Any) -> date:

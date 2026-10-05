@@ -15554,6 +15554,883 @@ def _render_data_management_mutation_controls(
         st.rerun()
 
 
+def _render_data_management_audit_history(
+    *,
+    mutation_manager: DataMutationManager,
+) -> None:
+    """
+    Render bounded, read-only Data Management Audit History.
+
+    This surface inspects successfully committed Data Management operations
+    only. It does not create, update, delete, replay, or otherwise mutate
+    audit events or daily_prices.
+    """
+    st.markdown("---")
+    st.subheader("Audit History")
+
+    st.caption(
+        "Review successfully committed Data Management operations. "
+        "A successful committed operation may have zero Rows Affected when "
+        "the approved operation required no physical database changes."
+    )
+
+    try:
+        audit_actions = (
+            mutation_manager.get_audit_actions()
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read Audit History actions: "
+            f"{exc}"
+        )
+        return
+
+    filter_columns = st.columns(
+        [1.2, 1.2, 1, 1]
+    )
+
+    with filter_columns[0]:
+        ticker_filter = st.text_input(
+            "Ticker",
+            value="",
+            key="data_management_audit_ticker_filter",
+            help=(
+                "Show committed audit events involving this ticker. "
+                "The filter includes ticker evidence stored in requested "
+                "scope, committed mutations, Source Missing evidence, "
+                "deletions, and duplicate repairs."
+            ),
+        )
+
+    with filter_columns[1]:
+        action_filter = st.selectbox(
+            "Action",
+            options=[
+                "All",
+                *audit_actions,
+            ],
+            index=0,
+            key="data_management_audit_action_filter",
+            help=(
+                "Filter by the committed Data Management action stored "
+                "in Audit History."
+            ),
+        )
+
+    with filter_columns[2]:
+        commit_date_from = st.date_input(
+            "Commit Date From",
+            value=None,
+            key="data_management_audit_commit_date_from",
+            help=(
+                "Filter by when the operation committed. "
+                "This is not the requested OHLCV Start Date."
+            ),
+        )
+
+    with filter_columns[3]:
+        commit_date_to = st.date_input(
+            "Commit Date To",
+            value=None,
+            key="data_management_audit_commit_date_to",
+            help=(
+                "Filter by when the operation committed. "
+                "This is not the requested OHLCV End Date."
+            ),
+        )
+
+    if (
+        commit_date_from is not None
+        and commit_date_to is not None
+        and commit_date_from > commit_date_to
+    ):
+        st.error(
+            "Commit Date From cannot be later than Commit Date To."
+        )
+        return
+
+    selected_action = (
+        None
+        if action_filter == "All"
+        else action_filter
+    )
+
+    try:
+        audit_history = (
+            mutation_manager.get_audit_history(
+                ticker=(
+                    ticker_filter
+                    if str(
+                        ticker_filter
+                    ).strip()
+                    else None
+                ),
+                action=selected_action,
+                start_commit_date=commit_date_from,
+                end_commit_date=commit_date_to,
+                limit=100,
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read Audit History: "
+            f"{exc}"
+        )
+        return
+
+    st.caption(
+        "Showing up to the 100 newest matching committed operations."
+    )
+
+    if not audit_history:
+        st.info(
+            "No Audit History events match the current filters."
+        )
+        return
+
+    history_rows = []
+
+    for record in audit_history:
+        history_rows.append(
+            {
+                "Audit ID": record.audit_id,
+                "Timestamp": record.timestamp,
+                "Action": record.action,
+                "Ticker": record.display_ticker,
+                "Start Date": (
+                    record.start_date
+                    or "\u2014"
+                ),
+                "End Date": (
+                    record.end_date
+                    or "\u2014"
+                ),
+                "Source": record.source,
+                "Rows Affected": (
+                    record.rows_affected
+                ),
+            }
+        )
+
+    history_frame = pd.DataFrame(
+        history_rows
+    )
+
+    st.dataframe(
+        history_frame,
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    records_by_id = {
+        record.audit_id: record
+        for record in audit_history
+    }
+
+    audit_id_options = [
+        record.audit_id
+        for record in audit_history
+    ]
+
+    selected_audit_id = st.selectbox(
+        "View Audit Event",
+        options=audit_id_options,
+        index=0,
+        format_func=lambda audit_id: (
+            f"#{audit_id} — "
+            f"{records_by_id[audit_id].timestamp} — "
+            f"{records_by_id[audit_id].action} — "
+            f"{records_by_id[audit_id].display_ticker}"
+        ),
+        key="data_management_audit_selected_event",
+        help=(
+            "Select one committed operation to inspect its stored "
+            "request scope, affected scope, summary, and audit evidence."
+        ),
+    )
+
+    record = records_by_id[
+        selected_audit_id
+    ]
+
+    details = record.details
+
+    st.markdown("#### Audit Event")
+
+    event_columns = st.columns(4)
+
+    event_columns[0].metric(
+        "Audit ID",
+        record.audit_id,
+    )
+    event_columns[1].metric(
+        "Action",
+        record.action,
+    )
+    event_columns[2].metric(
+        "Source",
+        record.source,
+    )
+    event_columns[3].metric(
+        "Rows Affected",
+        record.rows_affected,
+        help=(
+            "Physical database mutation effects performed by the "
+            "committed operation. Zero is a valid successful result."
+        ),
+    )
+
+    st.caption(
+        "Committed: "
+        f"{record.timestamp}"
+    )
+
+    if record.details_parse_error:
+        st.warning(
+            "Structured Audit Details could not be parsed. "
+            "The authoritative summary row remains available, and the "
+            "exact stored details value is preserved in the advanced "
+            "raw-details section below. "
+            f"Parser message: {record.details_parse_error}"
+        )
+
+    st.markdown("#### Requested Scope")
+
+    requested_ticker_label = (
+        ", ".join(
+            record.requested_tickers
+        )
+        if record.requested_tickers
+        else (
+            record.ticker
+            or "\u2014"
+        )
+    )
+
+    requested_scope_columns = (
+        st.columns(3)
+    )
+
+    requested_scope_columns[0].metric(
+        "Requested Ticker(s)",
+        requested_ticker_label,
+    )
+    requested_scope_columns[1].metric(
+        "Requested Start Date",
+        record.start_date
+        or "\u2014",
+    )
+    requested_scope_columns[2].metric(
+        "Requested End Date",
+        record.end_date
+        or "\u2014",
+    )
+
+    st.caption(
+        "Requested Scope reflects the scope persisted with the "
+        "committed operation. Manual Entry may legitimately have no "
+        "stored requested ticker/date scope because its affected record "
+        "identity is carried in committed mutation evidence."
+    )
+
+    st.markdown("#### Affected Scope")
+
+    affected_ticker_label = (
+        ", ".join(
+            record.affected_tickers
+        )
+        if record.affected_tickers
+        else "\u2014"
+    )
+
+    affected_scope_columns = (
+        st.columns(3)
+    )
+
+    affected_scope_columns[0].metric(
+        "Affected Ticker(s)",
+        affected_ticker_label,
+    )
+    affected_scope_columns[1].metric(
+        "First Affected Date",
+        record.affected_start_date
+        or "\u2014",
+    )
+    affected_scope_columns[2].metric(
+        "Last Affected Date",
+        record.affected_end_date
+        or "\u2014",
+    )
+
+    if record.rows_affected == 0:
+        st.caption(
+            "No physical database rows were changed by this committed "
+            "operation."
+        )
+
+    summary = details.get(
+        "summary",
+        {},
+    )
+
+    if isinstance(
+        summary,
+        dict,
+    ):
+        summary_labels = {
+            "new": "New Observations",
+            "changed": "Changed Observations",
+            "unchanged": "Unchanged Observations",
+            "insert": "Rows Inserted",
+            "replacement_candidate": (
+                "Replacement Candidates"
+            ),
+            "preserve_existing": (
+                "Existing Records Preserved"
+            ),
+            "no_change": "No Change",
+            "delete": "Rows Deleted",
+            "source_missing": "Source Missing",
+            "source_missing_preserved": (
+                "Source Missing Preserved"
+            ),
+            "source_missing_unresolved": (
+                "Source Missing Unresolved"
+            ),
+            "duplicate_keys": "Duplicate Keys",
+            "validation_issues": (
+                "Validation Issues"
+            ),
+            "validation_warnings": (
+                "Validation Warnings"
+            ),
+            "excluded_observations": (
+                "Excluded Observations"
+            ),
+            "excluded_validation_issues": (
+                "Excluded Validation Issues"
+            ),
+        }
+
+        summary_rows = []
+
+        for key, label in summary_labels.items():
+            if key not in summary:
+                continue
+
+            value = summary.get(
+                key
+            )
+
+            show_zero = (
+                record.rows_affected == 0
+                and key
+                in {
+                    "insert",
+                    "replacement_candidate",
+                    "delete",
+                }
+            )
+
+            if (
+                value
+                or show_zero
+            ):
+                summary_rows.append(
+                    {
+                        "Metric": label,
+                        "Count": value,
+                    }
+                )
+
+        if summary_rows:
+            st.markdown(
+                "#### Operation Summary"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    summary_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    validation_warnings = details.get(
+        "validation_warnings",
+        [],
+    )
+
+    if (
+        isinstance(
+            validation_warnings,
+            list,
+        )
+        and validation_warnings
+    ):
+        st.markdown(
+            "#### Validation Warnings"
+        )
+
+        st.dataframe(
+            pd.DataFrame(
+                validation_warnings
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    excluded_observations = details.get(
+        "excluded_observations",
+        [],
+    )
+
+    if (
+        isinstance(
+            excluded_observations,
+            list,
+        )
+        and excluded_observations
+    ):
+        st.markdown(
+            "#### Excluded Observations"
+        )
+
+        excluded_rows = []
+
+        for observation in excluded_observations:
+            if not isinstance(
+                observation,
+                dict,
+            ):
+                continue
+
+            issues = observation.get(
+                "issues",
+                [],
+            )
+
+            issue_messages = []
+
+            if isinstance(
+                issues,
+                list,
+            ):
+                for issue in issues:
+                    if not isinstance(
+                        issue,
+                        dict,
+                    ):
+                        continue
+
+                    message = str(
+                        issue.get(
+                            "message",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+
+                    code = str(
+                        issue.get(
+                            "code",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+
+                    if code and message:
+                        issue_messages.append(
+                            f"{code}: {message}"
+                        )
+                    elif message:
+                        issue_messages.append(
+                            message
+                        )
+                    elif code:
+                        issue_messages.append(
+                            code
+                        )
+
+            excluded_rows.append(
+                {
+                    "Candidate Index": (
+                        observation.get(
+                            "candidate_index"
+                        )
+                    ),
+                    "Ticker": (
+                        observation.get(
+                            "ticker"
+                        )
+                    ),
+                    "Date": (
+                        observation.get(
+                            "date"
+                        )
+                    ),
+                    "Issues": (
+                        " | ".join(
+                            issue_messages
+                        )
+                        if issue_messages
+                        else "\u2014"
+                    ),
+                }
+            )
+
+        if excluded_rows:
+            st.dataframe(
+                pd.DataFrame(
+                    excluded_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    mutations = details.get(
+        "mutations",
+        [],
+    )
+
+    if (
+        isinstance(
+            mutations,
+            list,
+        )
+        and mutations
+    ):
+        st.markdown(
+            "#### Committed Mutations"
+        )
+
+        mutation_rows = []
+
+        for mutation in mutations:
+            if not isinstance(
+                mutation,
+                dict,
+            ):
+                continue
+
+            differing_fields = (
+                mutation.get(
+                    "differing_fields",
+                    [],
+                )
+            )
+
+            if isinstance(
+                differing_fields,
+                list,
+            ):
+                differing_fields_label = (
+                    ", ".join(
+                        str(
+                            field
+                        )
+                        for field
+                        in differing_fields
+                    )
+                    if differing_fields
+                    else "\u2014"
+                )
+            else:
+                differing_fields_label = (
+                    str(
+                        differing_fields
+                    )
+                )
+
+            mutation_rows.append(
+                {
+                    "Ticker": (
+                        mutation.get(
+                            "Ticker"
+                        )
+                    ),
+                    "Date": (
+                        mutation.get(
+                            "Date"
+                        )
+                    ),
+                    "Classification": (
+                        mutation.get(
+                            "classification"
+                        )
+                    ),
+                    "Planned Action": (
+                        mutation.get(
+                            "planned_action"
+                        )
+                    ),
+                    "Differing Fields": (
+                        differing_fields_label
+                    ),
+                }
+            )
+
+        if mutation_rows:
+            st.dataframe(
+                pd.DataFrame(
+                    mutation_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    source_missing = details.get(
+        "source_missing",
+        [],
+    )
+
+    if (
+        isinstance(
+            source_missing,
+            list,
+        )
+        and source_missing
+    ):
+        st.markdown(
+            "#### Source Missing"
+        )
+
+        st.dataframe(
+            pd.DataFrame(
+                source_missing
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    deletion = details.get(
+        "deletion"
+    )
+
+    if isinstance(
+        deletion,
+        dict,
+    ):
+        st.markdown(
+            "#### Deletion Details"
+        )
+
+        deletion_rows = [
+            {
+                "Planned Action": (
+                    deletion.get(
+                        "planned_action"
+                    )
+                ),
+                "Materialized Rows": (
+                    deletion.get(
+                        "materialized_rows"
+                    )
+                ),
+                "First Affected Date": (
+                    deletion.get(
+                        "first_affected_date"
+                    )
+                ),
+                "Last Affected Date": (
+                    deletion.get(
+                        "last_affected_date"
+                    )
+                ),
+            }
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                deletion_rows
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    duplicate_repairs = details.get(
+        "duplicate_repairs",
+        [],
+    )
+
+    if (
+        isinstance(
+            duplicate_repairs,
+            list,
+        )
+        and duplicate_repairs
+    ):
+        st.markdown(
+            "#### Duplicate Repair Details"
+        )
+
+        for repair_index, repair in enumerate(
+            duplicate_repairs,
+            start=1,
+        ):
+            if not isinstance(
+                repair,
+                dict,
+            ):
+                continue
+
+            repair_ticker = str(
+                repair.get(
+                    "Ticker",
+                    "",
+                )
+                or ""
+            )
+
+            repair_date = str(
+                repair.get(
+                    "Date",
+                    "",
+                )
+                or ""
+            )
+
+            with st.expander(
+                (
+                    f"Repair {repair_index}: "
+                    f"{repair_ticker or '\u2014'} "
+                    f"{repair_date or '\u2014'}"
+                ),
+                expanded=False,
+            ):
+                repair_columns = (
+                    st.columns(3)
+                )
+
+                repair_columns[0].metric(
+                    "Planned Action",
+                    repair.get(
+                        "planned_action"
+                    )
+                    or "\u2014",
+                )
+
+                repair_columns[1].metric(
+                    "Physical Rows Removed",
+                    repair.get(
+                        "physical_rows_removed",
+                        0,
+                    ),
+                )
+
+                stored_records = repair.get(
+                    "stored_records",
+                    [],
+                )
+
+                stored_record_count = (
+                    len(
+                        stored_records
+                    )
+                    if isinstance(
+                        stored_records,
+                        list,
+                    )
+                    else 0
+                )
+
+                repair_columns[2].metric(
+                    "Stored Records",
+                    stored_record_count,
+                )
+
+                canonical_candidate = (
+                    repair.get(
+                        "canonical_candidate"
+                    )
+                )
+
+                if isinstance(
+                    canonical_candidate,
+                    dict,
+                ):
+                    st.caption(
+                        "Canonical replacement"
+                    )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            [
+                                canonical_candidate
+                            ]
+                        ),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+
+                if (
+                    isinstance(
+                        stored_records,
+                        list,
+                    )
+                    and stored_records
+                ):
+                    st.caption(
+                        "Stored physical records removed"
+                    )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            stored_records
+                        ),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+
+    st.markdown(
+        "#### Technical Identity"
+    )
+
+    technical_rows = [
+        {
+            "Field": "Plan Fingerprint",
+            "Value": (
+                record.plan_fingerprint
+            ),
+        },
+        {
+            "Field": "Baseline Fingerprint",
+            "Value": (
+                details.get(
+                    "baseline_fingerprint"
+                )
+                or "\u2014"
+            ),
+        },
+    ]
+
+    st.dataframe(
+        pd.DataFrame(
+            technical_rows
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander(
+        "Advanced — Raw Audit Details",
+        expanded=False,
+    ):
+        if record.raw_details is None:
+            st.caption(
+                "No raw Audit Details value is stored for this event."
+            )
+        elif not record.raw_details:
+            st.caption(
+                "The stored Audit Details value is empty."
+            )
+        else:
+            st.code(
+                record.raw_details,
+                language="json",
+            )
+
+
 def _render_data_management_mutation_workflow() -> None:
     """
     Render mutation result/error state and the active Preview when present.
@@ -16858,6 +17735,10 @@ def show_data_management():
 
     _render_data_management_deletion_controls(
         inventory=inventory,
+    )
+
+    _render_data_management_audit_history(
+        mutation_manager=mutation_manager,
     )
 
     _render_data_management_mutation_workflow()
