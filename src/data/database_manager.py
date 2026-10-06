@@ -10,17 +10,12 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Dict, List
 
-from src.config.assets import (
-    COUNTRY_ETFS,
-    CUSTOM_DEFAULT,
-    SECTOR_ETFS,
-    get_tickers_only,
-)
 from src.config.settings import DATABASE_FILE, TABLE_NAME
 from src.data.market_calendar import (
     get_expected_sessions,
     get_latest_expected_stored_session,
 )
+from src.data.universe_manager import UniverseManager
 
 
 class DatabaseManager:
@@ -37,6 +32,9 @@ class DatabaseManager:
 
     def __init__(self, database_file: str = DATABASE_FILE) -> None:
         self.database_path = Path(database_file)
+        self.universe_manager = UniverseManager(
+            database_file=database_file
+        )
 
     def _connect_read_only(self) -> sqlite3.Connection:
         """
@@ -51,43 +49,65 @@ class DatabaseManager:
         connection.row_factory = sqlite3.Row
         return connection
 
-    @staticmethod
-    def _configured_memberships() -> Dict[str, set[str]]:
+    def _configured_memberships(self) -> Dict[str, set[str]]:
         """
-        Return configured ticker memberships by Data Management universe.
+        Return persistent ticker memberships by Data Management universe.
 
         A ticker may legitimately belong to more than one configured universe.
+        Persistent universe membership is authoritative for Data Management.
         """
         return {
-            "Custom": {
-                str(ticker).upper()
-                for ticker in get_tickers_only(CUSTOM_DEFAULT)
-            },
-            "Sector": {
-                str(ticker).upper()
-                for ticker in get_tickers_only(SECTOR_ETFS)
-            },
-            "Country": {
-                str(ticker).upper()
-                for ticker in get_tickers_only(COUNTRY_ETFS)
-            },
+            bucket_name: set(
+                self.universe_manager.get_bucket_tickers(
+                    bucket_name
+                )
+            )
+            for bucket_name in (
+                "Custom",
+                "Sector",
+                "Country",
+            )
         }
 
-    @classmethod
-    def _bucket_labels_for_ticker(cls, ticker: str) -> List[str]:
+    def _bucket_labels_for_ticker(
+        self,
+        ticker: str,
+        memberships: Dict[str, set[str]] | None = None,
+    ) -> List[str]:
         """
-        Return every configured universe containing ticker.
+        Return every persistent universe containing ticker.
 
-        An empty list means the ticker is stored in the database but is
+        An empty list means the ticker is stored in daily_prices but is
         currently unassigned to Custom, Sector, or Country.
+
+        memberships may be supplied by bulk callers so the persistent universe
+        is read once rather than repeatedly for every stored ticker.
         """
-        ticker_upper = str(ticker).upper()
-        memberships = cls._configured_memberships()
+        ticker_upper = str(
+            ticker
+        ).strip().upper()
+
+        if memberships is not None:
+            return [
+                bucket_name
+                for bucket_name in (
+                    "Custom",
+                    "Sector",
+                    "Country",
+                )
+                if ticker_upper
+                in memberships.get(
+                    bucket_name,
+                    set(),
+                )
+            ]
 
         return [
-            bucket_name
-            for bucket_name, bucket_tickers in memberships.items()
-            if ticker_upper in bucket_tickers
+            membership.bucket
+            for membership
+            in self.universe_manager.get_bucket_memberships(
+                ticker_upper
+            )
         ]
 
     @staticmethod
@@ -592,13 +612,20 @@ class DatabaseManager:
 
         inventory: List[Dict[str, Any]] = []
 
+        configured_memberships = (
+            self._configured_memberships()
+        )
+
         for ticker in sorted(records_by_ticker):
             stored_records = records_by_ticker[ticker]
             stored_dates = [
                 record["date"]
                 for record in stored_records
             ]
-            bucket_labels = self._bucket_labels_for_ticker(ticker)
+            bucket_labels = self._bucket_labels_for_ticker(
+                ticker,
+                memberships=configured_memberships,
+            )
             health = self._calculate_ticker_health(
                 stored_dates,
                 expected_session_set,

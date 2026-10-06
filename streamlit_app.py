@@ -35,6 +35,7 @@ from data.data_acquisition import (
 )
 from data.data_mutation import DataMutationManager, MutationPlan
 from data.database_manager import DatabaseManager
+from data.universe_manager import UniverseManager
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import (
     ASSET_GROUPS,
@@ -7459,200 +7460,317 @@ def create_sidebar_controls():
     }
     st.sidebar.info(f"Currently analyzing: **{bucket_names[st.session_state.selected_bucket]}**")
 
-    # STEP 3 & 4: Filter and Add Tickers for Selected Bucket
+    # STEP 3 & 4: Filter and temporarily augment the selected bucket.
+    #
+    # Persistent bucket membership/order/display names come from UniverseManager.
+    # Checkbox visibility and ad hoc ticker additions remain session-only.
     st.sidebar.markdown("---")
-    st.sidebar.subheader(f"🔧 Modify/Filter {bucket_names[st.session_state.selected_bucket]}")
-    
-    # Import needed functions
-    from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
-    
-    # Initialize bucket_save_to_db variable
-    bucket_save_to_db = True  # Default value
-    
+    st.sidebar.subheader(
+        f"🔧 Modify/Filter "
+        f"{bucket_names[st.session_state.selected_bucket]}"
+    )
+
+    universe_manager = UniverseManager()
+
+    selected_bucket_name = {
+        "country": "Country",
+        "sector": "Sector",
+        "custom": "Custom",
+    }[st.session_state.selected_bucket]
+
+    bucket_records = universe_manager.get_bucket_records(
+        selected_bucket_name
+    )
+
+    persistent_bucket_tickers = [
+        record.ticker
+        for record in bucket_records
+    ]
+
+    persistent_ticker_names = {
+        record.ticker: record.display_name
+        for record in bucket_records
+    }
+
     if st.session_state.selected_bucket == 'country':
-        # Initialize visible tickers if empty
-        all_country_tickers = get_tickers_only(COUNTRY_ETFS)
         if not st.session_state.country_visible_tickers:
-            st.session_state.country_visible_tickers = all_country_tickers.copy()
-        
-        # Country ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Country ETFs", expanded=False):
-            for ticker, display_name in COUNTRY_ETFS:
-                is_visible = ticker in st.session_state.country_visible_tickers
+            st.session_state.country_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
+
+        with st.sidebar.expander(
+            "📋 Show/Hide Country ETFs",
+            expanded=False,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.country_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_country_{ticker}"
+                    key=f"filter_country_{ticker}",
                 ):
-                    if ticker not in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.country_visible_tickers
+                    ):
+                        st.session_state.country_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.remove(ticker)
-            
-            st.caption(f"Showing: {len(st.session_state.country_visible_tickers)}/{len(all_country_tickers)} country ETFs")
-        
-        # Add new Country ETF
-        with st.sidebar.expander("➕ Add New Country ETF", expanded=False):
-            new_country_ticker = st.text_input(
-                "Country ETF Ticker:",
-                key="new_country_ticker_step4",
-                placeholder="e.g., EWK"
-            ).upper().strip()
-            
-            new_country_name = st.text_input(
-                "Display Name:",
-                key="new_country_name_step4", 
-                placeholder="e.g., Belgium"
-            ).strip()
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=True,
-                key="save_country_to_db",
-                help="Save historical data for faster future access"
+                        st.session_state.country_visible_tickers.remove(
+                            ticker
+                        )
+
+            st.caption(
+                f"Showing: "
+                f"{len(st.session_state.country_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} country ETFs"
             )
-            
-            if st.button("Add Country ETF", key="add_country_step4"):
-                if new_country_ticker and new_country_name:
-                    if new_country_ticker not in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.append(new_country_ticker)
-                        st.success(f"✅ Added {new_country_name} ({new_country_ticker}) to country ETFs")
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Country Ticker",
+            expanded=False,
+        ):
+            new_country_ticker = st.text_input(
+                "Ticker:",
+                key="new_country_ticker_step4",
+                placeholder="e.g., EWK",
+                help=(
+                    "Add a ticker to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
+            ).upper().strip()
+
+            if st.button(
+                "Add Temporary Ticker",
+                key="add_country_step4",
+            ):
+                if new_country_ticker:
+                    if (
+                        new_country_ticker
+                        not in st.session_state.country_visible_tickers
+                    ):
+                        st.session_state.country_visible_tickers.append(
+                            new_country_ticker
+                        )
+                        st.success(
+                            f"✅ Added {new_country_ticker} "
+                            "to this Country view"
+                        )
                     else:
-                        st.warning(f"⚠️ {new_country_ticker} already in your list")
+                        st.warning(
+                            f"⚠️ {new_country_ticker} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Please enter both ticker and display name")
-    
+                    st.error("❌ Enter a ticker symbol")
+
     elif st.session_state.selected_bucket == 'sector':
-        # Initialize visible tickers if empty
-        all_sector_tickers = get_tickers_only(SECTOR_ETFS)
         if not st.session_state.sector_visible_tickers:
-            st.session_state.sector_visible_tickers = all_sector_tickers.copy()
-        
-        # Sector ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Sector ETFs", expanded=False):
-            for ticker, display_name in SECTOR_ETFS:
-                is_visible = ticker in st.session_state.sector_visible_tickers
+            st.session_state.sector_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
+
+        with st.sidebar.expander(
+            "📋 Show/Hide Sector ETFs",
+            expanded=False,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.sector_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_sector_{ticker}"
+                    key=f"filter_sector_{ticker}",
                 ):
-                    if ticker not in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.sector_visible_tickers
+                    ):
+                        st.session_state.sector_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.remove(ticker)
-            
-            st.caption(f"Showing: {len(st.session_state.sector_visible_tickers)}/{len(all_sector_tickers)} sector ETFs")
-        
-        # Add new Sector ETF
-        with st.sidebar.expander("➕ Add New Sector ETF", expanded=False):
-            new_sector_ticker = st.text_input(
-                "Sector ETF Ticker:",
-                key="new_sector_ticker_step4",
-                placeholder="e.g., JETS"
-            ).upper().strip()
-            
-            new_sector_name = st.text_input(
-                "Display Name:",
-                key="new_sector_name_step4",
-                placeholder="e.g., Airlines"
-            ).strip()
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=True,
-                key="save_sector_to_db",
-                help="Save historical data for faster future access"
+                        st.session_state.sector_visible_tickers.remove(
+                            ticker
+                        )
+
+            st.caption(
+                f"Showing: "
+                f"{len(st.session_state.sector_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} sector ETFs"
             )
-            
-            if st.button("Add Sector ETF", key="add_sector_step4"):
-                if new_sector_ticker and new_sector_name:
-                    if new_sector_ticker not in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.append(new_sector_ticker)
-                        st.success(f"✅ Added {new_sector_name} ({new_sector_ticker}) to sector ETFs")
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Sector Ticker",
+            expanded=False,
+        ):
+            new_sector_ticker = st.text_input(
+                "Ticker:",
+                key="new_sector_ticker_step4",
+                placeholder="e.g., JETS",
+                help=(
+                    "Add a ticker to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
+            ).upper().strip()
+
+            if st.button(
+                "Add Temporary Ticker",
+                key="add_sector_step4",
+            ):
+                if new_sector_ticker:
+                    if (
+                        new_sector_ticker
+                        not in st.session_state.sector_visible_tickers
+                    ):
+                        st.session_state.sector_visible_tickers.append(
+                            new_sector_ticker
+                        )
+                        st.success(
+                            f"✅ Added {new_sector_ticker} "
+                            "to this Sector view"
+                        )
                     else:
-                        st.warning(f"⚠️ {new_sector_ticker} already in your list")
+                        st.warning(
+                            f"⚠️ {new_sector_ticker} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Please enter both ticker and display name")
-    
+                    st.error("❌ Enter a ticker symbol")
+
     else:  # custom bucket
-        # Initialize visible tickers if empty.
-        # CUSTOM_DEFAULT may contain either plain ticker strings or
-        # (ticker, display_name) tuples; session state must store ticker strings only.
-        custom_default_tickers = get_tickers_only(CUSTOM_DEFAULT)
-
         if not st.session_state.custom_visible_tickers:
-            st.session_state.custom_visible_tickers = custom_default_tickers.copy()
-        
-        # Custom stock filtering
-        with st.sidebar.expander("📋 Show/Hide Custom Stocks", expanded=True):
-            for item in CUSTOM_DEFAULT:
-                if isinstance(item, tuple):
-                    ticker, display_name = item
-                else:
-                    ticker, display_name = item, item
+            st.session_state.custom_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
 
-                is_visible = ticker in st.session_state.custom_visible_tickers
+        with st.sidebar.expander(
+            "📋 Show/Hide Custom Stocks",
+            expanded=True,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.custom_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_custom_{ticker}"
+                    key=f"filter_custom_{ticker}",
                 ):
-                    if ticker not in st.session_state.custom_visible_tickers:
-                        st.session_state.custom_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.custom_visible_tickers
+                    ):
+                        st.session_state.custom_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.custom_visible_tickers:
-                        st.session_state.custom_visible_tickers.remove(ticker)
-            
+                        st.session_state.custom_visible_tickers.remove(
+                            ticker
+                        )
+
             st.caption(
-                f"Showing: {len(st.session_state.custom_visible_tickers)}/"
-                f"{len(custom_default_tickers)} custom stocks"
+                f"Showing: "
+                f"{len(st.session_state.custom_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} custom stocks"
             )
-        
-        # Add new Custom Stocks
-        with st.sidebar.expander("➕ Add Custom Stocks", expanded=False):
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Custom Ticker(s)",
+            expanded=False,
+        ):
             ticker_input = st.text_area(
                 "Add Ticker(s):",
                 key="custom_ticker_input_step4",
-                placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
-                height=80
+                placeholder=(
+                    "Single: TSLA\n"
+                    "Multiple: AAPL, MSFT, GOOGL\n"
+                    "(comma or line separated)"
+                ),
+                height=80,
+                help=(
+                    "Add ticker(s) to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
             )
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=st.session_state.save_custom_to_database,
-                key="save_custom_to_db_step4",
-                help="Save historical data for faster future access"
-            )
-            
-            if st.button("Add Ticker(s)", key="add_custom_step4"):
+
+            if st.button(
+                "Add Temporary Ticker(s)",
+                key="add_custom_step4",
+            ):
                 if ticker_input.strip():
-                    # Parse input
                     parsed_tickers = []
-                    for line in ticker_input.replace(',', '\n').split('\n'):
+
+                    for line in (
+                        ticker_input
+                        .replace(',', '\n')
+                        .split('\n')
+                    ):
                         ticker = line.strip().upper()
-                        if ticker and ticker not in parsed_tickers:
-                            parsed_tickers.append(ticker)
-                    
-                    # Add tickers
+
+                        if (
+                            ticker
+                            and ticker not in parsed_tickers
+                        ):
+                            parsed_tickers.append(
+                                ticker
+                            )
+
                     added_count = 0
+
                     for ticker in parsed_tickers:
-                        if ticker not in st.session_state.custom_visible_tickers:
-                            st.session_state.custom_visible_tickers.append(ticker)
+                        if (
+                            ticker
+                            not in st.session_state.custom_visible_tickers
+                        ):
+                            st.session_state.custom_visible_tickers.append(
+                                ticker
+                            )
                             added_count += 1
-                    
+
                     if added_count > 0:
-                        st.success(f"✅ Added {added_count} ticker{'s' if added_count != 1 else ''}")
+                        st.success(
+                            f"✅ Added {added_count} "
+                            f"temporary ticker"
+                            f"{'s' if added_count != 1 else ''}"
+                        )
+
                     if added_count < len(parsed_tickers):
-                        skipped = len(parsed_tickers) - added_count
-                        st.info(f"ℹ️ {skipped} ticker{'s' if skipped != 1 else ''} already in list")
+                        skipped = (
+                            len(parsed_tickers)
+                            - added_count
+                        )
+                        st.info(
+                            f"ℹ️ {skipped} ticker"
+                            f"{'s' if skipped != 1 else ''} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Enter at least one ticker symbol")
+                    st.error(
+                        "❌ Enter at least one ticker symbol"
+                    )
 
     # Ticker Aggregation Based on Selected Bucket
     st.sidebar.markdown("---")
@@ -7754,15 +7872,14 @@ def create_sidebar_controls():
         use_container_width=True
     )
     
-    # FIXED: Return the actual bucket-specific database toggle value
     return {
         'group': asset_group,
         'group_name': group_name,
         'tickers': final_tickers,
+        'ticker_names': persistent_ticker_names,
         'period': selected_period,
         'period_name': selected_period_name,
         'refresh': refresh_button,
-        'database_save': bucket_save_to_db,  # ← NOW USES BUCKET-SPECIFIC TOGGLE
         'analysis_mode': st.session_state.selected_analysis_mode,
         'volume_view_mode': volume_view_mode,
     }
@@ -7949,8 +8066,14 @@ def fetch_volume_data(
         
         return volume_data
 
-def display_summary_stats(performance_data):
+def display_summary_stats(
+    performance_data,
+    ticker_names=None,
+):
     """Display summary statistics"""
+    ticker_names = dict(
+        ticker_names or {}
+    )
     generator = st.session_state.heatmap_generator
     stats = generator.create_summary_stats(performance_data)
     
@@ -8008,21 +8131,6 @@ def display_summary_stats(performance_data):
             performance_key = 'volume_change'
 
     if performance_key:
-        selected_bucket = st.session_state.get(
-            'selected_bucket',
-            'custom',
-        )
-
-        ticker_names = dict(
-            ASSET_GROUPS.get(
-                selected_bucket,
-                {},
-            ).get(
-                'ticker_names',
-                {},
-            )
-        )
-
         best_performers = sorted(
             valid_data,
             key=lambda item: item[performance_key],
@@ -8089,11 +8197,11 @@ def display_heatmap(
     title,
     asset_group=None,
     tile_order='original',
+    ticker_names=None,
 ):
     """Display the main heatmap visualization"""
     generator = st.session_state.heatmap_generator
-    
-    # Create heatmap with asset group information
+
     fig = generator.create_treemap(
         performance_data=performance_data,
         title=title,
@@ -8101,6 +8209,7 @@ def display_heatmap(
         height=700,
         asset_group=asset_group,
         tile_order=tile_order,
+        ticker_names=ticker_names,
     )
     
     # Display with full width
@@ -9957,7 +10066,7 @@ def show_performance_heatmaps():
             performance_data = fetch_performance_data(
                 controls['tickers'],
                 controls['period'],
-                save_to_db=controls['database_save']
+                save_to_db=False,
             )
 
             # Store in session state.
@@ -9986,7 +10095,7 @@ def show_performance_heatmaps():
                 observation_mode=controls[
                     'volume_view_mode'
                 ],
-                save_to_db=controls['database_save'],
+                save_to_db=False,
             )
 
             # Store in session state using the same request-identity contract as
@@ -10039,7 +10148,12 @@ def show_performance_heatmaps():
         
         # Display summary statistics
         st.subheader("📊 Summary Statistics")
-        display_summary_stats(current_data)
+        display_summary_stats(
+            current_data,
+            ticker_names=controls[
+                'ticker_names'
+            ],
+        )
         
         st.markdown("---")
         
@@ -10266,6 +10380,9 @@ def show_performance_heatmaps():
             title,
             controls['group'],
             tile_order=selected_tile_order,
+            ticker_names=controls[
+                'ticker_names'
+            ],
         )
 
         # Display data table
