@@ -119,7 +119,6 @@ class DatabaseIntegratedTechnicalCalculator:
     def __init__(self, db_file: str = "data/stock_data.db"):
         self.db_file = db_file
         self.daily_prices_table = "daily_prices"
-        self.technical_table = "technical_indicators_daily"
         self.extremes_table = "price_extremes_periods"
         self.pivot_table = "pivot_points_daily"
         
@@ -820,10 +819,6 @@ class DatabaseIntegratedTechnicalCalculator:
         #  - However, we have not yet added legacy-style mappings/signals for those
         #    indicators in this dict. When/if we want them to appear in the legacy
         #    tables, we should add explicit mappings here.
-
-        # Save to database if enabled and we have a latest_date
-        if save_to_db and latest_date is not None:
-            self._save_technical_indicators_to_db(ticker, latest_date, indicators)
 
         return indicators
 
@@ -5216,10 +5211,6 @@ class DatabaseIntegratedTechnicalCalculator:
             
             logger.info(f"✅ Technical indicators calculated for {ticker}: {len([k for k in indicators.keys() if not k.startswith('_')])} indicators")
             
-            # Save to database if enabled
-            if save_to_db:
-                self._save_technical_indicators_to_db(ticker, latest_date, indicators)
-            
             return indicators
             
         except Exception as e:
@@ -5431,238 +5422,6 @@ class DatabaseIntegratedTechnicalCalculator:
         else:
             return {'signal': 'Neutral', 'strength': 'Weak', 'description': 'No significant momentum'}
     
-    def _save_technical_indicators_to_db(self, ticker: str, date: date, indicators: Dict) -> bool:
-        """
-        Save technical indicators to database (only if final data available)
-        
-        Args:
-            ticker: Stock ticker symbol
-            date: Date for the indicators
-            indicators: Dictionary with calculated indicators
-            
-        Returns:
-            True if saved successfully, False otherwise
-        """
-        # Import trading day logic
-        from .performance import get_last_completed_trading_day
-        
-        # Final data validation: Only save if date is last completed trading day or earlier
-        last_complete_day = get_last_completed_trading_day()
-        
-        # Convert to date objects for comparison
-        if isinstance(last_complete_day, datetime):
-            last_complete_day = last_complete_day.date()
-        
-        if isinstance(date, datetime):
-            date_only = date.date()
-        else:
-            date_only = date
-        
-        if date_only > last_complete_day:
-            logger.warning(f"⚠️ Skipping database save for {ticker} on {date_only} - final data not available yet (last complete: {last_complete_day})")
-            return False
-        
-        conn = self._get_database_connection()
-        if not conn:
-            return False
-        
-        try:
-            # Prepare data for database insertion
-            insert_data = {
-                'ticker': ticker,
-                'date': date.strftime('%Y-%m-%d'),
-                'rsi_14': indicators.get('rsi_14'),
-                'macd_value': indicators.get('macd_value'),
-                'macd_signal': indicators.get('macd_signal'),
-                'macd_histogram': indicators.get('macd_histogram'),
-                'stoch_k': indicators.get('stoch_k'),
-                'stoch_d': indicators.get('stoch_d'),
-                'adx_value': indicators.get('adx_value'),
-                'plus_di': indicators.get('plus_di'),
-                'minus_di': indicators.get('minus_di'),
-                'atr_14': indicators.get('atr_14'),
-                'bull_power': indicators.get('bull_power'),
-                'bear_power': indicators.get('bear_power'),
-                'sma_5': indicators.get('sma_5'),
-                'sma_9': indicators.get('sma_9'),
-                'sma_10': indicators.get('sma_10'),
-                'sma_20': indicators.get('sma_20'),
-                'sma_21': indicators.get('sma_21'),
-                'sma_50': indicators.get('sma_50'),
-                'sma_100': indicators.get('sma_100'),
-                'sma_200': indicators.get('sma_200'),
-                'ema_5': indicators.get('ema_5'),
-                'ema_9': indicators.get('ema_9'),
-                'ema_10': indicators.get('ema_10'),
-                'ema_20': indicators.get('ema_20'),
-                'ema_21': indicators.get('ema_21'),
-                'ema_50': indicators.get('ema_50'),
-                'ema_100': indicators.get('ema_100'),
-                'ema_200': indicators.get('ema_200')
-            }
-            
-            # Build dynamic INSERT OR REPLACE query
-            columns = list(insert_data.keys())
-            placeholders = ', '.join(['?' for _ in columns])
-            column_names = ', '.join(columns)
-            
-            query = f"""
-            INSERT OR REPLACE INTO {self.technical_table}
-            ({column_names})
-            VALUES ({placeholders})
-            """
-            
-            cursor = conn.cursor()
-            cursor.execute(query, list(insert_data.values()))
-            conn.commit()
-            
-            logger.info(f"✅ Technical indicators saved to database for {ticker} on {date}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error saving technical indicators for {ticker}: {e}")
-            return False
-        finally:
-            conn.close()
-    
-    def _get_latest_indicator_date(self, ticker: str) -> Optional[datetime.date]:
-        """Get the latest date with technical indicators for a ticker"""
-        try:
-            conn = sqlite3.connect(self.db_file)
-            cursor = conn.cursor()
-            
-            query = f"""
-            SELECT MAX(date) as latest_date
-            FROM {self.technical_table}
-            WHERE ticker = ?
-            """
-            
-            cursor.execute(query, (ticker,))
-            result = cursor.fetchone()
-            conn.close()
-            
-            if result and result[0]:
-                return datetime.strptime(result[0], '%Y-%m-%d').date()
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting latest indicator date for {ticker}: {e}")
-            return None
-    
-    def _calculate_indicators_for_date(self, ohlcv_data: pd.DataFrame, target_date: datetime.date) -> Dict:
-        """Calculate technical indicators using data up to target_date"""
-        try:
-            # Filter data up to target date
-            ohlcv_data.index = pd.to_datetime(ohlcv_data.index)
-            target_datetime = pd.Timestamp(target_date)
-            filtered_data = ohlcv_data[ohlcv_data.index <= target_datetime].copy()
-            
-            if len(filtered_data) < 200:
-                logger.warning(f"Insufficient data for {target_date}: only {len(filtered_data)} rows")
-                return {}
-            
-            # Calculate all indicators using existing methods
-            indicators = {}
-            
-            # Moving averages
-            ma_results = self._calculate_moving_averages(filtered_data)
-            if ma_results:
-                indicators.update(ma_results)
-            
-            # Technical indicators
-            tech_results = self._calculate_technical_indicators(filtered_data)
-            if tech_results:
-                indicators.update(tech_results)
-            
-            return indicators
-            
-        except Exception as e:
-            logger.error(f"Error calculating indicators for {target_date}: {e}")
-            return {}
-    
-    def backfill_technical_indicators(self, ticker: str, days: int = 22) -> Dict:
-        """
-        Fill gaps in technical_indicators_daily table for time-series continuity
-        
-        Args:
-            ticker: Stock ticker symbol
-            days: Number of trading days to backfill (default: 22 = 1 month)
-        
-        Returns:
-            Dict with success status and number of dates backfilled
-        """
-        try:
-            from .performance import get_last_completed_trading_day, get_last_n_trading_days
-            
-            # 1. Check if data is current
-            latest_date = self._get_latest_indicator_date(ticker)
-            last_complete_day = get_last_completed_trading_day()
-            
-            if latest_date and latest_date >= last_complete_day:
-                logger.info(f"✅ {ticker} technical indicators current (latest: {latest_date})")
-                return {'success': True, 'backfilled': 0, 'reason': 'data_current'}
-            
-            # 2. Get required date range (last 22 trading days)
-            required_dates = get_last_n_trading_days(days, end_date=last_complete_day)
-            
-            # 3. Query database for existing dates
-            conn = sqlite3.connect(self.db_file)
-            cursor = conn.cursor()
-            
-            placeholders = ','.join(['?' for _ in required_dates])
-            query = f"""
-            SELECT DISTINCT date
-            FROM {self.technical_table}
-            WHERE ticker = ? AND date IN ({placeholders})
-            """
-            
-            date_strings = [d.strftime('%Y-%m-%d') for d in required_dates]
-            cursor.execute(query, [ticker] + date_strings)
-            existing_dates_raw = cursor.fetchall()
-            conn.close()
-            
-            existing_dates = [datetime.strptime(row[0], '%Y-%m-%d').date() for row in existing_dates_raw]
-            
-            # 4. Identify missing dates
-            missing_dates = [d for d in required_dates if d not in existing_dates]
-            
-            if not missing_dates:
-                logger.info(f"✅ {ticker} has complete {days}-day history")
-                return {'success': True, 'backfilled': 0, 'reason': 'no_gaps'}
-            
-            logger.info(f"🔄 Backfilling {len(missing_dates)} missing dates for {ticker}")
-            
-            # 5. Fetch OHLCV data (includes gap detection)
-            ohlcv_data = self._get_sufficient_ohlcv_data(
-                ticker=ticker,
-                periods_needed=200,  # Need sufficient data for 200-day MA
-                save_to_db=True
-            )
-            
-            if ohlcv_data is None or ohlcv_data.empty:
-                logger.error(f"Failed to fetch OHLCV data for {ticker}")
-                return {'success': False, 'error': 'ohlcv_fetch_failed'}
-            
-            # 6. Calculate and save indicators for each missing date
-            backfilled_count = 0
-            for date in sorted(missing_dates):
-                indicators = self._calculate_indicators_for_date(ohlcv_data, date)
-                
-                if indicators:
-                    success = self._save_technical_indicators_to_db(ticker, date, indicators)
-                    if success:
-                        backfilled_count += 1
-            
-            logger.info(f"✅ Backfilled {backfilled_count}/{len(missing_dates)} dates for {ticker}")
-            return {
-                'success': True,
-                'backfilled': backfilled_count,
-                'attempted': len(missing_dates)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error backfilling technical indicators for {ticker}: {e}")
-            return {'success': False, 'error': str(e)}
     
     def _get_price_extremes_from_db(self, ticker: str, period: str) -> Optional[Dict]:
         """Get cached price extremes from database with staleness check"""

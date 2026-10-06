@@ -17886,11 +17886,6 @@ def main():
                         ticker=ticker,
                         save_to_db=True
                     )
-                    # Backfill 22-day history for rolling heatmap
-                    st.session_state.tech_calculator.backfill_technical_indicators(
-                        ticker=ticker,
-                        days=22
-                    )
                     # Calculate 52-week price extremes
                     st.session_state.tech_calculator.calculate_52_week_analysis(ticker)
                 except Exception as e:
