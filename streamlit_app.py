@@ -465,19 +465,40 @@ def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
 
 def _get_scd_source_config(source: str) -> Dict[str, Any]:
     """
-    Return existing asset-universe metadata for an SCD ticker source.
+    Return persistent universe metadata for one SCD ticker source.
 
-    SCD consumes the existing ASSET_GROUPS universes. It does not create a new
-    asset universe or reorder canonical ticker lists.
+    Persistent Custom, Sector, and Country membership owns the available
+    ticker list, canonical display names, and bucket-local order. SCD retains
+    its own curated default selections and session-only temporary tickers.
     """
-    source_key = source if source in {"country", "sector", "custom"} else "custom"
-    group = ASSET_GROUPS.get(source_key, {})
+    source_key = (
+        source
+        if source in {"country", "sector", "custom"}
+        else "custom"
+    )
+
+    source_names = {
+        "country": "Country ETFs",
+        "sector": "Sector ETFs",
+        "custom": "Custom Tickers",
+    }
+
+    universe_manager = UniverseManager()
+    bucket_records = universe_manager.get_bucket_records(
+        source_key
+    )
 
     return {
         "source": source_key,
-        "name": group.get("name", source_key.title()),
-        "tickers": list(group.get("tickers", [])),
-        "ticker_names": dict(group.get("ticker_names", {})),
+        "name": source_names[source_key],
+        "tickers": [
+            record.ticker
+            for record in bucket_records
+        ],
+        "ticker_names": {
+            record.ticker: record.display_name
+            for record in bucket_records
+        },
     }
 
 
