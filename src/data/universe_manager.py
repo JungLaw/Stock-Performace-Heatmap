@@ -160,6 +160,40 @@ class UniverseBucketRecord:
     sort_order: int
 
 
+@dataclass(frozen=True)
+class UniverseMembershipMutationResult:
+    """
+    Result of one committed Add-to-Bucket or Remove-from-Bucket mutation.
+    """
+
+    action: str
+    ticker: str
+    bucket: str
+    metadata_created: bool
+    sort_order: int | None
+
+
+@dataclass(frozen=True)
+class UniverseDisplayNameMutationResult:
+    """
+    Result of one committed canonical ticker display-name update.
+    """
+
+    ticker: str
+    previous_display_name: str
+    display_name: str
+
+
+@dataclass(frozen=True)
+class UniverseReorderMutationResult:
+    """
+    Result of one committed bucket-local reorder.
+    """
+
+    bucket: str
+    ordered_tickers: Tuple[str, ...]
+
+
 class UniverseManager:
     """
     Persistent ticker-universe owner.
@@ -492,6 +526,42 @@ class UniverseManager:
 
         return normalized_bucket
 
+    @staticmethod
+    def _normalize_ticker(
+        ticker: str,
+    ) -> str:
+        """
+        Normalize one canonical ticker identity for persistent universe use.
+        """
+        normalized_ticker = str(
+            ticker or ""
+        ).strip().upper()
+
+        if not normalized_ticker:
+            raise ValueError(
+                "Ticker cannot be empty."
+            )
+
+        return normalized_ticker
+
+    @staticmethod
+    def _normalize_display_name(
+        display_name: str,
+    ) -> str:
+        """
+        Normalize and validate one canonical ticker display name.
+        """
+        normalized_display_name = str(
+            display_name or ""
+        ).strip()
+
+        if not normalized_display_name:
+            raise ValueError(
+                "Display name cannot be empty."
+            )
+
+        return normalized_display_name
+
     def _require_compatible_schema_from_connection(
         self,
         connection: sqlite3.Connection,
@@ -508,6 +578,94 @@ class UniverseManager:
                 "Persistent universe schema is not initialized and "
                 "compatible."
             )
+
+    def _renumber_bucket_from_connection(
+        self,
+        connection: sqlite3.Connection,
+        bucket: str,
+    ) -> Tuple[str, ...]:
+        """
+        Rewrite one bucket to contiguous sort_order values beginning at 1.
+
+        The caller owns the surrounding transaction.
+        """
+        normalized_bucket = self._normalize_bucket_name(
+            bucket
+        )
+
+        rows = connection.execute(
+            f"""
+            SELECT ticker
+            FROM "{self.membership_table_name}"
+            WHERE bucket = ?
+            ORDER BY
+                sort_order ASC,
+                ticker ASC
+            """,
+            (normalized_bucket,),
+        ).fetchall()
+
+        ordered_tickers = tuple(
+            str(
+                row["ticker"]
+            )
+            for row in rows
+        )
+
+        if not ordered_tickers:
+            return ()
+
+        max_sort_order = int(
+            connection.execute(
+                f"""
+                SELECT COALESCE(
+                    MAX(sort_order),
+                    0
+                )
+                FROM "{self.membership_table_name}"
+                WHERE bucket = ?
+                """,
+                (normalized_bucket,),
+            ).fetchone()[0]
+        )
+
+        temporary_offset = (
+            max_sort_order
+            + len(ordered_tickers)
+            + 1
+        )
+
+        connection.execute(
+            f"""
+            UPDATE "{self.membership_table_name}"
+            SET sort_order = sort_order + ?
+            WHERE bucket = ?
+            """,
+            (
+                temporary_offset,
+                normalized_bucket,
+            ),
+        )
+
+        for sort_order, ticker in enumerate(
+            ordered_tickers,
+            start=1,
+        ):
+            connection.execute(
+                f"""
+                UPDATE "{self.membership_table_name}"
+                SET sort_order = ?
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    sort_order,
+                    ticker,
+                    normalized_bucket,
+                ),
+            )
+
+        return ordered_tickers
 
     def get_bucket_records(
         self,
@@ -1120,4 +1278,563 @@ class UniverseManager:
         return UniverseBootstrapCommitResult(
             metadata_rows_inserted=preview.ticker_count,
             membership_rows_inserted=preview.membership_count,
+        )
+
+    def add_to_bucket(
+        self,
+        ticker: str,
+        bucket: str,
+        display_name: str | None = None,
+    ) -> UniverseMembershipMutationResult:
+        """
+        Add one persistent ticker-to-bucket membership.
+
+        If ticker metadata does not yet exist, create it in the same
+        transaction. Existing ticker metadata is never renamed implicitly.
+        """
+        normalized_ticker = self._normalize_ticker(
+            ticker
+        )
+        normalized_bucket = self._normalize_bucket_name(
+            bucket
+        )
+
+        normalized_display_name = (
+            self._normalize_display_name(
+                display_name
+            )
+            if display_name is not None
+            else normalized_ticker
+        )
+
+        connection = self._connect_write()
+
+        try:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            self._require_compatible_schema_from_connection(
+                connection
+            )
+
+            existing_membership = connection.execute(
+                f"""
+                SELECT sort_order
+                FROM "{self.membership_table_name}"
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                ),
+            ).fetchone()
+
+            if existing_membership is not None:
+                raise ValueError(
+                    f"{normalized_ticker} is already a member "
+                    f"of {normalized_bucket}."
+                )
+
+            metadata_row = connection.execute(
+                f"""
+                SELECT display_name
+                FROM "{self.metadata_table_name}"
+                WHERE ticker = ?
+                """,
+                (normalized_ticker,),
+            ).fetchone()
+
+            metadata_created = (
+                metadata_row is None
+            )
+
+            if metadata_created:
+                connection.execute(
+                    f"""
+                    INSERT INTO "{self.metadata_table_name}" (
+                        ticker,
+                        display_name
+                    )
+                    VALUES (?, ?)
+                    """,
+                    (
+                        normalized_ticker,
+                        normalized_display_name,
+                    ),
+                )
+
+            next_sort_order = int(
+                connection.execute(
+                    f"""
+                    SELECT COALESCE(
+                        MAX(sort_order),
+                        0
+                    ) + 1
+                    FROM "{self.membership_table_name}"
+                    WHERE bucket = ?
+                    """,
+                    (normalized_bucket,),
+                ).fetchone()[0]
+            )
+
+            connection.execute(
+                f"""
+                INSERT INTO "{self.membership_table_name}" (
+                    ticker,
+                    bucket,
+                    sort_order
+                )
+                VALUES (?, ?, ?)
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                    next_sort_order,
+                ),
+            )
+
+            committed_row = connection.execute(
+                f"""
+                SELECT sort_order
+                FROM "{self.membership_table_name}"
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                ),
+            ).fetchone()
+
+            if (
+                committed_row is None
+                or int(
+                    committed_row["sort_order"]
+                )
+                != next_sort_order
+            ):
+                raise RuntimeError(
+                    "Add-to-Bucket verification failed "
+                    "before commit."
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+        return UniverseMembershipMutationResult(
+            action="add",
+            ticker=normalized_ticker,
+            bucket=normalized_bucket,
+            metadata_created=metadata_created,
+            sort_order=next_sort_order,
+        )
+
+    def remove_from_bucket(
+        self,
+        ticker: str,
+        bucket: str,
+    ) -> UniverseMembershipMutationResult:
+        """
+        Remove exactly one ticker-to-bucket membership.
+
+        Ticker metadata, other bucket memberships, and daily_prices are not
+        removed by this operation.
+        """
+        normalized_ticker = self._normalize_ticker(
+            ticker
+        )
+        normalized_bucket = self._normalize_bucket_name(
+            bucket
+        )
+
+        connection = self._connect_write()
+
+        try:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            self._require_compatible_schema_from_connection(
+                connection
+            )
+
+            existing_membership = connection.execute(
+                f"""
+                SELECT sort_order
+                FROM "{self.membership_table_name}"
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                ),
+            ).fetchone()
+
+            if existing_membership is None:
+                raise ValueError(
+                    f"{normalized_ticker} is not a member "
+                    f"of {normalized_bucket}."
+                )
+
+            connection.execute(
+                f"""
+                DELETE FROM "{self.membership_table_name}"
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                ),
+            )
+
+            remaining_row = connection.execute(
+                f"""
+                SELECT 1
+                FROM "{self.membership_table_name}"
+                WHERE ticker = ?
+                  AND bucket = ?
+                """,
+                (
+                    normalized_ticker,
+                    normalized_bucket,
+                ),
+            ).fetchone()
+
+            if remaining_row is not None:
+                raise RuntimeError(
+                    "Remove-from-Bucket verification failed "
+                    "before commit."
+                )
+
+            self._renumber_bucket_from_connection(
+                connection,
+                normalized_bucket,
+            )
+
+            metadata_row = connection.execute(
+                f"""
+                SELECT 1
+                FROM "{self.metadata_table_name}"
+                WHERE ticker = ?
+                """,
+                (normalized_ticker,),
+            ).fetchone()
+
+            if metadata_row is None:
+                raise RuntimeError(
+                    "Ticker metadata disappeared during "
+                    "membership removal."
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+        return UniverseMembershipMutationResult(
+            action="remove",
+            ticker=normalized_ticker,
+            bucket=normalized_bucket,
+            metadata_created=False,
+            sort_order=None,
+        )
+
+    def update_display_name(
+        self,
+        ticker: str,
+        display_name: str,
+    ) -> UniverseDisplayNameMutationResult:
+        """
+        Update canonical ticker-level display metadata only.
+        """
+        normalized_ticker = self._normalize_ticker(
+            ticker
+        )
+        normalized_display_name = self._normalize_display_name(
+            display_name
+        )
+
+        connection = self._connect_write()
+
+        try:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            self._require_compatible_schema_from_connection(
+                connection
+            )
+
+            metadata_row = connection.execute(
+                f"""
+                SELECT display_name
+                FROM "{self.metadata_table_name}"
+                WHERE ticker = ?
+                """,
+                (normalized_ticker,),
+            ).fetchone()
+
+            if metadata_row is None:
+                raise ValueError(
+                    f"No persistent ticker metadata exists for "
+                    f"{normalized_ticker}."
+                )
+
+            previous_display_name = (
+                str(
+                    metadata_row["display_name"]
+                ).strip()
+                if metadata_row["display_name"] is not None
+                else normalized_ticker
+            )
+
+            connection.execute(
+                f"""
+                UPDATE "{self.metadata_table_name}"
+                SET display_name = ?
+                WHERE ticker = ?
+                """,
+                (
+                    normalized_display_name,
+                    normalized_ticker,
+                ),
+            )
+
+            committed_row = connection.execute(
+                f"""
+                SELECT display_name
+                FROM "{self.metadata_table_name}"
+                WHERE ticker = ?
+                """,
+                (normalized_ticker,),
+            ).fetchone()
+
+            if (
+                committed_row is None
+                or str(
+                    committed_row["display_name"]
+                ).strip()
+                != normalized_display_name
+            ):
+                raise RuntimeError(
+                    "Display-name update verification failed "
+                    "before commit."
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+        return UniverseDisplayNameMutationResult(
+            ticker=normalized_ticker,
+            previous_display_name=previous_display_name,
+            display_name=normalized_display_name,
+        )
+
+    def reorder_bucket(
+        self,
+        bucket: str,
+        ordered_tickers: Tuple[str, ...] | list[str],
+    ) -> UniverseReorderMutationResult:
+        """
+        Replace one bucket's ordering without changing its membership set.
+        """
+        normalized_bucket = self._normalize_bucket_name(
+            bucket
+        )
+
+        normalized_tickers = tuple(
+            self._normalize_ticker(
+                ticker
+            )
+            for ticker in ordered_tickers
+        )
+
+        if len(normalized_tickers) != len(
+            set(normalized_tickers)
+        ):
+            raise ValueError(
+                "Reorder request contains duplicate ticker(s)."
+            )
+
+        connection = self._connect_write()
+
+        try:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            self._require_compatible_schema_from_connection(
+                connection
+            )
+
+            current_rows = connection.execute(
+                f"""
+                SELECT ticker
+                FROM "{self.membership_table_name}"
+                WHERE bucket = ?
+                ORDER BY
+                    sort_order ASC,
+                    ticker ASC
+                """,
+                (normalized_bucket,),
+            ).fetchall()
+
+            current_tickers = tuple(
+                str(
+                    row["ticker"]
+                )
+                for row in current_rows
+            )
+
+            if set(normalized_tickers) != set(
+                current_tickers
+            ):
+                missing_tickers = sorted(
+                    set(current_tickers)
+                    - set(normalized_tickers)
+                )
+                extra_tickers = sorted(
+                    set(normalized_tickers)
+                    - set(current_tickers)
+                )
+
+                raise ValueError(
+                    "Reorder request must contain exactly the "
+                    "current bucket membership. "
+                    f"Missing: {missing_tickers}; "
+                    f"extra: {extra_tickers}."
+                )
+
+            if len(normalized_tickers) != len(
+                current_tickers
+            ):
+                raise ValueError(
+                    "Reorder request length does not match "
+                    "current bucket membership."
+                )
+
+            if normalized_tickers:
+                max_sort_order = int(
+                    connection.execute(
+                        f"""
+                        SELECT COALESCE(
+                            MAX(sort_order),
+                            0
+                        )
+                        FROM "{self.membership_table_name}"
+                        WHERE bucket = ?
+                        """,
+                        (normalized_bucket,),
+                    ).fetchone()[0]
+                )
+
+                temporary_offset = (
+                    max_sort_order
+                    + len(normalized_tickers)
+                    + 1
+                )
+
+                connection.execute(
+                    f"""
+                    UPDATE "{self.membership_table_name}"
+                    SET sort_order = sort_order + ?
+                    WHERE bucket = ?
+                    """,
+                    (
+                        temporary_offset,
+                        normalized_bucket,
+                    ),
+                )
+
+                for sort_order, ticker in enumerate(
+                    normalized_tickers,
+                    start=1,
+                ):
+                    connection.execute(
+                        f"""
+                        UPDATE "{self.membership_table_name}"
+                        SET sort_order = ?
+                        WHERE ticker = ?
+                          AND bucket = ?
+                        """,
+                        (
+                            sort_order,
+                            ticker,
+                            normalized_bucket,
+                        ),
+                    )
+
+            committed_rows = connection.execute(
+                f"""
+                SELECT
+                    ticker,
+                    sort_order
+                FROM "{self.membership_table_name}"
+                WHERE bucket = ?
+                ORDER BY sort_order ASC
+                """,
+                (normalized_bucket,),
+            ).fetchall()
+
+            committed_tickers = tuple(
+                str(
+                    row["ticker"]
+                )
+                for row in committed_rows
+            )
+
+            committed_sort_orders = tuple(
+                int(
+                    row["sort_order"]
+                )
+                for row in committed_rows
+            )
+
+            expected_sort_orders = tuple(
+                range(
+                    1,
+                    len(normalized_tickers) + 1,
+                )
+            )
+
+            if committed_tickers != normalized_tickers:
+                raise RuntimeError(
+                    "Bucket reorder verification failed "
+                    "before commit."
+                )
+
+            if committed_sort_orders != expected_sort_orders:
+                raise RuntimeError(
+                    "Bucket reorder produced non-contiguous "
+                    "sort_order values."
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+        return UniverseReorderMutationResult(
+            bucket=normalized_bucket,
+            ordered_tickers=normalized_tickers,
         )
