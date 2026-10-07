@@ -16648,6 +16648,672 @@ def _render_data_management_mutation_workflow() -> None:
     )
 
 
+def _render_data_management_universe_management(
+    *,
+    inventory: list[Dict[str, Any]],
+) -> None:
+    """
+    Render persistent ticker-universe membership and metadata controls.
+
+    Universe mutations are intentionally independent from authoritative
+    OHLCV storage. These controls do not acquire, replace, or delete
+    daily_prices observations.
+    """
+    universe_manager = UniverseManager()
+
+    stored_ticker_set = {
+        str(row["ticker"]).strip().upper()
+        for row in inventory
+        if row.get("ticker")
+    }
+
+    st.markdown("---")
+    st.subheader("Ticker Universe Management")
+    st.caption(
+        "Manage persistent Custom, Sector, and Country membership. "
+        "Universe membership is independent from stored market data: "
+        "adding a ticker to a bucket does not acquire OHLCV, and removing "
+        "a ticker from a bucket does not delete OHLCV."
+    )
+
+    try:
+        schema_status = (
+            universe_manager.get_schema_status()
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read persistent ticker-universe infrastructure: "
+            f"{exc}"
+        )
+        return
+
+    if not schema_status.compatible:
+        st.error(
+            "Persistent ticker-universe infrastructure is not compatible. "
+            "Universe management is unavailable until the schema is "
+            "corrected."
+        )
+        return
+
+    result_message = st.session_state.pop(
+        "data_management_universe_result",
+        None,
+    )
+    error_message = st.session_state.pop(
+        "data_management_universe_error",
+        None,
+    )
+
+    if result_message:
+        st.success(
+            result_message
+        )
+
+    if error_message:
+        st.error(
+            error_message
+        )
+
+    try:
+        custom_records = (
+            universe_manager.get_bucket_records(
+                "Custom"
+            )
+        )
+        sector_records = (
+            universe_manager.get_bucket_records(
+                "Sector"
+            )
+        )
+        country_records = (
+            universe_manager.get_bucket_records(
+                "Country"
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read persistent universe membership: "
+            f"{exc}"
+        )
+        return
+
+    summary_columns = st.columns(3)
+
+    summary_columns[0].metric(
+        "Custom",
+        len(custom_records),
+    )
+    summary_columns[1].metric(
+        "Sector",
+        len(sector_records),
+    )
+    summary_columns[2].metric(
+        "Country",
+        len(country_records),
+    )
+
+    (
+        add_tab,
+        remove_tab,
+        rename_tab,
+        reorder_tab,
+    ) = st.tabs(
+        [
+            "Add to Bucket",
+            "Remove from Bucket",
+            "Edit Display Name",
+            "Reorder in Bucket",
+        ]
+    )
+
+    with add_tab:
+        st.caption(
+            "Add one persistent bucket membership. "
+            "If the ticker has no metadata row yet, one is created. "
+            "No market data is acquired. A stored ticker with no "
+            "Custom, Sector, or Country membership is Unassigned; "
+            "adding it here assigns it to the selected bucket."
+        )
+
+        add_columns = st.columns(
+            [1, 1, 2]
+        )
+
+        with add_columns[0]:
+            add_ticker = st.text_input(
+                "Ticker",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "add_ticker"
+                ),
+            ).strip().upper()
+
+        with add_columns[1]:
+            add_bucket = st.selectbox(
+                "Bucket",
+                options=[
+                    "Custom",
+                    "Sector",
+                    "Country",
+                ],
+                key=(
+                    "data_management_universe_"
+                    "add_bucket"
+                ),
+            )
+
+        with add_columns[2]:
+            add_display_name = st.text_input(
+                "Display name for new ticker (optional)",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "add_display_name"
+                ),
+                help=(
+                    "Used only when ticker metadata does not already "
+                    "exist. Existing display names are not silently "
+                    "overwritten."
+                ),
+            ).strip()
+
+        if add_ticker:
+            try:
+                current_memberships = (
+                    universe_manager.get_bucket_memberships(
+                        add_ticker
+                    )
+                )
+
+                current_display_name = (
+                    universe_manager.get_display_name(
+                        add_ticker
+                    )
+                )
+
+                membership_labels = [
+                    membership.bucket
+                    for membership
+                    in current_memberships
+                ]
+
+                if membership_labels:
+                    membership_text = ", ".join(
+                        membership_labels
+                    )
+                    state_text = (
+                        "Current membership"
+                        if len(membership_labels) == 1
+                        else "Current memberships"
+                    )
+
+                    st.info(
+                        f"{state_text}: {membership_text}"
+                    )
+
+                elif add_ticker in stored_ticker_set:
+                    st.info(
+                        "Current status: Unassigned — "
+                        "stored OHLCV exists, but this ticker has "
+                        "no persistent Custom, Sector, or Country "
+                        "membership."
+                    )
+
+                else:
+                    st.info(
+                        "Current memberships: none — "
+                        "this ticker is not currently stored in "
+                        "daily_prices."
+                    )
+
+                st.caption(
+                    "Current display name: "
+                    f"{current_display_name}"
+                )
+
+            except Exception as exc:
+                st.warning(
+                    "Unable to inspect current ticker state: "
+                    f"{exc}"
+                )
+
+        if st.button(
+            "Add to Bucket",
+            key=(
+                "data_management_universe_"
+                "add_button"
+            ),
+            type="primary",
+        ):
+            if not add_ticker:
+                st.warning(
+                    "Enter a ticker before adding membership."
+                )
+            else:
+                try:
+                    add_result = (
+                        universe_manager.add_to_bucket(
+                            ticker=add_ticker,
+                            bucket=add_bucket,
+                            display_name=(
+                                add_display_name
+                                if add_display_name
+                                else None
+                            ),
+                        )
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Added {add_result.ticker} to "
+                        f"{add_result.bucket} at position "
+                        f"{add_result.sort_order}."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+    with remove_tab:
+        st.caption(
+            "Remove exactly one bucket membership. "
+            "Other memberships, ticker metadata, and stored OHLCV "
+            "are preserved. If this is the ticker's final bucket "
+            "membership and stored OHLCV exists, the ticker will "
+            "become Unassigned."
+        )
+
+        remove_bucket = st.selectbox(
+            "Bucket",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+            ],
+            key=(
+                "data_management_universe_"
+                "remove_bucket"
+            ),
+        )
+
+        remove_record_map = {
+            "Custom": custom_records,
+            "Sector": sector_records,
+            "Country": country_records,
+        }
+
+        remove_records = remove_record_map[
+            remove_bucket
+        ]
+
+        if not remove_records:
+            st.info(
+                f"{remove_bucket} has no persistent members."
+            )
+        else:
+            remove_name_map = {
+                record.ticker: record.display_name
+                for record in remove_records
+            }
+
+            remove_ticker = st.selectbox(
+                "Ticker to remove",
+                options=[
+                    record.ticker
+                    for record in remove_records
+                ],
+                format_func=lambda ticker: (
+                    f"{remove_name_map[ticker]} "
+                    f"({ticker})"
+                    if (
+                        remove_name_map[ticker]
+                        and remove_name_map[ticker]
+                        != ticker
+                    )
+                    else ticker
+                ),
+                key=(
+                    "data_management_universe_"
+                    "remove_ticker"
+                ),
+            )
+
+            remove_confirmed = st.checkbox(
+                (
+                    "I understand this removes only the "
+                    f"{remove_bucket} membership and does "
+                    "not delete stored market data."
+                ),
+                key=(
+                    "data_management_universe_"
+                    "remove_confirmed"
+                ),
+            )
+
+            if st.button(
+                "Remove from Bucket",
+                key=(
+                    "data_management_universe_"
+                    "remove_button"
+                ),
+            ):
+                if not remove_confirmed:
+                    st.warning(
+                        "Confirm the membership-only removal "
+                        "before continuing."
+                    )
+                else:
+                    try:
+                        remove_result = (
+                            universe_manager.remove_from_bucket(
+                                ticker=remove_ticker,
+                                bucket=remove_bucket,
+                            )
+                        )
+
+                        st.session_state[
+                            "data_management_universe_result"
+                        ] = (
+                            f"Removed {remove_result.ticker} "
+                            f"from {remove_result.bucket}. "
+                            "Ticker metadata and stored market "
+                            "data were preserved."
+                        )
+
+                        st.session_state.pop(
+                            "data_management_universe_error",
+                            None,
+                        )
+
+                        st.rerun()
+
+                    except Exception as exc:
+                        st.session_state[
+                            "data_management_universe_error"
+                        ] = str(exc)
+
+                        st.rerun()
+
+    with rename_tab:
+        st.caption(
+            "Edit the canonical ticker-level display name. "
+            "This does not change bucket membership or stored OHLCV."
+        )
+
+        rename_columns = st.columns(
+            [1, 2]
+        )
+
+        with rename_columns[0]:
+            rename_ticker = st.text_input(
+                "Ticker",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "rename_ticker"
+                ),
+            ).strip().upper()
+
+        with rename_columns[1]:
+            rename_display_name = st.text_input(
+                "New display name",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "rename_display_name"
+                ),
+            ).strip()
+
+        if rename_ticker:
+            try:
+                current_name = (
+                    universe_manager.get_display_name(
+                        rename_ticker
+                    )
+                )
+                current_memberships = (
+                    universe_manager.get_bucket_memberships(
+                        rename_ticker
+                    )
+                )
+
+                st.caption(
+                    "Current persistent state — "
+                    f"Display name: {current_name}; "
+                    "Memberships: "
+                    + (
+                        ", ".join(
+                            membership.bucket
+                            for membership
+                            in current_memberships
+                        )
+                        if current_memberships
+                        else "none"
+                    )
+                )
+            except Exception as exc:
+                st.warning(
+                    "Unable to inspect current ticker state: "
+                    f"{exc}"
+                )
+
+        if st.button(
+            "Update Display Name",
+            key=(
+                "data_management_universe_"
+                "rename_button"
+            ),
+        ):
+            if not rename_ticker:
+                st.warning(
+                    "Enter a ticker before updating its display name."
+                )
+            elif not rename_display_name:
+                st.warning(
+                    "Enter a new display name."
+                )
+            else:
+                try:
+                    rename_result = (
+                        universe_manager.update_display_name(
+                            ticker=rename_ticker,
+                            display_name=rename_display_name,
+                        )
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Updated {rename_result.ticker} display "
+                        f"name from "
+                        f"'{rename_result.previous_display_name}' "
+                        f"to '{rename_result.display_name}'."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+    with reorder_tab:
+        st.caption(
+            "Move one ticker up or down within a single persistent "
+            "bucket. Membership in all buckets remains unchanged."
+        )
+
+        reorder_bucket = st.selectbox(
+            "Bucket",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+            ],
+            key=(
+                "data_management_universe_"
+                "reorder_bucket"
+            ),
+        )
+
+        reorder_record_map = {
+            "Custom": custom_records,
+            "Sector": sector_records,
+            "Country": country_records,
+        }
+
+        reorder_records = list(
+            reorder_record_map[
+                reorder_bucket
+            ]
+        )
+
+        if not reorder_records:
+            st.info(
+                f"{reorder_bucket} has no persistent members."
+            )
+        else:
+            reorder_name_map = {
+                record.ticker: record.display_name
+                for record in reorder_records
+            }
+
+            reorder_tickers = [
+                record.ticker
+                for record in reorder_records
+            ]
+
+            reorder_ticker = st.selectbox(
+                "Ticker to move",
+                options=reorder_tickers,
+                format_func=lambda ticker: (
+                    f"{reorder_name_map[ticker]} "
+                    f"({ticker})"
+                    if (
+                        reorder_name_map[ticker]
+                        and reorder_name_map[ticker]
+                        != ticker
+                    )
+                    else ticker
+                ),
+                key=(
+                    "data_management_universe_"
+                    "reorder_ticker"
+                ),
+            )
+
+            current_index = reorder_tickers.index(
+                reorder_ticker
+            )
+
+            st.caption(
+                f"Current position: "
+                f"{current_index + 1} of "
+                f"{len(reorder_tickers)}"
+            )
+
+            up_column, down_column = st.columns(2)
+
+            with up_column:
+                move_up = st.button(
+                    "Move Up",
+                    key=(
+                        "data_management_universe_"
+                        "move_up"
+                    ),
+                    disabled=(
+                        current_index == 0
+                    ),
+                )
+
+            with down_column:
+                move_down = st.button(
+                    "Move Down",
+                    key=(
+                        "data_management_universe_"
+                        "move_down"
+                    ),
+                    disabled=(
+                        current_index
+                        == len(reorder_tickers) - 1
+                    ),
+                )
+
+            if move_up or move_down:
+                proposed_order = list(
+                    reorder_tickers
+                )
+
+                target_index = (
+                    current_index - 1
+                    if move_up
+                    else current_index + 1
+                )
+
+                (
+                    proposed_order[current_index],
+                    proposed_order[target_index],
+                ) = (
+                    proposed_order[target_index],
+                    proposed_order[current_index],
+                )
+
+                try:
+                    reorder_result = (
+                        universe_manager.reorder_bucket(
+                            bucket=reorder_bucket,
+                            ordered_tickers=proposed_order,
+                        )
+                    )
+
+                    new_position = (
+                        reorder_result.ordered_tickers.index(
+                            reorder_ticker
+                        )
+                        + 1
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Moved {reorder_ticker} to position "
+                        f"{new_position} in {reorder_bucket}."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+
 def show_data_management():
     """Render Data Management inspection and controlled mutation workflows."""
     st.title("Data Management")
@@ -16885,6 +17551,10 @@ def show_data_management():
         "versus the immediately preceding expected NYSE session. If that "
         "prior session is missing from the database, no Large Price Move "
         "is evaluated."
+    )
+
+    _render_data_management_universe_management(
+        inventory=inventory,
     )
 
     st.markdown("---")
