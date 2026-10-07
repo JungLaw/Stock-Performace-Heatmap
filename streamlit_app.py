@@ -440,39 +440,19 @@ def initialize_session_state():
 
 def is_bucket_ticker(ticker: str) -> bool:
     """
-    Check if ticker exists in any of the three buckets (COUNTRY/SECTOR/CUSTOM)
-    
-    Args:
-        ticker: Stock ticker symbol (uppercase)
-        
-    Returns:
-        True if ticker is in any bucket, False otherwise
+    Return whether ticker has any persistent universe bucket membership.
+
+    Persistent Custom, Sector, and Country membership is authoritative.
+    A stored ticker with no persistent membership is Unassigned and
+    therefore returns False.
     """
-    # Get all bucket tickers
-    all_bucket_tickers = []
-    
-    # COUNTRY_ETFS
-    for item in ASSET_GROUPS.get('country', []):
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])  # (ticker, display_name)
-        else:
-            all_bucket_tickers.append(item)     # Just ticker
-    
-    # SECTOR_ETFS
-    for item in ASSET_GROUPS.get('sector', []):
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])
-        else:
-            all_bucket_tickers.append(item)
-    
-    # CUSTOM_DEFAULT
-    for item in CUSTOM_DEFAULT:
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])
-        else:
-            all_bucket_tickers.append(item)
-    
-    return ticker.upper() in [t.upper() for t in all_bucket_tickers]
+    universe_manager = UniverseManager()
+
+    return bool(
+        universe_manager.get_bucket_memberships(
+            ticker
+        )
+    )
 
 
 def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
