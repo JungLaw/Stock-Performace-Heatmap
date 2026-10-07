@@ -7294,6 +7294,47 @@ def create_sidebar_controls():
                 else:
                     st.error("❌ Enter a ticker symbol")
 
+            temporary_country_tickers = [
+                ticker
+                for ticker in st.session_state.country_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_country_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_country_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_country_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.country_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.country_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_country_temp_tickers",
+                ):
+                    st.session_state.country_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.country_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
+
     elif st.session_state.selected_bucket == 'sector':
         if not st.session_state.sector_visible_tickers:
             st.session_state.sector_visible_tickers = (
@@ -7374,6 +7415,47 @@ def create_sidebar_controls():
                         )
                 else:
                     st.error("❌ Enter a ticker symbol")
+
+            temporary_sector_tickers = [
+                ticker
+                for ticker in st.session_state.sector_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_sector_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_sector_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_sector_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.sector_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.sector_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_sector_temp_tickers",
+                ):
+                    st.session_state.sector_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.sector_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
 
     else:  # custom bucket
         if not st.session_state.custom_visible_tickers:
@@ -7492,6 +7574,47 @@ def create_sidebar_controls():
                     st.error(
                         "❌ Enter at least one ticker symbol"
                     )
+
+            temporary_custom_tickers = [
+                ticker
+                for ticker in st.session_state.custom_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_custom_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_custom_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_custom_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.custom_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.custom_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_custom_temp_tickers",
+                ):
+                    st.session_state.custom_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.custom_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
 
     # Ticker Aggregation Based on Selected Bucket
     st.sidebar.markdown("---")
@@ -8762,11 +8885,19 @@ def show_technical_analysis_dashboard():
         st.session_state.rh_days_selector = int(st.session_state.get("technical_analysis_rolling_days", 10))
     
     with col2:
-        # Save to database checkbox (only for non-bucket tickers)
+        # Optional database persistence for non-universe tickers.
+        # Persistent universe members enable this automatically.
         save_to_db_checkbox = st.checkbox(
-            "Save to database (Tracker)",
+            "Save fetched data to database",
             value=False,
-            help="Check to permanently track this ticker with daily updates. Bucket tickers (Country/Sector/Custom) are always saved.",
+            help=(
+                "When enabled, data fetched during this Technical Analysis "
+                "run may be stored in the database for future reuse. This "
+                "does not add the ticker to the Custom, Sector, or Country "
+                "universe. Persistent universe membership is managed in "
+                "Data Management. Tickers already in a persistent universe "
+                "bucket use database persistence automatically."
+            ),
             key="ta_save_to_db_checkbox"
         )
     
@@ -8809,13 +8940,25 @@ def show_technical_analysis_dashboard():
             # Keep current_ticker if other dashboards reference it
             st.session_state.current_ticker = ticker
 
-            # Info message (unchanged)
+            # Explain the resolved persistence policy without conflating
+            # database storage with persistent universe membership.
             if is_bucket:
-                st.info(f"ℹ️ {ticker} is a bucket ticker and will be automatically tracked with daily updates.")
+                st.info(
+                    f"ℹ️ {ticker} is in the persistent ticker universe; "
+                    "database persistence is enabled automatically."
+                )
             elif save_to_db_checkbox:
-                st.info(f"ℹ️ {ticker} will be added to tracking list with daily updates.")
+                st.info(
+                    f"ℹ️ {ticker} analysis may save fetched data to the "
+                    "database for future reuse. This does not add the ticker "
+                    "to the persistent ticker universe."
+                )
             else:
-                st.info(f"ℹ️ {ticker} analysis is session-only. Check 'Save to database' to track permanently.")
+                st.info(
+                    f"ℹ️ {ticker} analysis is session-only; fetched data "
+                    "will not be intentionally persisted by this Technical "
+                    "Analysis run."
+                )
 
             with st.spinner(f"Analyzing {ticker}..."):
                 try:
@@ -15566,19 +15709,36 @@ def _render_data_management_audit_history(
     }
 
     audit_id_options = [
-        record.audit_id
-        for record in audit_history
+        None,
+        *[
+            record.audit_id
+            for record in audit_history
+        ],
     ]
+
+    if (
+        st.session_state.get(
+            "data_management_audit_selected_event"
+        )
+        not in audit_id_options
+    ):
+        st.session_state[
+            "data_management_audit_selected_event"
+        ] = None
 
     selected_audit_id = st.selectbox(
         "View Audit Event",
         options=audit_id_options,
         index=0,
         format_func=lambda audit_id: (
-            f"#{audit_id} — "
-            f"{records_by_id[audit_id].timestamp} — "
-            f"{records_by_id[audit_id].action} — "
-            f"{records_by_id[audit_id].display_ticker}"
+            "Select an audit event..."
+            if audit_id is None
+            else (
+                f"#{audit_id} — "
+                f"{records_by_id[audit_id].timestamp} — "
+                f"{records_by_id[audit_id].action} — "
+                f"{records_by_id[audit_id].display_ticker}"
+            )
         ),
         key="data_management_audit_selected_event",
         help=(
@@ -15586,6 +15746,9 @@ def _render_data_management_audit_history(
             "request scope, affected scope, summary, and audit evidence."
         ),
     )
+
+    if selected_audit_id is None:
+        return
 
     record = records_by_id[
         selected_audit_id
