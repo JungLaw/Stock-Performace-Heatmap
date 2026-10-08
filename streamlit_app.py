@@ -7138,6 +7138,39 @@ def is_final_data_available_for_date(target_date: datetime) -> bool:
     return target_date_only <= last_complete_day
 
 
+def _resolve_performance_snapshot_date(
+    selected_date: Any,
+) -> datetime:
+    """
+    Resolve a Performance Heatmap historical snapshot date.
+
+    A weekend or market-holiday selection resolves backward to the
+    nearest valid US trading session. This helper is request metadata
+    only; it does not fetch, calculate, persist, or mutate data.
+    """
+    resolved_date = pd.Timestamp(
+        selected_date
+    )
+
+    if resolved_date.tzinfo is not None:
+        resolved_date = resolved_date.tz_localize(
+            None
+        )
+
+    resolved_date = (
+        resolved_date
+        .normalize()
+        .to_pydatetime()
+    )
+
+    while not is_us_trading_day(
+        resolved_date
+    ):
+        resolved_date -= timedelta(days=1)
+
+    return resolved_date
+
+
 def create_sidebar_controls():
     """Create sidebar controls for bucket-based ticker management"""
     st.sidebar.title("⚙️ Dashboard Controls")
@@ -7688,7 +7721,72 @@ def create_sidebar_controls():
     )
     selected_period = period_options[selected_period_name]
 
-    if st.session_state.selected_analysis_mode == 'volume':
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Snapshot")
+
+    snapshot_mode = st.sidebar.radio(
+        "Observation:",
+        options=['latest', 'historical'],
+        format_func=lambda value: {
+            'latest': 'Latest',
+            'historical': 'Historical date',
+        }[value],
+        index=0,
+        key='performance_snapshot_mode',
+        help=(
+            "Latest preserves the current Performance Heatmap behavior. "
+            "Historical date evaluates Price or Volume as of a selected "
+            "past trading session."
+        ),
+    )
+
+    selected_snapshot_date = None
+    effective_snapshot_day = None
+
+    if snapshot_mode == 'historical':
+        default_snapshot_date = (
+            get_last_completed_trading_day().date()
+        )
+
+        selected_snapshot_date = (
+            st.sidebar.date_input(
+                "Historical date:",
+                value=default_snapshot_date,
+                max_value=datetime.now().date(),
+                key='performance_snapshot_date',
+                help=(
+                    "Choose the observation date for the Performance "
+                    "Heatmap. Weekend and market-holiday selections "
+                    "resolve backward to the nearest trading session."
+                ),
+            )
+        )
+
+        effective_snapshot_day = (
+            _resolve_performance_snapshot_date(
+                selected_snapshot_date
+            )
+        )
+
+        if (
+            effective_snapshot_day.date()
+            != selected_snapshot_date
+        ):
+            st.sidebar.caption(
+                "Resolved trading session: "
+                f"{effective_snapshot_day.strftime('%m/%d/%y')}"
+            )
+        else:
+            st.sidebar.caption(
+                "Observation session: "
+                f"{effective_snapshot_day.strftime('%m/%d/%y')}"
+            )
+
+    if (
+        st.session_state.selected_analysis_mode
+        == 'volume'
+        and snapshot_mode == 'latest'
+    ):
         view_last_complete_day = st.sidebar.toggle(
             "View last complete day",
             value=False,
@@ -7705,6 +7803,13 @@ def create_sidebar_controls():
             if view_last_complete_day
             else 'live'
         )
+
+    elif (
+        st.session_state.selected_analysis_mode
+        == 'volume'
+    ):
+        volume_view_mode = 'historical'
+
     else:
         volume_view_mode = None
     
@@ -7726,6 +7831,9 @@ def create_sidebar_controls():
         'refresh': refresh_button,
         'analysis_mode': st.session_state.selected_analysis_mode,
         'volume_view_mode': volume_view_mode,
+        'snapshot_mode': snapshot_mode,
+        'snapshot_selected_date': selected_snapshot_date,
+        'snapshot_effective_day': effective_snapshot_day,
     }
 
 
@@ -7753,7 +7861,12 @@ def create_header():
                     unsafe_allow_html=True
                 )
 
-def fetch_performance_data(tickers, period, save_to_db: bool = True):
+def fetch_performance_data(
+    tickers,
+    period,
+    save_to_db: bool = True,
+    effective_day: Optional[datetime] = None,
+):
     """Fetch performance data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching data for {len(tickers)} tickers..."):
         # Create progress bar
@@ -7771,6 +7884,7 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
                     tickers,
                     period,
                     save_to_db=save_to_db,
+                    effective_day=effective_day,
                 )
             )
 
@@ -7780,6 +7894,16 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
 
             for item in performance_data:
                 if item.get('error', False):
+                    continue
+
+                if effective_day is not None:
+                    item['live_volume_context'] = (
+                        volume_calculator.get_completed_volume_context(
+                            item['ticker'],
+                            save_to_db=save_to_db,
+                            effective_day=effective_day,
+                        )
+                    )
                     continue
 
                 price_metadata = (
@@ -7836,6 +7960,7 @@ def fetch_volume_data(
     period,
     observation_mode='live',
     save_to_db: bool = True,
+    effective_day: Optional[datetime] = None,
 ):
     """Fetch volume data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching volume data for {len(tickers)} tickers..."):
@@ -7849,7 +7974,18 @@ def fetch_volume_data(
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            if observation_mode == 'completed':
+            if observation_mode == 'historical':
+                volume_data = (
+                    volume_calculator
+                    .calculate_completed_volume_performance_for_group(
+                        tickers,
+                        period,
+                        effective_day=effective_day,
+                        save_to_db=save_to_db,
+                    )
+                )
+
+            elif observation_mode == 'completed':
                 volume_data = (
                     volume_calculator
                     .calculate_latest_completed_volume_performance_for_group(
@@ -7858,6 +7994,7 @@ def fetch_volume_data(
                         save_to_db=save_to_db,
                     )
                 )
+
             else:
                 volume_data = (
                     volume_calculator
@@ -9884,10 +10021,21 @@ def show_performance_heatmaps():
     # Cache identity is based on the exact data request rather than the number
     # of successful rows returned. Individual ticker errors therefore remain a
     # valid cached result for the request that produced them.
+    snapshot_date_key = (
+        controls['snapshot_effective_day'].strftime(
+            '%Y-%m-%d'
+        )
+        if controls['snapshot_effective_day']
+        is not None
+        else None
+    )
+
     if controls['analysis_mode'] == 'volume':
         current_request_signature = (
             controls['analysis_mode'],
             controls['period'],
+            controls['snapshot_mode'],
+            snapshot_date_key,
             controls['volume_view_mode'],
             tuple(controls['tickers']),
         )
@@ -9895,6 +10043,8 @@ def show_performance_heatmaps():
         current_request_signature = (
             controls['analysis_mode'],
             controls['period'],
+            controls['snapshot_mode'],
+            snapshot_date_key,
             tuple(controls['tickers']),
         )
 
@@ -9931,6 +10081,9 @@ def show_performance_heatmaps():
                 controls['tickers'],
                 controls['period'],
                 save_to_db=False,
+                effective_day=controls[
+                    'snapshot_effective_day'
+                ],
             )
 
             # Store in session state.
@@ -9960,6 +10113,9 @@ def show_performance_heatmaps():
                     'volume_view_mode'
                 ],
                 save_to_db=False,
+                effective_day=controls[
+                    'snapshot_effective_day'
+                ],
             )
 
             # Store in session state using the same request-identity contract as
@@ -9999,7 +10155,9 @@ def show_performance_heatmaps():
         if controls['analysis_mode'] == 'price':
             title = f"{controls['group_name']} - {controls['period_name']} Performance"
         else:  # volume mode
-            if controls['volume_view_mode'] == 'completed':
+            if controls['volume_view_mode'] == 'historical':
+                volume_title_prefix = "Historical Volume"
+            elif controls['volume_view_mode'] == 'completed':
                 volume_title_prefix = "Last Complete Volume"
             else:
                 volume_title_prefix = "Current Volume"
@@ -10036,6 +10194,24 @@ def show_performance_heatmaps():
             horizontal=True,
             key='performance_heatmap_tile_order',
         )
+
+        if (
+            controls['snapshot_mode'] == 'historical'
+            and controls['snapshot_selected_date']
+            is not None
+            and controls['snapshot_effective_day']
+            is not None
+            and controls['snapshot_selected_date']
+            != controls[
+                'snapshot_effective_day'
+            ].date()
+        ):
+            st.caption(
+                "Selected Date: "
+                f"{pd.Timestamp(controls['snapshot_selected_date']).strftime('%m/%d/%y')}"
+                " → Resolved Trading Session: "
+                f"{controls['snapshot_effective_day'].strftime('%m/%d/%y')}"
+            )
 
         # Add timestamp and baseline date info (only for price mode)
         if controls['analysis_mode'] == 'price':
@@ -10121,31 +10297,36 @@ def show_performance_heatmaps():
                 )
 
             if timestamp_caption:
+                price_caption_label = (
+                    "As of"
+                    if controls['snapshot_mode']
+                    == 'historical'
+                    else "Timestamp"
+                )
+
                 st.caption(
-                    f"Timestamp: {timestamp_caption}"
+                    f"{price_caption_label}: "
+                    f"{timestamp_caption}"
                 )
 
             baseline_date = None
 
             if valid_items:
-                period = valid_items[0].get(
-                    'period',
-                    '1d',
-                )
-
-                from src.calculations.performance import (
-                    get_baseline_date_for_display,
-                )
-
                 baseline_date_str = (
-                    get_baseline_date_for_display(
-                        period
+                    valid_items[0].get(
+                        'baseline_date'
                     )
                 )
-                baseline_date = datetime.strptime(
-                    baseline_date_str,
-                    '%Y-%m-%d',
-                ).strftime('%m/%d/%y')
+
+                if baseline_date_str:
+                    try:
+                        baseline_date = (
+                            pd.Timestamp(
+                                baseline_date_str
+                            ).strftime('%m/%d/%y')
+                        )
+                    except Exception:
+                        baseline_date = None
 
             if baseline_date:
                 st.caption(
@@ -10231,13 +10412,83 @@ def show_performance_heatmaps():
                 label = (
                     "As of"
                     if controls['volume_view_mode']
-                    == 'completed'
+                    in {
+                        'completed',
+                        'historical',
+                    }
                     else "Timestamp"
                 )
 
                 st.caption(
                     f"{label}: {volume_caption}"
                 )
+
+            benchmark_context = None
+
+            if valid_volume_items:
+                benchmark_context = (
+                    (
+                        valid_volume_items[0].get(
+                            'volume_context'
+                        )
+                        or {}
+                    )
+                    .get(
+                        'volume_comparisons',
+                        {},
+                    )
+                    .get(
+                        controls['period'],
+                        {},
+                    )
+                )
+
+            if benchmark_context:
+                benchmark_start = (
+                    benchmark_context.get(
+                        'benchmark_start_date'
+                    )
+                )
+                benchmark_end = (
+                    benchmark_context.get(
+                        'benchmark_end_date'
+                    )
+                )
+                benchmark_count = (
+                    benchmark_context.get(
+                        'benchmark_session_count'
+                    )
+                )
+
+                if (
+                    benchmark_start
+                    and benchmark_end
+                    and benchmark_count
+                ):
+                    benchmark_start_label = (
+                        pd.Timestamp(
+                            benchmark_start
+                        ).strftime('%m/%d/%y')
+                    )
+                    benchmark_end_label = (
+                        pd.Timestamp(
+                            benchmark_end
+                        ).strftime('%m/%d/%y')
+                    )
+
+                    if int(benchmark_count) == 1:
+                        st.caption(
+                            "Benchmark Date: "
+                            f"{benchmark_end_label}"
+                        )
+                    else:
+                        st.caption(
+                            "Benchmark Window: "
+                            f"{benchmark_start_label} → "
+                            f"{benchmark_end_label} "
+                            f"({int(benchmark_count)} "
+                            "completed sessions)"
+                        )
         
         display_heatmap(
             current_data,
