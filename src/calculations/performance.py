@@ -693,10 +693,116 @@ class DatabaseIntegratedPerformanceCalculator:
             return False
         finally:
             conn.close()
-    
-    def get_historical_price(self, ticker: str, period: str, save_to_db: bool = True) -> Optional[float]:
+
+    def get_price_for_date(
+        self,
+        ticker: str,
+        target_date: datetime,
+        save_to_db: bool = True,
+    ) -> Optional[float]:
         """
-        Get historical price using database-first approach with STRICT date validation
+        Return the exact closing price for one historical trading session.
+
+        This is the historical-observation counterpart to get_current_price().
+        It preserves strict exact-date validation and the existing
+        database-first / yfinance-fallback behavior.
+
+        The caller is responsible for resolving non-trading dates before
+        invoking this method.
+        """
+        target_date = pd.Timestamp(
+            target_date
+        ).normalize().to_pydatetime()
+        target_date_str = target_date.strftime(
+            '%Y-%m-%d'
+        )
+
+        logger.info(
+            f"🔍 Looking for {ticker} exact observation date "
+            f"{target_date_str}"
+        )
+
+        db_price = self._query_historical_price_from_db(
+            ticker,
+            target_date_str,
+        )
+
+        if db_price is not None:
+            logger.info(
+                f"📊 Using cached exact observation price for "
+                f"{ticker}: ${db_price:.2f}"
+            )
+            return db_price
+
+        logger.info(
+            f"📡 Auto-fetching {ticker} from yfinance "
+            f"(observation date {target_date_str} not in database)"
+        )
+
+        try:
+            stock = yf.Ticker(ticker)
+
+            start_date = target_date - timedelta(days=15)
+            end_date = target_date + timedelta(days=5)
+
+            hist_data = stock.history(
+                start=start_date,
+                end=end_date,
+            )
+
+            if hist_data.empty:
+                logger.warning(
+                    f"⚠️ No historical data returned from "
+                    f"yfinance for {ticker}"
+                )
+                return None
+
+            if self.db_available:
+                self._save_historical_data_to_db(
+                    ticker,
+                    hist_data,
+                    save_to_db=save_to_db,
+                )
+
+            exact_price = self._validate_exact_target_date(
+                hist_data,
+                target_date,
+                ticker,
+            )
+
+            if exact_price is not None:
+                logger.info(
+                    f"✅ Retrieved {ticker} exact observation "
+                    f"price: ${exact_price:.2f}"
+                )
+                return exact_price
+
+            logger.error(
+                f"❌ Exact observation date {target_date_str} "
+                f"unavailable for {ticker}"
+            )
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Error fetching observation price for "
+                f"{ticker} from yfinance: {e}"
+            )
+            return None
+
+    def get_historical_price(
+        self,
+        ticker: str,
+        period: str,
+        save_to_db: bool = True,
+        from_date: Optional[datetime] = None,
+    ) -> Optional[float]:
+        """
+        Get historical price using database-first approach with STRICT date validation.
+
+        When from_date is supplied, calculate the period baseline relative
+        to that observation date. When omitted, preserve the existing
+        latest/current behavior.
         
         Implementation with exact date requirement:
         1. Calculate proper trading day target date
@@ -710,12 +816,22 @@ class DatabaseIntegratedPerformanceCalculator:
             ticker: Stock ticker symbol
             period: Time period key ('1d', '1w', '1m', etc.)
             save_to_db: Whether to save fetched data to database
+            from_date: Optional observation date used as the period anchor
             
         Returns:
             Historical price as float, or None if exact date not available
         """
+        reference_date = (
+            pd.Timestamp(from_date).normalize().to_pydatetime()
+            if from_date is not None
+            else datetime.now()
+        )
+
         # Calculate target date using proper trading day logic
-        target_date = get_trading_day_target(period, datetime.now())
+        target_date = get_trading_day_target(
+            period,
+            reference_date,
+        )
         target_date_str = target_date.strftime('%Y-%m-%d')
         
         # DIAGNOSTIC: Enhanced logging
@@ -938,28 +1054,79 @@ class DatabaseIntegratedPerformanceCalculator:
             
         return ((current_price - historical_price) / historical_price) * 100
     
-    def calculate_performance_for_ticker(self, ticker: str, period: str, save_to_db: bool = True) -> Dict:
+    def calculate_performance_for_ticker(
+        self,
+        ticker: str,
+        period: str,
+        save_to_db: bool = True,
+        effective_day: Optional[datetime] = None,
+    ) -> Dict:
         """
-        Calculate complete performance data for a single ticker using database-first approach
+        Calculate complete performance data for a single ticker.
+
+        When effective_day is omitted, preserve the existing latest/current
+        Price Performance behavior. When supplied, use that exact historical
+        trading session as the observation date and calculate the selected
+        period baseline relative to it.
         
         Args:
             ticker: Stock ticker symbol
             period: Time period for comparison
+            save_to_db: Whether fetched fallback data may be persisted
+            effective_day: Optional exact historical observation session
             
         Returns:
             Dictionary with performance data
         """
-        logger.info(f"🎯 Calculating performance for {ticker} ({period})")
-        
-        # Get current and historical prices using database-first approach
-        current_price = self.get_current_price(ticker)
-        current_price_metadata = (
-            self.get_current_price_metadata(ticker)
+        logger.info(
+            f"🎯 Calculating performance for {ticker} "
+            f"({period})"
         )
+
+        if effective_day is None:
+            current_price = self.get_current_price(ticker)
+            current_price_metadata = (
+                self.get_current_price_metadata(ticker)
+            )
+            baseline_reference_date = datetime.now()
+        else:
+            resolved_effective_day = (
+                pd.Timestamp(
+                    effective_day
+                ).normalize().to_pydatetime()
+            )
+
+            current_price = self.get_price_for_date(
+                ticker,
+                resolved_effective_day,
+                save_to_db=save_to_db,
+            )
+            current_price_metadata = {
+                'price': current_price,
+                'price_source': 'historical_exact_date',
+                'effective_timestamp': None,
+                'effective_date': (
+                    resolved_effective_day.strftime(
+                        '%Y-%m-%d'
+                    )
+                ),
+                'current_volume': None,
+                'fetched_at': None,
+            }
+            baseline_reference_date = (
+                resolved_effective_day
+            )
+
+        baseline_date = get_trading_day_target(
+            period,
+            baseline_reference_date,
+        )
+
         historical_price = self.get_historical_price(
             ticker,
             period,
             save_to_db=save_to_db,
+            from_date=baseline_reference_date,
         )
         
         if current_price is None or historical_price is None:
@@ -971,6 +1138,9 @@ class DatabaseIntegratedPerformanceCalculator:
                 'absolute_change': 0.0,
                 'period': period,
                 'period_label': get_enhanced_period_label(period),
+                'baseline_date': (
+                    baseline_date.strftime('%Y-%m-%d')
+                ),
                 'current_price_metadata': (
                     current_price_metadata
                 ),
@@ -978,11 +1148,17 @@ class DatabaseIntegratedPerformanceCalculator:
                 'data_source': 'error'
             }
         
-        percentage_change = self.calculate_percentage_change(current_price, historical_price)
-        absolute_change = current_price - historical_price
+        percentage_change = self.calculate_percentage_change(
+            current_price,
+            historical_price,
+        )
+        absolute_change = (
+            current_price
+            - historical_price
+        )
         
-        # Determine data source for reporting
-        data_source = 'database+yfinance'  # Mixed sources
+        # Preserve the existing public reporting convention.
+        data_source = 'database+yfinance'
         
         result = {
             'ticker': ticker,
@@ -992,6 +1168,9 @@ class DatabaseIntegratedPerformanceCalculator:
             'absolute_change': absolute_change,
             'period': period,
             'period_label': get_enhanced_period_label(period),
+            'baseline_date': (
+                baseline_date.strftime('%Y-%m-%d')
+            ),
             'current_price_metadata': (
                 current_price_metadata
             ),
@@ -999,26 +1178,51 @@ class DatabaseIntegratedPerformanceCalculator:
             'data_source': data_source
         }
         
-        logger.info(f"✅ {ticker}: ${current_price:.2f} vs ${historical_price:.2f} = {percentage_change:+.2f}%")
+        logger.info(
+            f"✅ {ticker}: ${current_price:.2f} vs "
+            f"${historical_price:.2f} = "
+            f"{percentage_change:+.2f}%"
+        )
         return result
     
-    def calculate_performance_for_group(self, tickers: List[str], period: str, save_to_db: bool = True) -> List[Dict]:
+    def calculate_performance_for_group(
+        self,
+        tickers: List[str],
+        period: str,
+        save_to_db: bool = True,
+        effective_day: Optional[datetime] = None,
+    ) -> List[Dict]:
         """
-        Calculate performance data for a group of tickers using database-first approach
+        Calculate performance data for a group of tickers using database-first approach.
         
         Args:
             tickers: List of ticker symbols
             period: Time period for comparison
+            save_to_db: Whether fetched fallback data may be persisted
+            effective_day: Optional exact historical observation session
             
         Returns:
             List of dictionaries with performance data for each ticker
         """
-        logger.info(f"🎯 Calculating performance for {len(tickers)} tickers ({period})")
+        logger.info(
+            f"🎯 Calculating performance for "
+            f"{len(tickers)} tickers ({period})"
+        )
         results = []
         
         for i, ticker in enumerate(tickers, 1):
-            logger.info(f"📊 Processing {ticker} ({i}/{len(tickers)})...")
-            performance_data = self.calculate_performance_for_ticker(ticker, period, save_to_db=save_to_db)
+            logger.info(
+                f"📊 Processing {ticker} "
+                f"({i}/{len(tickers)})..."
+            )
+            performance_data = (
+                self.calculate_performance_for_ticker(
+                    ticker,
+                    period,
+                    save_to_db=save_to_db,
+                    effective_day=effective_day,
+                )
+            )
             results.append(performance_data)
         
         # Log summary of data sources used

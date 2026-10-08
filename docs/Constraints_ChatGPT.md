@@ -1,5 +1,5 @@
 # AI CODING ASSISTANT EFFECTIVENESS FRAMEWORK
-As of: 5/10/26 (7/29/26)
+As of: 10/5/26
 
 _Comprehensive constraints to ensure accurate, efficient, and truthful development sessions_
 
@@ -639,19 +639,79 @@ When a change may affect display time or repeated per-cell/per-ticker work:
 
 Small dictionary lookups or display-only formatting may be characterized as negligible only after confirming they do not invoke upstream computation.
 
-### 13. Git scope and selective staging
+### 13. Git scope, selective staging, and structured closeout
 
-After compile, static, functional, and manual checks pass, provide exact Git commands.
+After compile, static, functional, and manual checks pass, use a structured,
+checkpoint-based Git closeout workflow.
 
-Begin with:
+At each checkpoint, provide one consolidated PowerShell block using
+`Write-Host` section headers so the user can run the entire stage at once
+and return one consolidated result.
+
+Use this sequence:
+
+```text
+pre-staging scope review
+→ selective staging
+→ cached-diff verification
+→ final pre-commit verification
+→ commit
+→ post-commit branch/divergence verification
+→ push
+→ post-push synchronization verification
+```
+
+Do not advance across an irreversible boundary until the user returns the
+preceding checkpoint output and it has been reviewed.
+
+In particular:
+
+- do not stage until the working-tree scope has been reviewed;
+- do not commit until the staged payload has been reviewed;
+- do not push until the resulting commit, active branch, and divergence have
+  been verified;
+- do not declare the workstream closed until push synchronization is confirmed
+  when push is part of the approved workflow.
+
+#### Pre-staging scope review
+
+Begin with one consolidated PowerShell block that reports, at minimum:
 
 ```powershell
+Write-Host "--- CURRENT BRANCH ---"
+git branch --show-current
+
+Write-Host "--- WORKING TREE ---"
+git status --short
+
+Write-Host "--- RECENT COMMITS ---"
+git log --oneline -8
+
+Write-Host "--- BRANCH TRACKING ---"
+git branch -vv
+
+Write-Host "--- ORIGIN DIVERGENCE ---"
+git rev-list --left-right --count `
+  origin/<branch>...<branch>
+
+Write-Host "--- UNSTAGED DIFF CHECK ---"
 git diff --check
 
-git diff --stat
+Write-Host "--- CHANGED FILES ---"
+git diff --name-only
 
-git status --short
+Write-Host "--- DIFF STAT ---"
+git diff --stat
 ```
+
+Before staging, explicitly identify:
+
+- files expected to belong to the task;
+- files that must remain unstaged;
+- known unrelated modifications that must be preserved;
+- whether the observed file scope matches the intended workstream.
+
+#### Selective staging
 
 When only specific files belong to the task, stage only those files:
 
@@ -665,49 +725,168 @@ Do not recommend:
 git add .
 ```
 
-unless the user explicitly confirms every working-tree change belongs to the commit.
+unless the user explicitly confirms every working-tree change belongs to the
+same commit.
 
-Before committing, require:
+Prefer a single-line `git add -- ...` command when practical to avoid
+PowerShell line-continuation ambiguity.
+
+#### Cached-diff verification
+
+After staging, use one consolidated block that verifies both the index and any
+remaining unstaged work:
 
 ```powershell
-git diff --cached --name-only
+Write-Host "--- WORKING TREE AFTER STAGING ---"
+git status --short
 
+Write-Host "--- CACHED DIFF CHECK ---"
 git diff --cached --check
 
+Write-Host "--- CACHED FILES ---"
+git diff --cached --name-status
+
+Write-Host "--- CACHED NUMSTAT ---"
+git diff --cached --numstat
+
+Write-Host "--- CACHED DIFF STAT ---"
 git diff --cached --stat
 
+Write-Host "--- UNSTAGED FILES REMAINING ---"
+git diff --name-only
+```
+
+Confirm that:
+
+- only intended files are staged;
+- required files were not omitted;
+- unrelated files remain unstaged;
+- no unexpected unstaged modifications remain;
+- cached file counts and diff statistics are consistent with the pre-staging
+  scope.
+
+For non-trivial changes, review the actual staged payload before committing:
+
+```powershell
 git diff --cached
 ```
 
-Explicitly identify:
+If the staged diff is too large for practical terminal review, export the
+cached diff to a temporary review artifact and inspect that exact staged
+payload. Do not add the review artifact to the repository.
 
-* files expected to be staged;
-* files that must remain unstaged;
-* known unrelated modifications that must be preserved;
-* the proposed commit message;
-* whether a tag or documentation checkpoint is warranted.
+#### Final pre-commit verification
 
-After committing, verify:
+Immediately before commit, verify again:
 
 ```powershell
-git show --stat --oneline --decorate HEAD
+Write-Host "--- FINAL PRE-COMMIT STATUS ---"
+git status --short
 
+Write-Host "--- FINAL CACHED DIFF CHECK ---"
+git diff --cached --check
+
+Write-Host "--- FINAL CACHED FILES ---"
+git diff --cached --name-status
+
+Write-Host "--- ACTIVE BRANCH ---"
+git branch --show-current
+```
+
+Before supplying the commit command, explicitly state:
+
+- the exact staged file scope;
+- the proposed commit message;
+- whether a tag or documentation checkpoint is warranted.
+
+#### Post-commit verification
+
+After commit, do not push immediately.
+
+Verify the resulting commit and repository state with one consolidated block:
+
+```powershell
+Write-Host "--- POST-COMMIT STATUS ---"
+git status --short
+
+Write-Host "--- CURRENT BRANCH ---"
+git branch --show-current
+
+Write-Host "--- NEW HEAD ---"
+git log --oneline -3
+
+Write-Host "--- COMMITTED FILES ---"
 git show --name-only --format="" HEAD
 
-git status --short
-```
+Write-Host "--- COMMIT STAT ---"
+git show --stat --oneline --decorate HEAD
 
-After pushing, verify:
-
-```powershell
-git status --short
-
+Write-Host "--- BRANCH TRACKING ---"
 git branch -vv
 
-git log -3 --oneline --decorate
+Write-Host "--- ORIGIN DIVERGENCE ---"
+git rev-list --left-right --count `
+  origin/<branch>...<branch>
 ```
 
-Do not declare an item closed until the intended commit is pushed and branch alignment is confirmed when push is part of the approved workflow.
+For a newly created local commit on an otherwise synchronized branch, the
+expected divergence before push is normally:
+
+```text
+0  1
+```
+
+Do not treat that expectation as a substitute for observing the actual branch
+state.
+
+#### Push
+
+Immediately before giving branch-specific push guidance, verify the active
+branch from the user's latest reported output.
+
+Never assume `main`.
+
+Push the verified active branch explicitly:
+
+```powershell
+git push origin <verified-active-branch>
+```
+
+#### Post-push synchronization verification
+
+After push, verify synchronization with one consolidated block:
+
+```powershell
+Write-Host "--- POST-PUSH STATUS ---"
+git status --short
+
+Write-Host "--- CURRENT BRANCH ---"
+git branch --show-current
+
+Write-Host "--- HEAD / ORIGIN ---"
+git log --oneline --decorate -3
+
+Write-Host "--- BRANCH TRACKING ---"
+git branch -vv
+
+Write-Host "--- ORIGIN DIVERGENCE ---"
+git rev-list --left-right --count `
+  origin/<branch>...<branch>
+```
+
+Completion requires:
+
+```text
+no uncommitted changes belonging to the completed item/workstream
+any unrelated working-tree changes explicitly identified and preserved
+correct active branch
+HEAD at intended commit
+origin/<branch> at the same intended commit
+origin divergence 0 0
+```
+
+Do not declare the item or workstream closed until those conditions are
+confirmed when push is part of the approved workflow.
 
 ### 14. Documentation-only changes
 

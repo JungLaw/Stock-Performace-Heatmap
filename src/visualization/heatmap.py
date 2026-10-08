@@ -59,9 +59,13 @@ class FinvizHeatmapGenerator:
         # Default to neutral for edge cases
         return self.FINVIZ_COLORS['neutral']
     
-    def prepare_treemap_data(self, performance_data: List[Dict], 
-                           sizing_method: str = 'equal',
-                           asset_group: str = None) -> pd.DataFrame:
+    def prepare_treemap_data(
+        self,
+        performance_data: List[Dict],
+        sizing_method: str = 'equal',
+        asset_group: str = None,
+        ticker_names: Optional[Dict[str, str]] = None,
+    ) -> pd.DataFrame:
         """
         Prepare data for treemap visualization
         
@@ -73,9 +77,6 @@ class FinvizHeatmapGenerator:
         Returns:
             DataFrame ready for Plotly treemap
         """
-        # Import here to avoid circular imports
-        from config.assets import get_display_name_for_ticker, should_use_display_names
-        
         # Filter out error cases
         valid_data = [p for p in performance_data if not p.get('error', False)]
         
@@ -87,7 +88,9 @@ class FinvizHeatmapGenerator:
             ])
         
         df_data = []
-        use_display_names = should_use_display_names(asset_group) if asset_group else False
+        display_names = dict(
+            ticker_names or {}
+        )
         
         for item in valid_data:
             ticker = item['ticker']
@@ -111,11 +114,10 @@ class FinvizHeatmapGenerator:
                 # Skip unknown data structure
                 continue
             
-            # Get display name based on asset group
-            if use_display_names:
-                display_name = get_display_name_for_ticker(ticker, asset_group)
-            else:
-                display_name = ticker
+            display_name = display_names.get(
+                ticker,
+                ticker,
+            )
             
             # Color mapping
             color = self.get_performance_color(pct_change)
@@ -553,6 +555,7 @@ Data unavailable<br>
         height: int = 800,
         asset_group: str = None,
         tile_order: str = 'original',
+        ticker_names: Optional[Dict[str, str]] = None,
     ) -> go.Figure:
         """
         Create Finviz-style treemap visualization
@@ -576,6 +579,7 @@ Data unavailable<br>
             performance_data,
             sizing_method,
             asset_group,
+            ticker_names,
         )
 
         # Presentation-only ordering.

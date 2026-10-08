@@ -1005,9 +1005,21 @@ class DatabaseIntegratedVolumeCalculator:
             '60d': '3M Avg',
         }
 
+        benchmark_session_counts = {
+            '1d': 1,
+            '1w': 5,
+            '10d': 10,
+            '1m': 22,
+            '60d': 60,
+        }
+
         comparisons = {}
 
         for key, benchmark_volume in benchmark_values.items():
+            benchmark_rows = prior_rows.tail(
+                benchmark_session_counts[key]
+            )
+
             share_pct = (
                 (
                     float(current_volume)
@@ -1021,6 +1033,19 @@ class DatabaseIntegratedVolumeCalculator:
             comparisons[key] = {
                 'label': labels[key],
                 'benchmark_volume': benchmark_volume,
+                'benchmark_session_count': len(
+                    benchmark_rows
+                ),
+                'benchmark_start_date': (
+                    benchmark_rows.index[0].strftime(
+                        '%Y-%m-%d'
+                    )
+                ),
+                'benchmark_end_date': (
+                    benchmark_rows.index[-1].strftime(
+                        '%Y-%m-%d'
+                    )
+                ),
                 'percentage_change': self._percentage_change(
                     current_volume,
                     benchmark_volume,
@@ -1100,9 +1125,21 @@ class DatabaseIntegratedVolumeCalculator:
             '60d': '3M Avg',
         }
 
+        benchmark_session_counts = {
+            '1d': 1,
+            '1w': 5,
+            '10d': 10,
+            '1m': 22,
+            '60d': 60,
+        }
+
         comparisons = {}
 
         for key, benchmark_volume in benchmark_values.items():
+            benchmark_rows = completed_rows.tail(
+                benchmark_session_counts[key]
+            )
+
             share_pct = (
                 (
                     float(current_volume)
@@ -1116,6 +1153,19 @@ class DatabaseIntegratedVolumeCalculator:
             comparisons[key] = {
                 'label': labels[key],
                 'benchmark_volume': benchmark_volume,
+                'benchmark_session_count': len(
+                    benchmark_rows
+                ),
+                'benchmark_start_date': (
+                    benchmark_rows.index[0].strftime(
+                        '%Y-%m-%d'
+                    )
+                ),
+                'benchmark_end_date': (
+                    benchmark_rows.index[-1].strftime(
+                        '%Y-%m-%d'
+                    )
+                ),
                 'percentage_change': self._percentage_change(
                     current_volume,
                     benchmark_volume,
@@ -1600,6 +1650,65 @@ class DatabaseIntegratedVolumeCalculator:
         logger.info(
             f"   - Errors: {error_count} tickers"
         )
+
+        return results
+
+    def calculate_completed_volume_performance_for_group(
+        self,
+        tickers: List[str],
+        benchmark_period: str = '10d',
+        effective_day: Optional[datetime] = None,
+        save_to_db: bool = True,
+    ) -> List[Dict]:
+        """
+        Calculate completed-session Volume performance for an explicit
+        historical trading session.
+
+        The supplied effective_day becomes the displayed observation.
+        Benchmark sessions remain strictly prior to that observation.
+
+        Callers are responsible for resolving weekend/holiday selections
+        to a valid trading session before invoking this method.
+        """
+        if effective_day is None:
+            raise ValueError(
+                "effective_day is required for explicit completed-session "
+                "Volume performance."
+            )
+
+        resolved_effective_day = (
+            pd.Timestamp(
+                effective_day
+            ).normalize().to_pydatetime()
+        )
+
+        logger.info(
+            f"Calculating explicit completed-session volume performance "
+            f"for {len(tickers)} tickers "
+            f"({benchmark_period} benchmark; "
+            f"effective day "
+            f"{resolved_effective_day.strftime('%Y-%m-%d')})"
+        )
+
+        results = []
+
+        for i, ticker in enumerate(tickers, 1):
+            logger.info(
+                f"Processing historical completed {ticker} "
+                f"({i}/{len(tickers)})..."
+            )
+
+            result = self.calculate_volume_performance(
+                ticker,
+                benchmark_period,
+                save_to_db=save_to_db,
+                effective_day=resolved_effective_day,
+            )
+
+            if not result.get('error', False):
+                result['observation_mode'] = 'historical'
+
+            results.append(result)
 
         return results
 

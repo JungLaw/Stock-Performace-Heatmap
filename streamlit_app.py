@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional
 
 # Add src to path for imports
@@ -29,11 +29,15 @@ from calculations.performance import (
 )
 from calculations.volume import DatabaseIntegratedVolumeCalculator
 from calculations.technical import DatabaseIntegratedTechnicalCalculator
+from data.data_acquisition import (
+    DataAcquisitionManager,
+    DataAcquisitionResult,
+)
+from data.data_mutation import DataMutationManager, MutationPlan
+from data.database_manager import DatabaseManager
+from data.universe_manager import UniverseManager
 from visualization.heatmap import FinvizHeatmapGenerator, get_color_legend
 from config.assets import (
-    ASSET_GROUPS,
-    CUSTOM_DEFAULT,
-    get_tickers_only,
     SCD_DEFAULT_COUNTRY_TICKERS,
     SCD_DEFAULT_SECTOR_TICKERS,
     SCD_DEFAULT_CUSTOM_TICKERS,
@@ -163,24 +167,6 @@ def initialize_session_state():
         st.session_state.technical_calculator = DatabaseIntegratedTechnicalCalculator()
     if 'heatmap_generator' not in st.session_state:
         st.session_state.heatmap_generator = FinvizHeatmapGenerator()
-    
-    # Three-level ticker management session state variables
-    if 'selected_country_etfs' not in st.session_state:
-        st.session_state.selected_country_etfs = []
-    if 'selected_sector_etfs' not in st.session_state:
-        st.session_state.selected_sector_etfs = []
-    if 'session_custom_tickers' not in st.session_state:
-        st.session_state.session_custom_tickers = []
-    if 'permanent_country_additions' not in st.session_state:
-        st.session_state.permanent_country_additions = []
-    if 'permanent_sector_additions' not in st.session_state:
-        st.session_state.permanent_sector_additions = []
-    
-    # Database and performance settings
-    if 'save_custom_to_database' not in st.session_state:
-        st.session_state.save_custom_to_database = True
-    if 'custom_ticker_limit' not in st.session_state:
-        st.session_state.custom_ticker_limit = 10
 
     if 'selected_bucket' not in st.session_state:
         st.session_state.selected_bucket = 'custom'  # Default to custom bucket
@@ -433,39 +419,19 @@ def initialize_session_state():
 
 def is_bucket_ticker(ticker: str) -> bool:
     """
-    Check if ticker exists in any of the three buckets (COUNTRY/SECTOR/CUSTOM)
-    
-    Args:
-        ticker: Stock ticker symbol (uppercase)
-        
-    Returns:
-        True if ticker is in any bucket, False otherwise
+    Return whether ticker has any persistent universe bucket membership.
+
+    Persistent Custom, Sector, and Country membership is authoritative.
+    A stored ticker with no persistent membership is Unassigned and
+    therefore returns False.
     """
-    # Get all bucket tickers
-    all_bucket_tickers = []
-    
-    # COUNTRY_ETFS
-    for item in ASSET_GROUPS.get('country', []):
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])  # (ticker, display_name)
-        else:
-            all_bucket_tickers.append(item)     # Just ticker
-    
-    # SECTOR_ETFS
-    for item in ASSET_GROUPS.get('sector', []):
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])
-        else:
-            all_bucket_tickers.append(item)
-    
-    # CUSTOM_DEFAULT
-    for item in CUSTOM_DEFAULT:
-        if isinstance(item, tuple):
-            all_bucket_tickers.append(item[0])
-        else:
-            all_bucket_tickers.append(item)
-    
-    return ticker.upper() in [t.upper() for t in all_bucket_tickers]
+    universe_manager = UniverseManager()
+
+    return bool(
+        universe_manager.get_bucket_memberships(
+            ticker
+        )
+    )
 
 
 def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
@@ -478,19 +444,40 @@ def _format_scd_ticker_label(ticker: str, ticker_names: Dict[str, str]) -> str:
 
 def _get_scd_source_config(source: str) -> Dict[str, Any]:
     """
-    Return existing asset-universe metadata for an SCD ticker source.
+    Return persistent universe metadata for one SCD ticker source.
 
-    SCD consumes the existing ASSET_GROUPS universes. It does not create a new
-    asset universe or reorder canonical ticker lists.
+    Persistent Custom, Sector, and Country membership owns the available
+    ticker list, canonical display names, and bucket-local order. SCD retains
+    its own curated default selections and session-only temporary tickers.
     """
-    source_key = source if source in {"country", "sector", "custom"} else "custom"
-    group = ASSET_GROUPS.get(source_key, {})
+    source_key = (
+        source
+        if source in {"country", "sector", "custom"}
+        else "custom"
+    )
+
+    source_names = {
+        "country": "Country ETFs",
+        "sector": "Sector ETFs",
+        "custom": "Custom Tickers",
+    }
+
+    universe_manager = UniverseManager()
+    bucket_records = universe_manager.get_bucket_records(
+        source_key
+    )
 
     return {
         "source": source_key,
-        "name": group.get("name", source_key.title()),
-        "tickers": list(group.get("tickers", [])),
-        "ticker_names": dict(group.get("ticker_names", {})),
+        "name": source_names[source_key],
+        "tickers": [
+            record.ticker
+            for record in bucket_records
+        ],
+        "ticker_names": {
+            record.ticker: record.display_name
+            for record in bucket_records
+        },
     }
 
 
@@ -7150,264 +7137,38 @@ def is_final_data_available_for_date(target_date: datetime) -> bool:
     # Final data is available if target date is on or before last completed trading day
     return target_date_only <= last_complete_day
 
-def create_level1_predefined_selection():
-    """Level 1: Predefined ticker selection with checkboxes"""
-    from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
-    
-    st.sidebar.subheader("📋 Level 1: Predefined Assets")
-    
-    # Country ETFs Section
-    with st.sidebar.expander("🌍 Country ETFs (52 available)", expanded=False):
-        # Select All/Deselect All for Country ETFs
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Select All Countries", key="select_all_countries"):
-                st.session_state.selected_country_etfs = get_tickers_only(COUNTRY_ETFS)
-        with col2:
-            if st.button("Deselect All Countries", key="deselect_all_countries"):
-                st.session_state.selected_country_etfs = []
-        
-        # Search filter for countries
-        country_search = st.text_input(
-            "Search countries:",
-            key="country_search",
-            placeholder="Type to filter..."
-        )
-        
-        # Filter country ETFs based on search
-        filtered_countries = COUNTRY_ETFS
-        if country_search:
-            filtered_countries = [
-                (ticker, name) for ticker, name in COUNTRY_ETFS
-                if country_search.lower() in name.lower() or country_search.lower() in ticker.lower()
-            ]
-        
-        # Create checkboxes for country ETFs
-        for ticker, display_name in filtered_countries:
-            is_selected = ticker in st.session_state.selected_country_etfs
-            if st.checkbox(
-                f"{display_name} ({ticker})",
-                value=is_selected,
-                key=f"country_{ticker}"
-            ):
-                if ticker not in st.session_state.selected_country_etfs:
-                    st.session_state.selected_country_etfs.append(ticker)
-            else:
-                if ticker in st.session_state.selected_country_etfs:
-                    st.session_state.selected_country_etfs.remove(ticker)
-        
-        # Show selection count
-        st.caption(f"Selected: {len(st.session_state.selected_country_etfs)} countries")
-    
-    # Sector ETFs Section
-    with st.sidebar.expander("🏭 Sector ETFs (30 available)", expanded=False):
-        # Select All/Deselect All for Sector ETFs
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Select All Sectors", key="select_all_sectors"):
-                st.session_state.selected_sector_etfs = get_tickers_only(SECTOR_ETFS)
-        with col2:
-            if st.button("Deselect All Sectors", key="deselect_all_sectors"):
-                st.session_state.selected_sector_etfs = []
-        
-        # Search filter for sectors
-        sector_search = st.text_input(
-            "Search sectors:",
-            key="sector_search",
-            placeholder="Type to filter..."
-        )
-        
-        # Filter sector ETFs based on search
-        filtered_sectors = SECTOR_ETFS
-        if sector_search:
-            filtered_sectors = [
-                (ticker, name) for ticker, name in SECTOR_ETFS
-                if sector_search.lower() in name.lower() or sector_search.lower() in ticker.lower()
-            ]
-        
-        # Create checkboxes for sector ETFs
-        for ticker, display_name in filtered_sectors:
-            is_selected = ticker in st.session_state.selected_sector_etfs
-            if st.checkbox(
-                f"{display_name} ({ticker})",
-                value=is_selected,
-                key=f"sector_{ticker}"
-            ):
-                if ticker not in st.session_state.selected_sector_etfs:
-                    st.session_state.selected_sector_etfs.append(ticker)
-            else:
-                if ticker in st.session_state.selected_sector_etfs:
-                    st.session_state.selected_sector_etfs.remove(ticker)
-        
-        # Show selection count
-        st.caption(f"Selected: {len(st.session_state.selected_sector_etfs)} sectors")
 
-def create_level2_permanent_expansion():
-    """Level 2: Add new tickers to permanent predefined lists"""
-    st.sidebar.subheader("➕ Level 2: Expand Permanent Lists")
-    
-    # Add to Country ETFs
-    with st.sidebar.expander("🌍 Add New Country ETF", expanded=False):
-        new_country_ticker = st.text_input(
-            "Country ETF Ticker:",
-            key="new_country_ticker",
-            placeholder="e.g., EWK"
-        ).upper().strip()
-        
-        new_country_name = st.text_input(
-            "Display Name:",
-            key="new_country_name",
-            placeholder="e.g., Belgium"
-        ).strip()
-        
-        if st.button("Add Country ETF", key="add_country_etf"):
-            if new_country_ticker and new_country_name:
-                # Check if already exists
-                existing_tickers = [item[0] for item in st.session_state.permanent_country_additions]
-                if new_country_ticker not in existing_tickers:
-                    st.session_state.permanent_country_additions.append((new_country_ticker, new_country_name))
-                    # Auto-select the newly added ticker
-                    if new_country_ticker not in st.session_state.selected_country_etfs:
-                        st.session_state.selected_country_etfs.append(new_country_ticker)
-                    st.success(f"✅ Added {new_country_name} ({new_country_ticker}) to country ETFs")
-                else:
-                    st.warning(f"⚠️ {new_country_ticker} already exists in your additions")
-            else:
-                st.error("❌ Please enter both ticker and display name")
-        
-        # Show current permanent additions
-        if st.session_state.permanent_country_additions:
-            st.caption("Your additions:")
-            for ticker, name in st.session_state.permanent_country_additions:
-                st.caption(f"• {name} ({ticker})")
-    
-    # Add to Sector ETFs
-    with st.sidebar.expander("🏭 Add New Sector ETF", expanded=False):
-        new_sector_ticker = st.text_input(
-            "Sector ETF Ticker:",
-            key="new_sector_ticker",
-            placeholder="e.g., JETS"
-        ).upper().strip()
-        
-        new_sector_name = st.text_input(
-            "Display Name:",
-            key="new_sector_name",
-            placeholder="e.g., Airlines"
-        ).strip()
-        
-        if st.button("Add Sector ETF", key="add_sector_etf"):
-            if new_sector_ticker and new_sector_name:
-                # Check if already exists
-                existing_tickers = [item[0] for item in st.session_state.permanent_sector_additions]
-                if new_sector_ticker not in existing_tickers:
-                    st.session_state.permanent_sector_additions.append((new_sector_ticker, new_sector_name))
-                    # Auto-select the newly added ticker
-                    if new_sector_ticker not in st.session_state.selected_sector_etfs:
-                        st.session_state.selected_sector_etfs.append(new_sector_ticker)
-                    st.success(f"✅ Added {new_sector_name} ({new_sector_ticker}) to sector ETFs")
-                else:
-                    st.warning(f"⚠️ {new_sector_ticker} already exists in your additions")
-            else:
-                st.error("❌ Please enter both ticker and display name")
-        
-        # Show current permanent additions
-        if st.session_state.permanent_sector_additions:
-            st.caption("Your additions:")
-            for ticker, name in st.session_state.permanent_sector_additions:
-                st.caption(f"• {name} ({ticker})")
+def _resolve_performance_snapshot_date(
+    selected_date: Any,
+) -> datetime:
+    """
+    Resolve a Performance Heatmap historical snapshot date.
 
-def create_level3_session_custom():
-    """Level 3: Session-only custom tickers with configurable limit"""
-    st.sidebar.subheader("🎯 Level 3: Session Custom Tickers")
-    
-    # Configurable ticker limit
-    st.session_state.custom_ticker_limit = st.sidebar.slider(
-        "Max custom tickers:",
-        min_value=5,
-        max_value=50,
-        value=st.session_state.custom_ticker_limit,
-        help="Higher limits may slow analysis"
+    A weekend or market-holiday selection resolves backward to the
+    nearest valid US trading session. This helper is request metadata
+    only; it does not fetch, calculate, persist, or mutate data.
+    """
+    resolved_date = pd.Timestamp(
+        selected_date
     )
-    
-    # Performance warning
-    if st.session_state.custom_ticker_limit > 20:
-        st.sidebar.warning("⚠️ Large ticker counts may slow analysis")
-    
-    # Add ticker(s) - unified input for single or multiple
-    ticker_input = st.sidebar.text_area(
-        "Add Ticker(s):",
-        key="custom_ticker_input",
-        placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
-        height=80
+
+    if resolved_date.tzinfo is not None:
+        resolved_date = resolved_date.tz_localize(
+            None
+        )
+
+    resolved_date = (
+        resolved_date
+        .normalize()
+        .to_pydatetime()
     )
-    
-    if st.sidebar.button("Add Ticker(s)", key="add_custom_tickers"):
-        if ticker_input.strip():
-            # Parse input (reuse bulk parsing logic)
-            parsed_tickers = []
-            for line in ticker_input.replace(',', '\n').split('\n'):
-                ticker = line.strip().upper()
-                if ticker and ticker not in parsed_tickers:
-                    parsed_tickers.append(ticker)
-            
-            # Add tickers respecting limit
-            added_count = 0
-            current_count = len(st.session_state.session_custom_tickers)
-            
-            for ticker in parsed_tickers:
-                if current_count + added_count < st.session_state.custom_ticker_limit:
-                    if ticker not in st.session_state.session_custom_tickers:
-                        st.session_state.session_custom_tickers.append(ticker)
-                        added_count += 1
-                else:
-                    break
-            
-            if added_count > 0:
-                st.success(f"✅ Added {added_count} ticker{'s' if added_count != 1 else ''}")
-            if added_count < len(parsed_tickers):
-                remaining = len(parsed_tickers) - added_count
-                st.warning(f"⚠️ {remaining} ticker{'s' if remaining != 1 else ''} skipped (limit reached)")
-        else:
-            st.error("❌ Enter at least one ticker symbol")
-    
-    # Display current custom tickers with remove functionality
-    if st.session_state.session_custom_tickers:
-        st.sidebar.write("**Current custom tickers:**")
-        
-        # Show count
-        count = len(st.session_state.session_custom_tickers)
-        limit = st.session_state.custom_ticker_limit
-        st.sidebar.caption(f"Selected: {count}/{limit} tickers")
-        
-        # Tag-style display with remove buttons
-        tickers_to_remove = []
-        for i, ticker in enumerate(st.session_state.session_custom_tickers):
-            col1, col2 = st.sidebar.columns([3, 1])
-            with col1:
-                st.write(f"🏷️ {ticker}")
-            with col2:
-                if st.button("❌", key=f"remove_custom_{i}", help=f"Remove {ticker}"):
-                    tickers_to_remove.append(ticker)
-        
-        # Remove tickers (done after iteration to avoid modification during iteration)
-        for ticker in tickers_to_remove:
-            st.session_state.session_custom_tickers.remove(ticker)
-            st.success(f"✅ Removed {ticker}")
-            st.rerun()
-        
-        # Clear all button
-        if st.sidebar.button("🗑️ Clear All Custom", key="clear_all_custom"):
-            st.session_state.session_custom_tickers = []
-            st.success("✅ Cleared all custom tickers")
-            st.rerun()
-    
-    # Database save toggle
-    st.sidebar.markdown("---")
-    st.session_state.save_custom_to_database = st.sidebar.checkbox(
-        "💾 Save custom tickers to database",
-        value=st.session_state.save_custom_to_database,
-        help="When checked, custom ticker data will be permanently cached for faster future access"
-    )
+
+    while not is_us_trading_day(
+        resolved_date
+    ):
+        resolved_date -= timedelta(days=1)
+
+    return resolved_date
 
 
 def create_sidebar_controls():
@@ -7453,200 +7214,440 @@ def create_sidebar_controls():
     }
     st.sidebar.info(f"Currently analyzing: **{bucket_names[st.session_state.selected_bucket]}**")
 
-    # STEP 3 & 4: Filter and Add Tickers for Selected Bucket
+    # STEP 3 & 4: Filter and temporarily augment the selected bucket.
+    #
+    # Persistent bucket membership/order/display names come from UniverseManager.
+    # Checkbox visibility and ad hoc ticker additions remain session-only.
     st.sidebar.markdown("---")
-    st.sidebar.subheader(f"🔧 Modify/Filter {bucket_names[st.session_state.selected_bucket]}")
-    
-    # Import needed functions
-    from config.assets import COUNTRY_ETFS, SECTOR_ETFS, get_tickers_only
-    
-    # Initialize bucket_save_to_db variable
-    bucket_save_to_db = True  # Default value
-    
+    st.sidebar.subheader(
+        f"🔧 Modify/Filter "
+        f"{bucket_names[st.session_state.selected_bucket]}"
+    )
+
+    universe_manager = UniverseManager()
+
+    selected_bucket_name = {
+        "country": "Country",
+        "sector": "Sector",
+        "custom": "Custom",
+    }[st.session_state.selected_bucket]
+
+    bucket_records = universe_manager.get_bucket_records(
+        selected_bucket_name
+    )
+
+    persistent_bucket_tickers = [
+        record.ticker
+        for record in bucket_records
+    ]
+
+    persistent_ticker_names = {
+        record.ticker: record.display_name
+        for record in bucket_records
+    }
+
     if st.session_state.selected_bucket == 'country':
-        # Initialize visible tickers if empty
-        all_country_tickers = get_tickers_only(COUNTRY_ETFS)
         if not st.session_state.country_visible_tickers:
-            st.session_state.country_visible_tickers = all_country_tickers.copy()
-        
-        # Country ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Country ETFs", expanded=False):
-            for ticker, display_name in COUNTRY_ETFS:
-                is_visible = ticker in st.session_state.country_visible_tickers
+            st.session_state.country_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
+
+        with st.sidebar.expander(
+            "📋 Show/Hide Country ETFs",
+            expanded=False,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.country_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_country_{ticker}"
+                    key=f"filter_country_{ticker}",
                 ):
-                    if ticker not in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.country_visible_tickers
+                    ):
+                        st.session_state.country_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.remove(ticker)
-            
-            st.caption(f"Showing: {len(st.session_state.country_visible_tickers)}/{len(all_country_tickers)} country ETFs")
-        
-        # Add new Country ETF
-        with st.sidebar.expander("➕ Add New Country ETF", expanded=False):
-            new_country_ticker = st.text_input(
-                "Country ETF Ticker:",
-                key="new_country_ticker_step4",
-                placeholder="e.g., EWK"
-            ).upper().strip()
-            
-            new_country_name = st.text_input(
-                "Display Name:",
-                key="new_country_name_step4", 
-                placeholder="e.g., Belgium"
-            ).strip()
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=True,
-                key="save_country_to_db",
-                help="Save historical data for faster future access"
+                        st.session_state.country_visible_tickers.remove(
+                            ticker
+                        )
+
+            st.caption(
+                f"Showing: "
+                f"{len(st.session_state.country_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} country ETFs"
             )
-            
-            if st.button("Add Country ETF", key="add_country_step4"):
-                if new_country_ticker and new_country_name:
-                    if new_country_ticker not in st.session_state.country_visible_tickers:
-                        st.session_state.country_visible_tickers.append(new_country_ticker)
-                        st.success(f"✅ Added {new_country_name} ({new_country_ticker}) to country ETFs")
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Country Ticker",
+            expanded=False,
+        ):
+            new_country_ticker = st.text_input(
+                "Ticker:",
+                key="new_country_ticker_step4",
+                placeholder="e.g., EWK",
+                help=(
+                    "Add a ticker to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
+            ).upper().strip()
+
+            if st.button(
+                "Add Temporary Ticker",
+                key="add_country_step4",
+            ):
+                if new_country_ticker:
+                    if (
+                        new_country_ticker
+                        not in st.session_state.country_visible_tickers
+                    ):
+                        st.session_state.country_visible_tickers.append(
+                            new_country_ticker
+                        )
+                        st.success(
+                            f"✅ Added {new_country_ticker} "
+                            "to this Country view"
+                        )
                     else:
-                        st.warning(f"⚠️ {new_country_ticker} already in your list")
+                        st.warning(
+                            f"⚠️ {new_country_ticker} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Please enter both ticker and display name")
-    
+                    st.error("❌ Enter a ticker symbol")
+
+            temporary_country_tickers = [
+                ticker
+                for ticker in st.session_state.country_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_country_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_country_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_country_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.country_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.country_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_country_temp_tickers",
+                ):
+                    st.session_state.country_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.country_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
+
     elif st.session_state.selected_bucket == 'sector':
-        # Initialize visible tickers if empty
-        all_sector_tickers = get_tickers_only(SECTOR_ETFS)
         if not st.session_state.sector_visible_tickers:
-            st.session_state.sector_visible_tickers = all_sector_tickers.copy()
-        
-        # Sector ETF filtering
-        with st.sidebar.expander("📋 Show/Hide Sector ETFs", expanded=False):
-            for ticker, display_name in SECTOR_ETFS:
-                is_visible = ticker in st.session_state.sector_visible_tickers
+            st.session_state.sector_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
+
+        with st.sidebar.expander(
+            "📋 Show/Hide Sector ETFs",
+            expanded=False,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.sector_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_sector_{ticker}"
+                    key=f"filter_sector_{ticker}",
                 ):
-                    if ticker not in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.sector_visible_tickers
+                    ):
+                        st.session_state.sector_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.remove(ticker)
-            
-            st.caption(f"Showing: {len(st.session_state.sector_visible_tickers)}/{len(all_sector_tickers)} sector ETFs")
-        
-        # Add new Sector ETF
-        with st.sidebar.expander("➕ Add New Sector ETF", expanded=False):
-            new_sector_ticker = st.text_input(
-                "Sector ETF Ticker:",
-                key="new_sector_ticker_step4",
-                placeholder="e.g., JETS"
-            ).upper().strip()
-            
-            new_sector_name = st.text_input(
-                "Display Name:",
-                key="new_sector_name_step4",
-                placeholder="e.g., Airlines"
-            ).strip()
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=True,
-                key="save_sector_to_db",
-                help="Save historical data for faster future access"
+                        st.session_state.sector_visible_tickers.remove(
+                            ticker
+                        )
+
+            st.caption(
+                f"Showing: "
+                f"{len(st.session_state.sector_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} sector ETFs"
             )
-            
-            if st.button("Add Sector ETF", key="add_sector_step4"):
-                if new_sector_ticker and new_sector_name:
-                    if new_sector_ticker not in st.session_state.sector_visible_tickers:
-                        st.session_state.sector_visible_tickers.append(new_sector_ticker)
-                        st.success(f"✅ Added {new_sector_name} ({new_sector_ticker}) to sector ETFs")
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Sector Ticker",
+            expanded=False,
+        ):
+            new_sector_ticker = st.text_input(
+                "Ticker:",
+                key="new_sector_ticker_step4",
+                placeholder="e.g., JETS",
+                help=(
+                    "Add a ticker to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
+            ).upper().strip()
+
+            if st.button(
+                "Add Temporary Ticker",
+                key="add_sector_step4",
+            ):
+                if new_sector_ticker:
+                    if (
+                        new_sector_ticker
+                        not in st.session_state.sector_visible_tickers
+                    ):
+                        st.session_state.sector_visible_tickers.append(
+                            new_sector_ticker
+                        )
+                        st.success(
+                            f"✅ Added {new_sector_ticker} "
+                            "to this Sector view"
+                        )
                     else:
-                        st.warning(f"⚠️ {new_sector_ticker} already in your list")
+                        st.warning(
+                            f"⚠️ {new_sector_ticker} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Please enter both ticker and display name")
-    
+                    st.error("❌ Enter a ticker symbol")
+
+            temporary_sector_tickers = [
+                ticker
+                for ticker in st.session_state.sector_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_sector_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_sector_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_sector_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.sector_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.sector_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_sector_temp_tickers",
+                ):
+                    st.session_state.sector_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.sector_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
+
     else:  # custom bucket
-        # Initialize visible tickers if empty.
-        # CUSTOM_DEFAULT may contain either plain ticker strings or
-        # (ticker, display_name) tuples; session state must store ticker strings only.
-        custom_default_tickers = get_tickers_only(CUSTOM_DEFAULT)
-
         if not st.session_state.custom_visible_tickers:
-            st.session_state.custom_visible_tickers = custom_default_tickers.copy()
-        
-        # Custom stock filtering
-        with st.sidebar.expander("📋 Show/Hide Custom Stocks", expanded=True):
-            for item in CUSTOM_DEFAULT:
-                if isinstance(item, tuple):
-                    ticker, display_name = item
-                else:
-                    ticker, display_name = item, item
+            st.session_state.custom_visible_tickers = (
+                persistent_bucket_tickers.copy()
+            )
 
-                is_visible = ticker in st.session_state.custom_visible_tickers
+        with st.sidebar.expander(
+            "📋 Show/Hide Custom Stocks",
+            expanded=True,
+        ):
+            for record in bucket_records:
+                ticker = record.ticker
+                display_name = record.display_name
+
+                is_visible = (
+                    ticker
+                    in st.session_state.custom_visible_tickers
+                )
+
                 if st.checkbox(
                     f"{display_name} ({ticker})",
                     value=is_visible,
-                    key=f"filter_custom_{ticker}"
+                    key=f"filter_custom_{ticker}",
                 ):
-                    if ticker not in st.session_state.custom_visible_tickers:
-                        st.session_state.custom_visible_tickers.append(ticker)
+                    if (
+                        ticker
+                        not in st.session_state.custom_visible_tickers
+                    ):
+                        st.session_state.custom_visible_tickers.append(
+                            ticker
+                        )
                 else:
                     if ticker in st.session_state.custom_visible_tickers:
-                        st.session_state.custom_visible_tickers.remove(ticker)
-            
+                        st.session_state.custom_visible_tickers.remove(
+                            ticker
+                        )
+
             st.caption(
-                f"Showing: {len(st.session_state.custom_visible_tickers)}/"
-                f"{len(custom_default_tickers)} custom stocks"
+                f"Showing: "
+                f"{len(st.session_state.custom_visible_tickers)}/"
+                f"{len(persistent_bucket_tickers)} custom stocks"
             )
-        
-        # Add new Custom Stocks
-        with st.sidebar.expander("➕ Add Custom Stocks", expanded=False):
+
+        with st.sidebar.expander(
+            "➕ Add Temporary Custom Ticker(s)",
+            expanded=False,
+        ):
             ticker_input = st.text_area(
                 "Add Ticker(s):",
                 key="custom_ticker_input_step4",
-                placeholder="Single: TSLA\nMultiple: AAPL, MSFT, GOOGL\n(comma or line separated)",
-                height=80
+                placeholder=(
+                    "Single: TSLA\n"
+                    "Multiple: AAPL, MSFT, GOOGL\n"
+                    "(comma or line separated)"
+                ),
+                height=80,
+                help=(
+                    "Add ticker(s) to this dashboard session only. "
+                    "This does not add universe membership or store OHLCV."
+                ),
             )
-            
-            # FIXED: Capture the bucket-specific toggle value
-            bucket_save_to_db = st.checkbox(
-                "💾 Save to database",
-                value=st.session_state.save_custom_to_database,
-                key="save_custom_to_db_step4",
-                help="Save historical data for faster future access"
-            )
-            
-            if st.button("Add Ticker(s)", key="add_custom_step4"):
+
+            if st.button(
+                "Add Temporary Ticker(s)",
+                key="add_custom_step4",
+            ):
                 if ticker_input.strip():
-                    # Parse input
                     parsed_tickers = []
-                    for line in ticker_input.replace(',', '\n').split('\n'):
+
+                    for line in (
+                        ticker_input
+                        .replace(',', '\n')
+                        .split('\n')
+                    ):
                         ticker = line.strip().upper()
-                        if ticker and ticker not in parsed_tickers:
-                            parsed_tickers.append(ticker)
-                    
-                    # Add tickers
+
+                        if (
+                            ticker
+                            and ticker not in parsed_tickers
+                        ):
+                            parsed_tickers.append(
+                                ticker
+                            )
+
                     added_count = 0
+
                     for ticker in parsed_tickers:
-                        if ticker not in st.session_state.custom_visible_tickers:
-                            st.session_state.custom_visible_tickers.append(ticker)
+                        if (
+                            ticker
+                            not in st.session_state.custom_visible_tickers
+                        ):
+                            st.session_state.custom_visible_tickers.append(
+                                ticker
+                            )
                             added_count += 1
-                    
+
                     if added_count > 0:
-                        st.success(f"✅ Added {added_count} ticker{'s' if added_count != 1 else ''}")
+                        st.success(
+                            f"✅ Added {added_count} "
+                            f"temporary ticker"
+                            f"{'s' if added_count != 1 else ''}"
+                        )
+
                     if added_count < len(parsed_tickers):
-                        skipped = len(parsed_tickers) - added_count
-                        st.info(f"ℹ️ {skipped} ticker{'s' if skipped != 1 else ''} already in list")
+                        skipped = (
+                            len(parsed_tickers)
+                            - added_count
+                        )
+                        st.info(
+                            f"ℹ️ {skipped} ticker"
+                            f"{'s' if skipped != 1 else ''} "
+                            "already in this view"
+                        )
                 else:
-                    st.error("❌ Enter at least one ticker symbol")
+                    st.error(
+                        "❌ Enter at least one ticker symbol"
+                    )
+
+            temporary_custom_tickers = [
+                ticker
+                for ticker in st.session_state.custom_visible_tickers
+                if ticker not in persistent_bucket_tickers
+            ]
+
+            if temporary_custom_tickers:
+                st.caption("Temporary tickers:")
+
+                for ticker in temporary_custom_tickers:
+                    remove_col, label_col = st.columns([1, 4])
+
+                    with remove_col:
+                        if st.button(
+                            "❌",
+                            key=f"remove_custom_temp_{ticker}",
+                            help=f"Remove {ticker} from this session view",
+                        ):
+                            st.session_state.custom_visible_tickers = [
+                                existing
+                                for existing
+                                in st.session_state.custom_visible_tickers
+                                if existing != ticker
+                            ]
+                            st.rerun()
+
+                    with label_col:
+                        st.write(ticker)
+
+                if st.button(
+                    "Clear Temporary Tickers",
+                    key="clear_custom_temp_tickers",
+                ):
+                    st.session_state.custom_visible_tickers = [
+                        ticker
+                        for ticker
+                        in st.session_state.custom_visible_tickers
+                        if ticker in persistent_bucket_tickers
+                    ]
+                    st.rerun()
 
     # Ticker Aggregation Based on Selected Bucket
     st.sidebar.markdown("---")
@@ -7720,7 +7721,72 @@ def create_sidebar_controls():
     )
     selected_period = period_options[selected_period_name]
 
-    if st.session_state.selected_analysis_mode == 'volume':
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Snapshot")
+
+    snapshot_mode = st.sidebar.radio(
+        "Observation:",
+        options=['latest', 'historical'],
+        format_func=lambda value: {
+            'latest': 'Latest',
+            'historical': 'Historical date',
+        }[value],
+        index=0,
+        key='performance_snapshot_mode',
+        help=(
+            "Latest preserves the current Performance Heatmap behavior. "
+            "Historical date evaluates Price or Volume as of a selected "
+            "past trading session."
+        ),
+    )
+
+    selected_snapshot_date = None
+    effective_snapshot_day = None
+
+    if snapshot_mode == 'historical':
+        default_snapshot_date = (
+            get_last_completed_trading_day().date()
+        )
+
+        selected_snapshot_date = (
+            st.sidebar.date_input(
+                "Historical date:",
+                value=default_snapshot_date,
+                max_value=datetime.now().date(),
+                key='performance_snapshot_date',
+                help=(
+                    "Choose the observation date for the Performance "
+                    "Heatmap. Weekend and market-holiday selections "
+                    "resolve backward to the nearest trading session."
+                ),
+            )
+        )
+
+        effective_snapshot_day = (
+            _resolve_performance_snapshot_date(
+                selected_snapshot_date
+            )
+        )
+
+        if (
+            effective_snapshot_day.date()
+            != selected_snapshot_date
+        ):
+            st.sidebar.caption(
+                "Resolved trading session: "
+                f"{effective_snapshot_day.strftime('%m/%d/%y')}"
+            )
+        else:
+            st.sidebar.caption(
+                "Observation session: "
+                f"{effective_snapshot_day.strftime('%m/%d/%y')}"
+            )
+
+    if (
+        st.session_state.selected_analysis_mode
+        == 'volume'
+        and snapshot_mode == 'latest'
+    ):
         view_last_complete_day = st.sidebar.toggle(
             "View last complete day",
             value=False,
@@ -7737,6 +7803,13 @@ def create_sidebar_controls():
             if view_last_complete_day
             else 'live'
         )
+
+    elif (
+        st.session_state.selected_analysis_mode
+        == 'volume'
+    ):
+        volume_view_mode = 'historical'
+
     else:
         volume_view_mode = None
     
@@ -7748,17 +7821,19 @@ def create_sidebar_controls():
         use_container_width=True
     )
     
-    # FIXED: Return the actual bucket-specific database toggle value
     return {
         'group': asset_group,
         'group_name': group_name,
         'tickers': final_tickers,
+        'ticker_names': persistent_ticker_names,
         'period': selected_period,
         'period_name': selected_period_name,
         'refresh': refresh_button,
-        'database_save': bucket_save_to_db,  # ← NOW USES BUCKET-SPECIFIC TOGGLE
         'analysis_mode': st.session_state.selected_analysis_mode,
         'volume_view_mode': volume_view_mode,
+        'snapshot_mode': snapshot_mode,
+        'snapshot_selected_date': selected_snapshot_date,
+        'snapshot_effective_day': effective_snapshot_day,
     }
 
 
@@ -7786,7 +7861,12 @@ def create_header():
                     unsafe_allow_html=True
                 )
 
-def fetch_performance_data(tickers, period, save_to_db: bool = True):
+def fetch_performance_data(
+    tickers,
+    period,
+    save_to_db: bool = True,
+    effective_day: Optional[datetime] = None,
+):
     """Fetch performance data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching data for {len(tickers)} tickers..."):
         # Create progress bar
@@ -7804,6 +7884,7 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
                     tickers,
                     period,
                     save_to_db=save_to_db,
+                    effective_day=effective_day,
                 )
             )
 
@@ -7813,6 +7894,16 @@ def fetch_performance_data(tickers, period, save_to_db: bool = True):
 
             for item in performance_data:
                 if item.get('error', False):
+                    continue
+
+                if effective_day is not None:
+                    item['live_volume_context'] = (
+                        volume_calculator.get_completed_volume_context(
+                            item['ticker'],
+                            save_to_db=save_to_db,
+                            effective_day=effective_day,
+                        )
+                    )
                     continue
 
                 price_metadata = (
@@ -7869,6 +7960,7 @@ def fetch_volume_data(
     period,
     observation_mode='live',
     save_to_db: bool = True,
+    effective_day: Optional[datetime] = None,
 ):
     """Fetch volume data with progress tracking and database usage reporting"""
     with st.spinner(f"Fetching volume data for {len(tickers)} tickers..."):
@@ -7882,7 +7974,18 @@ def fetch_volume_data(
         status_text.text(f"Processing {len(tickers)} tickers using database-first approach...")
         
         try:
-            if observation_mode == 'completed':
+            if observation_mode == 'historical':
+                volume_data = (
+                    volume_calculator
+                    .calculate_completed_volume_performance_for_group(
+                        tickers,
+                        period,
+                        effective_day=effective_day,
+                        save_to_db=save_to_db,
+                    )
+                )
+
+            elif observation_mode == 'completed':
                 volume_data = (
                     volume_calculator
                     .calculate_latest_completed_volume_performance_for_group(
@@ -7891,6 +7994,7 @@ def fetch_volume_data(
                         save_to_db=save_to_db,
                     )
                 )
+
             else:
                 volume_data = (
                     volume_calculator
@@ -7943,8 +8047,14 @@ def fetch_volume_data(
         
         return volume_data
 
-def display_summary_stats(performance_data):
+def display_summary_stats(
+    performance_data,
+    ticker_names=None,
+):
     """Display summary statistics"""
+    ticker_names = dict(
+        ticker_names or {}
+    )
     generator = st.session_state.heatmap_generator
     stats = generator.create_summary_stats(performance_data)
     
@@ -8002,21 +8112,6 @@ def display_summary_stats(performance_data):
             performance_key = 'volume_change'
 
     if performance_key:
-        selected_bucket = st.session_state.get(
-            'selected_bucket',
-            'custom',
-        )
-
-        ticker_names = dict(
-            ASSET_GROUPS.get(
-                selected_bucket,
-                {},
-            ).get(
-                'ticker_names',
-                {},
-            )
-        )
-
         best_performers = sorted(
             valid_data,
             key=lambda item: item[performance_key],
@@ -8083,11 +8178,11 @@ def display_heatmap(
     title,
     asset_group=None,
     tile_order='original',
+    ticker_names=None,
 ):
     """Display the main heatmap visualization"""
     generator = st.session_state.heatmap_generator
-    
-    # Create heatmap with asset group information
+
     fig = generator.create_treemap(
         performance_data=performance_data,
         title=title,
@@ -8095,6 +8190,7 @@ def display_heatmap(
         height=700,
         asset_group=asset_group,
         tile_order=tile_order,
+        ticker_names=ticker_names,
     )
     
     # Display with full width
@@ -8926,11 +9022,19 @@ def show_technical_analysis_dashboard():
         st.session_state.rh_days_selector = int(st.session_state.get("technical_analysis_rolling_days", 10))
     
     with col2:
-        # Save to database checkbox (only for non-bucket tickers)
+        # Optional database persistence for non-universe tickers.
+        # Persistent universe members enable this automatically.
         save_to_db_checkbox = st.checkbox(
-            "Save to database (Tracker)",
+            "Save fetched data to database",
             value=False,
-            help="Check to permanently track this ticker with daily updates. Bucket tickers (Country/Sector/Custom) are always saved.",
+            help=(
+                "When enabled, data fetched during this Technical Analysis "
+                "run may be stored in the database for future reuse. This "
+                "does not add the ticker to the Custom, Sector, or Country "
+                "universe. Persistent universe membership is managed in "
+                "Data Management. Tickers already in a persistent universe "
+                "bucket use database persistence automatically."
+            ),
             key="ta_save_to_db_checkbox"
         )
     
@@ -8973,13 +9077,25 @@ def show_technical_analysis_dashboard():
             # Keep current_ticker if other dashboards reference it
             st.session_state.current_ticker = ticker
 
-            # Info message (unchanged)
+            # Explain the resolved persistence policy without conflating
+            # database storage with persistent universe membership.
             if is_bucket:
-                st.info(f"ℹ️ {ticker} is a bucket ticker and will be automatically tracked with daily updates.")
+                st.info(
+                    f"ℹ️ {ticker} is in the persistent ticker universe; "
+                    "database persistence is enabled automatically."
+                )
             elif save_to_db_checkbox:
-                st.info(f"ℹ️ {ticker} will be added to tracking list with daily updates.")
+                st.info(
+                    f"ℹ️ {ticker} analysis may save fetched data to the "
+                    "database for future reuse. This does not add the ticker "
+                    "to the persistent ticker universe."
+                )
             else:
-                st.info(f"ℹ️ {ticker} analysis is session-only. Check 'Save to database' to track permanently.")
+                st.info(
+                    f"ℹ️ {ticker} analysis is session-only; fetched data "
+                    "will not be intentionally persisted by this Technical "
+                    "Analysis run."
+                )
 
             with st.spinner(f"Analyzing {ticker}..."):
                 try:
@@ -9905,10 +10021,21 @@ def show_performance_heatmaps():
     # Cache identity is based on the exact data request rather than the number
     # of successful rows returned. Individual ticker errors therefore remain a
     # valid cached result for the request that produced them.
+    snapshot_date_key = (
+        controls['snapshot_effective_day'].strftime(
+            '%Y-%m-%d'
+        )
+        if controls['snapshot_effective_day']
+        is not None
+        else None
+    )
+
     if controls['analysis_mode'] == 'volume':
         current_request_signature = (
             controls['analysis_mode'],
             controls['period'],
+            controls['snapshot_mode'],
+            snapshot_date_key,
             controls['volume_view_mode'],
             tuple(controls['tickers']),
         )
@@ -9916,6 +10043,8 @@ def show_performance_heatmaps():
         current_request_signature = (
             controls['analysis_mode'],
             controls['period'],
+            controls['snapshot_mode'],
+            snapshot_date_key,
             tuple(controls['tickers']),
         )
 
@@ -9951,7 +10080,10 @@ def show_performance_heatmaps():
             performance_data = fetch_performance_data(
                 controls['tickers'],
                 controls['period'],
-                save_to_db=controls['database_save']
+                save_to_db=False,
+                effective_day=controls[
+                    'snapshot_effective_day'
+                ],
             )
 
             # Store in session state.
@@ -9980,7 +10112,10 @@ def show_performance_heatmaps():
                 observation_mode=controls[
                     'volume_view_mode'
                 ],
-                save_to_db=controls['database_save'],
+                save_to_db=False,
+                effective_day=controls[
+                    'snapshot_effective_day'
+                ],
             )
 
             # Store in session state using the same request-identity contract as
@@ -10020,7 +10155,9 @@ def show_performance_heatmaps():
         if controls['analysis_mode'] == 'price':
             title = f"{controls['group_name']} - {controls['period_name']} Performance"
         else:  # volume mode
-            if controls['volume_view_mode'] == 'completed':
+            if controls['volume_view_mode'] == 'historical':
+                volume_title_prefix = "Historical Volume"
+            elif controls['volume_view_mode'] == 'completed':
                 volume_title_prefix = "Last Complete Volume"
             else:
                 volume_title_prefix = "Current Volume"
@@ -10033,7 +10170,12 @@ def show_performance_heatmaps():
         
         # Display summary statistics
         st.subheader("📊 Summary Statistics")
-        display_summary_stats(current_data)
+        display_summary_stats(
+            current_data,
+            ticker_names=controls[
+                'ticker_names'
+            ],
+        )
         
         st.markdown("---")
         
@@ -10052,6 +10194,24 @@ def show_performance_heatmaps():
             horizontal=True,
             key='performance_heatmap_tile_order',
         )
+
+        if (
+            controls['snapshot_mode'] == 'historical'
+            and controls['snapshot_selected_date']
+            is not None
+            and controls['snapshot_effective_day']
+            is not None
+            and controls['snapshot_selected_date']
+            != controls[
+                'snapshot_effective_day'
+            ].date()
+        ):
+            st.caption(
+                "Selected Date: "
+                f"{pd.Timestamp(controls['snapshot_selected_date']).strftime('%m/%d/%y')}"
+                " → Resolved Trading Session: "
+                f"{controls['snapshot_effective_day'].strftime('%m/%d/%y')}"
+            )
 
         # Add timestamp and baseline date info (only for price mode)
         if controls['analysis_mode'] == 'price':
@@ -10137,31 +10297,36 @@ def show_performance_heatmaps():
                 )
 
             if timestamp_caption:
+                price_caption_label = (
+                    "As of"
+                    if controls['snapshot_mode']
+                    == 'historical'
+                    else "Timestamp"
+                )
+
                 st.caption(
-                    f"Timestamp: {timestamp_caption}"
+                    f"{price_caption_label}: "
+                    f"{timestamp_caption}"
                 )
 
             baseline_date = None
 
             if valid_items:
-                period = valid_items[0].get(
-                    'period',
-                    '1d',
-                )
-
-                from src.calculations.performance import (
-                    get_baseline_date_for_display,
-                )
-
                 baseline_date_str = (
-                    get_baseline_date_for_display(
-                        period
+                    valid_items[0].get(
+                        'baseline_date'
                     )
                 )
-                baseline_date = datetime.strptime(
-                    baseline_date_str,
-                    '%Y-%m-%d',
-                ).strftime('%m/%d/%y')
+
+                if baseline_date_str:
+                    try:
+                        baseline_date = (
+                            pd.Timestamp(
+                                baseline_date_str
+                            ).strftime('%m/%d/%y')
+                        )
+                    except Exception:
+                        baseline_date = None
 
             if baseline_date:
                 st.caption(
@@ -10247,19 +10412,92 @@ def show_performance_heatmaps():
                 label = (
                     "As of"
                     if controls['volume_view_mode']
-                    == 'completed'
+                    in {
+                        'completed',
+                        'historical',
+                    }
                     else "Timestamp"
                 )
 
                 st.caption(
                     f"{label}: {volume_caption}"
                 )
+
+            benchmark_context = None
+
+            if valid_volume_items:
+                benchmark_context = (
+                    (
+                        valid_volume_items[0].get(
+                            'volume_context'
+                        )
+                        or {}
+                    )
+                    .get(
+                        'volume_comparisons',
+                        {},
+                    )
+                    .get(
+                        controls['period'],
+                        {},
+                    )
+                )
+
+            if benchmark_context:
+                benchmark_start = (
+                    benchmark_context.get(
+                        'benchmark_start_date'
+                    )
+                )
+                benchmark_end = (
+                    benchmark_context.get(
+                        'benchmark_end_date'
+                    )
+                )
+                benchmark_count = (
+                    benchmark_context.get(
+                        'benchmark_session_count'
+                    )
+                )
+
+                if (
+                    benchmark_start
+                    and benchmark_end
+                    and benchmark_count
+                ):
+                    benchmark_start_label = (
+                        pd.Timestamp(
+                            benchmark_start
+                        ).strftime('%m/%d/%y')
+                    )
+                    benchmark_end_label = (
+                        pd.Timestamp(
+                            benchmark_end
+                        ).strftime('%m/%d/%y')
+                    )
+
+                    if int(benchmark_count) == 1:
+                        st.caption(
+                            "Benchmark Date: "
+                            f"{benchmark_end_label}"
+                        )
+                    else:
+                        st.caption(
+                            "Benchmark Window: "
+                            f"{benchmark_start_label} → "
+                            f"{benchmark_end_label} "
+                            f"({int(benchmark_count)} "
+                            "completed sessions)"
+                        )
         
         display_heatmap(
             current_data,
             title,
             controls['group'],
             tile_order=selected_tile_order,
+            ticker_names=controls[
+                'ticker_names'
+            ],
         )
 
         # Display data table
@@ -10327,6 +10565,23 @@ def show_stock_comparison_dashboard():
     # routing behavior when switching between analysis modes.
     st.session_state.scd_analysis_mode = analysis_mode
 
+    if st.session_state.get(
+        _DATA_MANAGEMENT_SCD_STALE_KEY,
+        False,
+    ):
+        rebuild_action = (
+            "Rebuild Time-Series Matrix"
+            if analysis_mode == "Single Indicator"
+            else "Rebuild Comparison Matrix"
+        )
+
+        st.warning(
+            "The underlying authoritative OHLCV data has changed since "
+            "the previous Stock Comparison results were built. "
+            f"Click **{rebuild_action}** to rebuild this view from the "
+            "updated data."
+        )
+
     selected_tickers = _render_scd_ticker_controls()
 
     if selected_tickers:
@@ -10369,6 +10624,10 @@ def show_stock_comparison_dashboard():
             selected_tickers
             and selected_single_indicator
             and st.session_state.get("scd_single_indicator_matrix") is None
+            and not st.session_state.get(
+                _DATA_MANAGEMENT_SCD_STALE_KEY,
+                False,
+            )
         )
 
         if build_single_clicked or should_auto_build_single:
@@ -10391,6 +10650,22 @@ def show_stock_comparison_dashboard():
                     )
                 )
                 st.session_state.scd_single_indicator_matrix_last_run = datetime.now()
+
+            if build_single_clicked:
+                stale_rebuild_completed = bool(
+                    st.session_state.get(
+                        _DATA_MANAGEMENT_SCD_STALE_KEY,
+                        False,
+                    )
+                )
+
+                st.session_state.pop(
+                    _DATA_MANAGEMENT_SCD_STALE_KEY,
+                    None,
+                )
+
+                if stale_rebuild_completed:
+                    st.rerun()
 
         single_matrix = st.session_state.get("scd_single_indicator_matrix")
 
@@ -11051,6 +11326,21 @@ def show_stock_comparison_dashboard():
             )
             st.session_state.scd_matrix_last_run = datetime.now().isoformat(timespec="seconds")
 
+        stale_rebuild_completed = bool(
+            st.session_state.get(
+                _DATA_MANAGEMENT_SCD_STALE_KEY,
+                False,
+            )
+        )
+
+        st.session_state.pop(
+            _DATA_MANAGEMENT_SCD_STALE_KEY,
+            None,
+        )
+
+        if stale_rebuild_completed:
+            st.rerun()
+
         refreshed_matrix = st.session_state.get("scd_signal_matrix")
         refreshed_profile = (
             refreshed_matrix.get("profile", {})
@@ -11126,6 +11416,7256 @@ def show_stock_comparison_dashboard():
     with st.expander("Cache diagnostics", expanded=False):
         _render_scd_cache_diagnostics()
 
+
+# ---------------------------------------------------------------------
+# Data Management acquisition + mutation UI helpers
+# ---------------------------------------------------------------------
+
+_DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY = (
+    "data_management_acquisition_context"
+)
+
+_DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY = (
+    "data_management_manual_entry_context"
+)
+
+_DATA_MANAGEMENT_MUTATION_PLAN_KEY = (
+    "data_management_mutation_plan"
+)
+_DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY = (
+    "data_management_mutation_confirmed_fingerprint"
+)
+_DATA_MANAGEMENT_MUTATION_RESULT_KEY = (
+    "data_management_mutation_result"
+)
+_DATA_MANAGEMENT_MUTATION_ERROR_KEY = (
+    "data_management_mutation_error"
+)
+_DATA_MANAGEMENT_SCD_STALE_KEY = (
+    "data_management_scd_stale"
+)
+
+_DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY = (
+    "data_management_maintenance_request"
+)
+
+
+def _prepare_data_management_maintenance_request(
+    request: Dict[str, Any],
+) -> None:
+    """
+    Prepare one session-only Ticker Diagnostics maintenance handoff.
+
+    This helper may preselect the existing acquisition operation and stored
+    ticker controls. It does not acquire source data, build a MutationPlan,
+    approve changes, commit changes, or write to SQLite.
+    """
+    if not isinstance(
+        request,
+        dict,
+    ):
+        return
+
+    operation = str(
+        request.get(
+            "operation",
+            "",
+        )
+    ).strip()
+
+    if operation not in {
+        "Update to Current",
+        "Repair Missing",
+        "Repair Duplicate Stored Keys",
+    }:
+        return
+
+    ticker = str(
+        request.get(
+            "ticker",
+            "",
+        )
+    ).strip().upper()
+
+    if not ticker:
+        return
+
+    if st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    ) is not None:
+        return
+
+    normalized_request = dict(
+        request
+    )
+
+    normalized_request[
+        "operation"
+    ] = operation
+    normalized_request[
+        "ticker"
+    ] = ticker
+    normalized_request[
+        "origin"
+    ] = str(
+        normalized_request.get(
+            "origin",
+            "Ticker Diagnostics",
+        )
+    ).strip() or "Ticker Diagnostics"
+
+    st.session_state[
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY
+    ] = normalized_request
+
+    st.session_state[
+        "data_management_acquisition_operation"
+    ] = operation
+
+    st.session_state[
+        "data_management_acquisition_maintenance_ticker"
+    ] = ticker
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+        None,
+    )
+
+
+def _build_data_management_acquisition_context(
+    result: DataAcquisitionResult,
+) -> Dict[str, Any]:
+    """
+    Build UI-only acquisition context for the active mutation Preview.
+
+    This context preserves the distinction between the administrator's
+    original requested interval and the effective persistence scope passed
+    to DataMutationManager. It is display state only; MutationPlan remains
+    authoritative for Preview / Confirm / Commit.
+    """
+    if not isinstance(
+        result,
+        DataAcquisitionResult,
+    ):
+        raise TypeError(
+            "result must be a DataAcquisitionResult."
+        )
+
+    return {
+        "source": result.source,
+        "requested_tickers": list(
+            result.requested_tickers
+        ),
+        "requested_start_date": (
+            result.requested_start_date.isoformat()
+        ),
+        "requested_end_date": (
+            result.requested_end_date.isoformat()
+        ),
+        "effective_start_date": (
+            result.effective_start_date.isoformat()
+            if result.effective_start_date is not None
+            else None
+        ),
+        "effective_end_date": (
+            result.effective_end_date.isoformat()
+            if result.effective_end_date is not None
+            else None
+        ),
+        "latest_expected_stored_session": (
+            result.latest_expected_stored_session.isoformat()
+        ),
+        "yfinance_end_exclusive": (
+            result.yfinance_end_exclusive.isoformat()
+            if result.yfinance_end_exclusive is not None
+            else None
+        ),
+        "candidate_count": len(
+            result.candidates
+        ),
+        "issues": [
+            {
+                "level": issue.level,
+                "code": issue.code,
+                "message": issue.message,
+                "ticker": issue.ticker,
+            }
+            for issue in result.issues
+        ],
+    }
+
+
+def _render_data_management_acquisition_context(
+    context: Dict[str, Any],
+) -> None:
+    """Render the source request and effective persistence scope."""
+    if not isinstance(
+        context,
+        dict,
+    ):
+        return
+
+    st.caption(
+        "Canonical source: "
+        f"{context.get('source') or '—'}"
+    )
+
+    scope_columns = st.columns(4)
+
+    scope_columns[0].metric(
+        "Requested Start",
+        context.get(
+            "requested_start_date"
+        ) or "—",
+    )
+    scope_columns[1].metric(
+        "Requested End",
+        context.get(
+            "requested_end_date"
+        ) or "—",
+    )
+    scope_columns[2].metric(
+        "Effective Start",
+        context.get(
+            "effective_start_date"
+        ) or "—",
+    )
+    scope_columns[3].metric(
+        "Effective End",
+        context.get(
+            "effective_end_date"
+        ) or "—",
+    )
+
+    persistence_columns = st.columns(3)
+
+    persistence_columns[0].metric(
+        "Latest Expected Stored Session",
+        context.get(
+            "latest_expected_stored_session"
+        ) or "—",
+    )
+    persistence_columns[1].metric(
+        "Source Candidates",
+        f"{context.get('candidate_count', 0):,}",
+    )
+    persistence_columns[2].metric(
+        "yFinance Exclusive End",
+        context.get(
+            "yfinance_end_exclusive"
+        ) or "—",
+    )
+
+    acquisition_issues = context.get(
+        "issues",
+        [],
+    )
+
+    for issue in acquisition_issues:
+        ticker = issue.get(
+            "ticker"
+        )
+
+        prefix = (
+            f"{ticker}: "
+            if ticker
+            else ""
+        )
+
+        message = (
+            prefix
+            + str(
+                issue.get(
+                    "message",
+                    "",
+                )
+            )
+        )
+
+        if issue.get(
+            "level"
+        ) == "error":
+            st.error(message)
+        else:
+            st.warning(message)
+
+
+def _render_data_management_acquisition_controls(
+    *,
+    inventory: list[Dict[str, Any]],
+    database_manager: DatabaseManager,
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render canonical Data Management acquisition and maintenance workflows.
+
+    Supported operations:
+    - Add Market Data
+    - Update to Current
+    - Repair Missing
+    - Repair Duplicate Stored Keys
+    - Backfill Earlier
+
+    Acquisition remains read-only. Build Preview passes the exact effective
+    source result into DataMutationManager.build_plan(); the existing mutation
+    workflow continues to own Preview / Approve / Apply.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if (
+        isinstance(
+            active_plan,
+            MutationPlan,
+        )
+        and active_plan.operation
+        in {
+            "Manual Add",
+            "Manual Replace",
+        }
+    ):
+        return
+
+    st.markdown("---")
+    st.subheader("Acquire Market Data")
+
+    st.caption(
+        "Acquire canonical daily OHLCV from yFinance and preview the exact "
+        "database actions before anything is saved. Review the preview, "
+        "approve it, then apply the approved changes."
+    )
+
+    acquisition_context = st.session_state.get(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    )
+
+    maintenance_request = st.session_state.get(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY
+    )
+
+    if active_plan is not None:
+        context_workflow = (
+            acquisition_context.get(
+                "workflow"
+            )
+            if isinstance(
+                acquisition_context,
+                dict,
+            )
+            else None
+        )
+
+        if context_workflow != "Historical Data Reconciliation":
+            st.info(
+                "A Database Change Preview is active. Approve and apply it, "
+                "or Cancel Preview, before changing the acquisition request."
+            )
+
+            if isinstance(
+                acquisition_context,
+                dict,
+            ):
+                _render_data_management_acquisition_context(
+                    acquisition_context
+                )
+
+        return
+
+    try:
+        default_end_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_end_date = date.today()
+
+    operation_labels = [
+        "Add Market Data",
+        "Update to Current",
+        "Repair Missing",
+        "Repair Duplicate Stored Keys",
+        "Backfill Earlier",
+    ]
+
+    selected_operation = st.radio(
+        "Acquisition Operation",
+        options=operation_labels,
+        horizontal=True,
+        key="data_management_acquisition_operation",
+        help=(
+            "Add Market Data uses an explicit ticker/date request. "
+            "Update to Current fills the stale tail after a stored ticker's "
+            "Last Date. Repair Missing reacquires the envelope containing "
+            "known Internal Gaps while preserving existing rows. Repair "
+            "Duplicate Stored Keys reacquires canonical source observations "
+            "for exact duplicate ticker/date keys and replaces every stored "
+            "physical copy with one canonical row. Backfill Earlier extends "
+            "stored history before the current First Date."
+        ),
+    )
+
+    inventory_by_ticker = {
+        str(
+            row.get(
+                "ticker",
+                "",
+            )
+        ).strip().upper(): row
+        for row in inventory
+        if str(
+            row.get(
+                "ticker",
+                "",
+            )
+        ).strip()
+    }
+
+    stored_tickers = sorted(
+        inventory_by_ticker
+    )
+
+    requested_tickers: list[str] = []
+    requested_start_date: Optional[date] = None
+    requested_end_date: Optional[date] = None
+    backend_operation: Optional[str] = None
+    build_preview_clicked = False
+
+    if selected_operation == "Add Market Data":
+        backend_operation = "Add"
+
+        with st.form(
+            "data_management_acquisition_form"
+        ):
+            ticker_input = st.text_input(
+                "Ticker(s)",
+                value="",
+                help=(
+                    "Enter one or more ticker symbols separated by commas "
+                    "or spaces."
+                ),
+            )
+
+            date_columns = st.columns(2)
+
+            with date_columns[0]:
+                requested_start_date = st.date_input(
+                    "Start Date",
+                    value=default_end_date,
+                )
+
+            with date_columns[1]:
+                requested_end_date = st.date_input(
+                    "End Date",
+                    value=default_end_date,
+                )
+
+            build_preview_clicked = (
+                st.form_submit_button(
+                    "Preview Database Changes",
+                    type="primary",
+                    use_container_width=True,
+                    help=(
+                        "Fetch the requested yFinance data and compare it with "
+                        "the authoritative database. This does not save or "
+                        "replace any records."
+                    ),
+                )
+            )
+
+        if build_preview_clicked:
+            requested_tickers = [
+                ticker
+                for ticker in (
+                    str(ticker_input)
+                    .replace(",", " ")
+                    .split()
+                )
+                if ticker
+            ]
+
+    else:
+        if not stored_tickers:
+            st.warning(
+                "No stored tickers are available for this maintenance "
+                "operation."
+            )
+            return
+
+        selected_ticker = st.selectbox(
+            "Stored Ticker",
+            options=stored_tickers,
+            key="data_management_acquisition_maintenance_ticker",
+            help=(
+                "Choose one ticker currently stored in daily_prices."
+            ),
+        )
+
+        selected_inventory = (
+            inventory_by_ticker[
+                selected_ticker
+            ]
+        )
+
+        if isinstance(
+            maintenance_request,
+            dict,
+        ):
+            prepared_operation = str(
+                maintenance_request.get(
+                    "operation",
+                    "",
+                )
+            ).strip()
+            prepared_ticker = str(
+                maintenance_request.get(
+                    "ticker",
+                    "",
+                )
+            ).strip().upper()
+
+            if (
+                prepared_operation
+                == selected_operation
+                and prepared_ticker
+                == selected_ticker
+            ):
+                reason = str(
+                    maintenance_request.get(
+                        "reason",
+                        "",
+                    )
+                ).strip()
+
+                suggested_start = (
+                    maintenance_request.get(
+                        "suggested_start_date"
+                    )
+                )
+                suggested_end = (
+                    maintenance_request.get(
+                        "suggested_end_date"
+                    )
+                )
+
+                prepared_message = (
+                    "Prepared from Ticker Diagnostics"
+                )
+
+                if reason:
+                    prepared_message += (
+                        f": {reason}"
+                    )
+
+                st.info(
+                    prepared_message
+                )
+
+                if (
+                    suggested_start
+                    and suggested_end
+                ):
+                    st.caption(
+                        "Diagnostic-derived request scope: "
+                        f"{suggested_start} → "
+                        f"{suggested_end}. "
+                        "Review the authoritative scope below, then explicitly "
+                        "build the Preview when ready."
+                    )
+
+                evidence = (
+                    maintenance_request.get(
+                        "evidence",
+                        {},
+                    )
+                )
+
+                if isinstance(
+                    evidence,
+                    dict,
+                ):
+                    if (
+                        selected_operation
+                        == "Repair Missing"
+                    ):
+                        gap_count = int(
+                            evidence.get(
+                                "internal_gap_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        gap_range_count = len(
+                            evidence.get(
+                                "internal_gap_ranges",
+                                [],
+                            )
+                            or []
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{gap_count:,} missing expected session(s) "
+                            f"across {gap_range_count:,} Internal Gap "
+                            "range(s)."
+                        )
+
+                    elif (
+                        selected_operation
+                        == "Update to Current"
+                    ):
+                        tail_count = int(
+                            evidence.get(
+                                "missing_tail_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        tail_range_count = len(
+                            evidence.get(
+                                "missing_tail_ranges",
+                                [],
+                            )
+                            or []
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{tail_count:,} missing expected tail session(s) "
+                            f"across {tail_range_count:,} tail range(s)."
+                        )
+
+                    elif (
+                        selected_operation
+                        == "Repair Duplicate Stored Keys"
+                    ):
+                        duplicate_key_count = int(
+                            evidence.get(
+                                "duplicate_stored_key_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        excess_row_count = int(
+                            evidence.get(
+                                "duplicate_stored_excess_rows",
+                                0,
+                            )
+                            or 0
+                        )
+
+                        st.caption(
+                            "Diagnostic evidence carried forward: "
+                            f"{duplicate_key_count:,} duplicate stored "
+                            "(Ticker, Date) key(s), representing "
+                            f"{excess_row_count:,} excess physical row(s)."
+                        )
+            else:
+                st.session_state.pop(
+                    _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+                    None,
+                )
+                maintenance_request = None
+
+        stored_columns = st.columns(4)
+
+        stored_columns[0].metric(
+            "Stored Records",
+            f"{int(selected_inventory.get('records', 0) or 0):,}",
+        )
+        stored_columns[1].metric(
+            "First Stored Date",
+            selected_inventory.get(
+                "first_date"
+            ) or "—",
+        )
+        stored_columns[2].metric(
+            "Last Stored Date",
+            selected_inventory.get(
+                "last_date"
+            ) or "—",
+        )
+        stored_columns[3].metric(
+            "Status",
+            selected_inventory.get(
+                "status"
+            ) or "—",
+        )
+
+        requested_tickers = [
+            selected_ticker
+        ]
+
+        maintenance_request_ready = True
+
+        if selected_operation == "Update to Current":
+            backend_operation = "Update to Current"
+
+            try:
+                last_stored_date = date.fromisoformat(
+                    str(
+                        selected_inventory[
+                            "last_date"
+                        ]
+                    )
+                )
+                requested_start_date = (
+                    last_stored_date
+                    + timedelta(days=1)
+                )
+                requested_end_date = (
+                    default_end_date
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored Last Date for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            scope_columns = st.columns(2)
+
+            scope_columns[0].metric(
+                "Update From",
+                requested_start_date.isoformat(),
+            )
+            scope_columns[1].metric(
+                "Update Through",
+                requested_end_date.isoformat(),
+            )
+
+            if (
+                requested_start_date
+                > requested_end_date
+            ):
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} already reaches the Latest Expected "
+                    "Stored Session. There is no stale tail to update."
+                )
+            else:
+                st.caption(
+                    "Update to Current acquires the calendar interval after "
+                    "the current Last Date through the Latest Expected Stored "
+                    "Session. Existing stored observations are preserved."
+                )
+
+        elif selected_operation == "Repair Missing":
+            backend_operation = "Repair Missing"
+
+            try:
+                diagnostics = (
+                    database_manager.get_ticker_diagnostics(
+                        selected_ticker
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to read Internal Gap diagnostics for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            internal_gap_dates = (
+                list(
+                    diagnostics.get(
+                        "internal_gap_dates",
+                        [],
+                    )
+                )
+                if isinstance(
+                    diagnostics,
+                    dict,
+                )
+                else []
+            )
+
+            if not internal_gap_dates:
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} has no known Internal Gaps to repair."
+                )
+            else:
+                try:
+                    requested_start_date = (
+                        date.fromisoformat(
+                            str(
+                                internal_gap_dates[
+                                    0
+                                ]
+                            )
+                        )
+                    )
+                    requested_end_date = (
+                        date.fromisoformat(
+                            str(
+                                internal_gap_dates[
+                                    -1
+                                ]
+                            )
+                        )
+                    )
+                except Exception as exc:
+                    st.error(
+                        "Unable to resolve the Internal Gap repair scope for "
+                        f"{selected_ticker}: {exc}"
+                    )
+                    return
+
+                gap_columns = st.columns(3)
+
+                gap_columns[0].metric(
+                    "Missing Sessions",
+                    f"{len(internal_gap_dates):,}",
+                )
+                gap_columns[1].metric(
+                    "Repair From",
+                    requested_start_date.isoformat(),
+                )
+                gap_columns[2].metric(
+                    "Repair Through",
+                    requested_end_date.isoformat(),
+                )
+
+                st.caption(
+                    "Repair Missing reacquires the continuous envelope from "
+                    "the first known Internal Gap through the last known "
+                    "Internal Gap. Existing stored rows inside that envelope "
+                    "are preserved; only eligible missing observations can "
+                    "be added."
+                )
+
+        elif (
+            selected_operation
+            == "Repair Duplicate Stored Keys"
+        ):
+            backend_operation = (
+                "Repair Duplicate Stored Keys"
+            )
+
+            try:
+                diagnostics = (
+                    database_manager.get_ticker_diagnostics(
+                        selected_ticker
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to read Duplicate Stored Key diagnostics for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            duplicate_stored_keys = (
+                list(
+                    diagnostics.get(
+                        "duplicate_stored_keys",
+                        [],
+                    )
+                )
+                if isinstance(
+                    diagnostics,
+                    dict,
+                )
+                else []
+            )
+
+            duplicate_dates = [
+                str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+                for duplicate_key
+                in duplicate_stored_keys
+                if str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+            ]
+
+            if not duplicate_dates:
+                maintenance_request_ready = False
+                st.info(
+                    f"{selected_ticker} has no Duplicate Stored Keys "
+                    "to repair."
+                )
+            else:
+                try:
+                    requested_start_date = (
+                        date.fromisoformat(
+                            duplicate_dates[
+                                0
+                            ]
+                        )
+                    )
+                    requested_end_date = (
+                        date.fromisoformat(
+                            duplicate_dates[
+                                -1
+                            ]
+                        )
+                    )
+                except Exception as exc:
+                    st.error(
+                        "Unable to resolve the Duplicate Stored Key "
+                        f"repair scope for {selected_ticker}: {exc}"
+                    )
+                    return
+
+                duplicate_physical_rows = sum(
+                    int(
+                        duplicate_key.get(
+                            "physical_rows",
+                            0,
+                        )
+                        or 0
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                )
+
+                duplicate_excess_rows = sum(
+                    int(
+                        duplicate_key.get(
+                            "excess_rows",
+                            0,
+                        )
+                        or 0
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                )
+
+                duplicate_columns = st.columns(
+                    5
+                )
+
+                duplicate_columns[0].metric(
+                    "Duplicate Keys",
+                    f"{len(duplicate_dates):,}",
+                )
+                duplicate_columns[1].metric(
+                    "Physical Rows",
+                    f"{duplicate_physical_rows:,}",
+                )
+                duplicate_columns[2].metric(
+                    "Excess Rows",
+                    f"{duplicate_excess_rows:,}",
+                )
+                duplicate_columns[3].metric(
+                    "Acquire From",
+                    requested_start_date.isoformat(),
+                )
+                duplicate_columns[4].metric(
+                    "Acquire Through",
+                    requested_end_date.isoformat(),
+                )
+
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Duplicate Date": (
+                                    duplicate_key[
+                                        "date"
+                                    ]
+                                ),
+                                "Physical Rows": (
+                                    duplicate_key[
+                                        "physical_rows"
+                                    ]
+                                ),
+                                "Excess Rows": (
+                                    duplicate_key[
+                                        "excess_rows"
+                                    ]
+                                ),
+                            }
+                            for duplicate_key
+                            in duplicate_stored_keys
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.caption(
+                    "Canonical yFinance data is acquired over the continuous "
+                    "calendar envelope from the first duplicate date through "
+                    "the last duplicate date. Only the exact Duplicate Dates "
+                    "shown above are repair targets; intervening non-duplicate "
+                    "stored dates are not eligible for mutation."
+                )
+
+        else:
+            backend_operation = "Backfill Earlier"
+
+            try:
+                first_stored_date = date.fromisoformat(
+                    str(
+                        selected_inventory[
+                            "first_date"
+                        ]
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored First Date for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+            requested_end_date = (
+                first_stored_date
+                - timedelta(days=1)
+            )
+
+            requested_start_date = st.date_input(
+                "Backfill Start Date",
+                value=requested_end_date,
+                max_value=requested_end_date,
+                key="data_management_backfill_start_date",
+                help=(
+                    "Choose how far back to extend stored history. "
+                    "The backfill ends on the calendar day immediately before "
+                    "the ticker's current First Stored Date."
+                ),
+            )
+
+            backfill_columns = st.columns(2)
+
+            backfill_columns[0].metric(
+                "Backfill From",
+                requested_start_date.isoformat(),
+            )
+            backfill_columns[1].metric(
+                "Backfill Through",
+                requested_end_date.isoformat(),
+            )
+
+            st.caption(
+                "Backfill Earlier preserves every existing stored observation "
+                "and only adds eligible observations before the current "
+                "First Stored Date."
+            )
+
+        build_preview_clicked = st.button(
+            "Preview Database Changes",
+            key="data_management_acquisition_maintenance_preview",
+            type="primary",
+            use_container_width=True,
+            disabled=not maintenance_request_ready,
+            help=(
+                "Fetch canonical yFinance data for this maintenance scope and "
+                "compare it with the authoritative database. Nothing is "
+                "changed until the resulting Preview is approved and applied."
+            ),
+        )
+
+    if not build_preview_clicked:
+        if isinstance(
+            acquisition_context,
+            dict,
+        ):
+            _render_data_management_acquisition_context(
+                acquisition_context
+            )
+
+        return
+
+    if not requested_tickers:
+        st.error(
+            "Enter at least one ticker before previewing database changes."
+        )
+        return
+
+    if (
+        requested_start_date is None
+        or requested_end_date is None
+    ):
+        st.error(
+            "A valid Start Date and End Date are required before "
+            "previewing database changes."
+        )
+        return
+
+    if requested_start_date > requested_end_date:
+        st.error(
+            "Requested Start Date cannot be later than End Date."
+        )
+        return
+
+    if backend_operation is None:
+        st.error(
+            "Unable to resolve the selected acquisition operation."
+        )
+        return
+
+    acquisition_manager = (
+        DataAcquisitionManager()
+    )
+
+    try:
+        acquisition_result = (
+            acquisition_manager.acquire_daily_ohlcv(
+                tickers=requested_tickers,
+                requested_start_date=(
+                    requested_start_date
+                ),
+                requested_end_date=(
+                    requested_end_date
+                ),
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to acquire canonical market data: "
+            f"{exc}"
+        )
+        return
+
+    acquisition_context = (
+        _build_data_management_acquisition_context(
+            acquisition_result
+        )
+    )
+
+    acquisition_context[
+        "workflow"
+    ] = "Acquire Market Data"
+
+    acquisition_context[
+        "ui_operation"
+    ] = selected_operation
+
+    st.session_state[
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    ] = acquisition_context
+
+    if not acquisition_result.has_effective_scope:
+        _render_data_management_acquisition_context(
+            acquisition_context
+        )
+        return
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        if (
+            backend_operation
+            == "Repair Duplicate Stored Keys"
+        ):
+            duplicate_repair_dates = [
+                str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+                for duplicate_key
+                in duplicate_stored_keys
+                if str(
+                    duplicate_key.get(
+                        "date",
+                        "",
+                    )
+                ).strip()
+            ]
+
+            plan = (
+                mutation_manager.build_duplicate_repair_plan(
+                    operation=backend_operation,
+                    source=acquisition_result.source,
+                    ticker=requested_tickers[0],
+                    duplicate_dates=(
+                        duplicate_repair_dates
+                    ),
+                    candidates=(
+                        acquisition_result.candidates
+                    ),
+                )
+            )
+        else:
+            plan = mutation_manager.build_plan(
+                operation=backend_operation,
+                source=acquisition_result.source,
+                candidates=(
+                    acquisition_result.candidates
+                ),
+                requested_tickers=(
+                    acquisition_result.requested_tickers
+                ),
+                requested_start_date=(
+                    acquisition_result.effective_start_date
+                ),
+                requested_end_date=(
+                    acquisition_result.effective_end_date
+                ),
+            )
+    except Exception as exc:
+        st.error(
+            "Unable to build Database Change Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+        None,
+    )
+
+    st.rerun()
+
+
+def _sync_data_management_replace_range_end_date() -> None:
+    """
+    Reset Replace-a-Date-Range End Date to the newly selected Start Date.
+
+    This is UI session state only. The user may subsequently extend End Date
+    before building the reconciliation Preview.
+    """
+    start_key = (
+        "data_management_replace_"
+        "range_start_date"
+    )
+    end_key = (
+        "data_management_replace_"
+        "range_end_date"
+    )
+
+    selected_start_date = (
+        st.session_state.get(
+            start_key
+        )
+    )
+
+    if selected_start_date is not None:
+        st.session_state[
+            end_key
+        ] = selected_start_date
+
+
+def _render_data_management_reconciliation_controls(
+    *,
+    inventory: list[Dict[str, Any]],
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render explicit historical yFinance reconciliation workflows.
+
+    User-facing operations:
+    - Replace a Date Range
+        One or more tickers share one explicit requested date range.
+        Backend MutationPlan operation: Replace Range.
+
+    - Refresh Existing Coverage
+        One stored ticker uses its existing First Date through Last Date.
+        Backend MutationPlan operation: Refresh Existing Coverage.
+
+    Acquisition remains read-only. This helper builds and stores one exact
+    MutationPlan; existing Preview / Approve / Apply controls own mutation.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    acquisition_context = st.session_state.get(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    )
+
+    if active_plan is not None:
+        context_workflow = (
+            acquisition_context.get(
+                "workflow"
+            )
+            if isinstance(
+                acquisition_context,
+                dict,
+            )
+            else None
+        )
+
+        if context_workflow == "Historical Data Reconciliation":
+            st.markdown("---")
+            st.subheader(
+                "Historical Data Reconciliation"
+            )
+            st.info(
+                "A reconciliation Preview is active. Review and approve it, "
+                "apply the approved changes, or Cancel Preview before "
+                "starting another reconciliation request."
+            )
+
+            _render_data_management_acquisition_context(
+                acquisition_context
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader(
+        "Historical Data Reconciliation"
+    )
+
+    st.caption(
+        "Compare fresh canonical yFinance history with authoritative stored "
+        "OHLCV before replacing anything. Nothing is changed until the exact "
+        "preview is approved and applied."
+    )
+
+    operation_labels = [
+        "Refresh Existing Coverage",
+        "Replace a Date Range",
+    ]
+
+    selected_operation = st.radio(
+        "Reconciliation Operation",
+        options=operation_labels,
+        horizontal=True,
+        key="data_management_reconciliation_operation",
+        help=(
+            "Refresh Existing Coverage checks one stored ticker across its "
+            "entire current First Date through Last Date. Replace a Date "
+            "Range uses one explicit shared date range for one or more "
+            "tickers."
+        ),
+    )
+
+    try:
+        default_end_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_end_date = date.today()
+
+    requested_tickers: list[str] = []
+    requested_start_date: Optional[date] = None
+    requested_end_date: Optional[date] = None
+    backend_operation: Optional[str] = None
+    preview_clicked = False
+
+    if selected_operation == "Replace a Date Range":
+        backend_operation = "Replace Range"
+
+        start_date_key = (
+            "data_management_replace_"
+            "range_start_date"
+        )
+        end_date_key = (
+            "data_management_replace_"
+            "range_end_date"
+        )
+
+        if start_date_key not in st.session_state:
+            st.session_state[
+                start_date_key
+            ] = default_end_date
+
+        if end_date_key not in st.session_state:
+            st.session_state[
+                end_date_key
+            ] = st.session_state[
+                start_date_key
+            ]
+
+        ticker_input = st.text_input(
+            "Ticker(s)",
+            value="",
+            key=(
+                "data_management_replace_"
+                "range_tickers"
+            ),
+            help=(
+                "Enter one or more ticker symbols separated by commas "
+                "or spaces. Every ticker in this request uses the same "
+                "Start Date and End Date."
+            ),
+        )
+
+        date_columns = st.columns(2)
+
+        with date_columns[0]:
+            range_start_date = st.date_input(
+                "Start Date",
+                key=start_date_key,
+                on_change=(
+                    _sync_data_management_replace_range_end_date
+                ),
+            )
+
+        with date_columns[1]:
+            range_end_date = st.date_input(
+                "End Date",
+                key=end_date_key,
+            )
+
+        preview_clicked = st.button(
+            "Preview Changes",
+            key=(
+                "data_management_replace_"
+                "range_preview"
+            ),
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Fetch fresh canonical yFinance history for this "
+                "shared ticker/date scope and compare it with stored "
+                "OHLCV. Nothing is replaced by this preview."
+            ),
+        )
+
+        if preview_clicked:
+            requested_tickers = [
+                ticker
+                for ticker in (
+                    str(ticker_input)
+                    .replace(",", " ")
+                    .split()
+                )
+                if ticker
+            ]
+            requested_start_date = (
+                range_start_date
+            )
+            requested_end_date = (
+                range_end_date
+            )
+
+    else:
+        backend_operation = (
+            "Refresh Existing Coverage"
+        )
+
+        inventory_by_ticker = {
+            str(
+                row.get(
+                    "ticker",
+                    "",
+                )
+            ).strip().upper(): row
+            for row in inventory
+            if str(
+                row.get(
+                    "ticker",
+                    "",
+                )
+            ).strip()
+        }
+
+        stored_tickers = sorted(
+            inventory_by_ticker
+        )
+
+        if not stored_tickers:
+            st.warning(
+                "No stored tickers are available for historical "
+                "reconciliation."
+            )
+            return
+
+        selected_ticker = st.selectbox(
+            "Stored Ticker",
+            options=stored_tickers,
+            key=(
+                "data_management_reconcile_"
+                "stored_ticker"
+            ),
+            help=(
+                "Choose one ticker already stored in daily_prices. "
+                "Its complete current First Date through Last Date "
+                "will be reconciled."
+            ),
+        )
+
+        selected_inventory = (
+            inventory_by_ticker[
+                selected_ticker
+            ]
+        )
+
+        coverage_columns = st.columns(3)
+
+        coverage_columns[0].metric(
+            "Stored Records",
+            f"{int(selected_inventory.get('records', 0) or 0):,}",
+        )
+        coverage_columns[1].metric(
+            "First Stored Date",
+            selected_inventory.get(
+                "first_date"
+            ) or "—",
+        )
+        coverage_columns[2].metric(
+            "Last Stored Date",
+            selected_inventory.get(
+                "last_date"
+            ) or "—",
+        )
+
+        st.caption(
+            "This operation automatically compares fresh canonical "
+            "yFinance history across the ticker's entire currently stored "
+            "date range. The date boundaries are not manually editable."
+        )
+
+        preview_clicked = st.button(
+            "Preview Changes",
+            key=(
+                "data_management_reconcile_"
+                "stored_history_preview"
+            ),
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Fetch fresh canonical yFinance history from the ticker's "
+                "First Stored Date through Last Stored Date and compare it "
+                "with the authoritative database. Nothing is replaced by "
+                "this preview."
+            ),
+        )
+
+        if preview_clicked:
+            requested_tickers = [
+                selected_ticker
+            ]
+
+            try:
+                requested_start_date = (
+                    date.fromisoformat(
+                        str(
+                            selected_inventory[
+                                "first_date"
+                            ]
+                        )
+                    )
+                )
+                requested_end_date = (
+                    date.fromisoformat(
+                        str(
+                            selected_inventory[
+                                "last_date"
+                            ]
+                        )
+                    )
+                )
+            except Exception as exc:
+                st.error(
+                    "Unable to resolve the stored coverage range for "
+                    f"{selected_ticker}: {exc}"
+                )
+                return
+
+    if not preview_clicked:
+        return
+
+    if not requested_tickers:
+        st.error(
+            "Enter at least one ticker before previewing changes."
+        )
+        return
+
+    if (
+        requested_start_date is None
+        or requested_end_date is None
+    ):
+        st.error(
+            "A valid Start Date and End Date are required before "
+            "previewing changes."
+        )
+        return
+
+    acquisition_manager = (
+        DataAcquisitionManager()
+    )
+
+    try:
+        acquisition_result = (
+            acquisition_manager.acquire_daily_ohlcv(
+                tickers=requested_tickers,
+                requested_start_date=(
+                    requested_start_date
+                ),
+                requested_end_date=(
+                    requested_end_date
+                ),
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to acquire canonical market data for reconciliation: "
+            f"{exc}"
+        )
+        return
+
+    acquisition_context = (
+        _build_data_management_acquisition_context(
+            acquisition_result
+        )
+    )
+
+    acquisition_context[
+        "workflow"
+    ] = "Historical Data Reconciliation"
+
+    acquisition_context[
+        "ui_operation"
+    ] = selected_operation
+
+    st.session_state[
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY
+    ] = acquisition_context
+
+    if not acquisition_result.has_effective_scope:
+        _render_data_management_acquisition_context(
+            acquisition_context
+        )
+        return
+
+    mutation_manager = (
+        DataMutationManager()
+    )
+
+    try:
+        plan = mutation_manager.build_plan(
+            operation=backend_operation,
+            source=acquisition_result.source,
+            candidates=(
+                acquisition_result.candidates
+            ),
+            requested_tickers=(
+                acquisition_result.requested_tickers
+            ),
+            requested_start_date=(
+                acquisition_result.effective_start_date
+            ),
+            requested_end_date=(
+                acquisition_result.effective_end_date
+            ),
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build reconciliation Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
+
+def _render_data_management_manual_entry_controls(
+    *,
+    latest_expected_stored_session: Any,
+) -> None:
+    """
+    Render one-record Manual Entry controls.
+
+    Manual Entry supplies one candidate observation directly to the existing
+    DataMutationManager planning boundary. It does not acquire yFinance data,
+    write SQLite directly, or bypass Preview / Approve / Apply.
+
+    A session-only draft context preserves the administrator's entered values
+    so an active Manual Entry Preview can be discarded for editing without
+    requiring the complete observation to be re-entered.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    manual_context = st.session_state.get(
+        _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY
+    )
+
+    if not isinstance(
+        manual_context,
+        dict,
+    ):
+        manual_context = {}
+
+    if active_plan is not None:
+        if (
+            isinstance(
+                active_plan,
+                MutationPlan,
+            )
+            and active_plan.operation
+            in {
+                "Manual Add",
+                "Manual Replace",
+            }
+        ):
+            st.markdown("---")
+            st.subheader("Manual Entry")
+            st.info(
+                "A Manual Entry Preview is active. Review the exact values "
+                "and database action below, then use the Preview controls to "
+                "approve, apply, edit, or cancel this manual observation."
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader("Manual Entry")
+
+    st.caption(
+        "Enter one complete daily OHLCV observation and preview the exact "
+        "database action before anything is saved. Manual Add preserves an "
+        "existing ticker/date; Manual Replace explicitly permits replacement "
+        "when stored values differ."
+    )
+
+    try:
+        default_manual_date = pd.Timestamp(
+            latest_expected_stored_session
+        ).date()
+    except Exception:
+        default_manual_date = date.today()
+
+    stored_operation = str(
+        manual_context.get(
+            "ui_operation",
+            "Add a Record",
+        )
+    )
+
+    operation_labels = [
+        "Add a Record",
+        "Replace a Record",
+    ]
+
+    if stored_operation not in operation_labels:
+        stored_operation = "Add a Record"
+
+    try:
+        stored_manual_date = pd.Timestamp(
+            manual_context.get(
+                "date",
+                default_manual_date,
+            )
+        ).date()
+    except Exception:
+        stored_manual_date = default_manual_date
+
+    with st.form(
+        "data_management_manual_entry_form"
+    ):
+        selected_operation = st.radio(
+            "Manual Entry Operation",
+            options=operation_labels,
+            index=operation_labels.index(
+                stored_operation
+            ),
+            horizontal=True,
+            help=(
+                "Add a Record preserves an existing ticker/date if one is "
+                "already stored. Replace a Record explicitly permits replacing "
+                "an existing ticker/date when the entered OHLCV values differ."
+            ),
+        )
+
+        identity_columns = st.columns(2)
+
+        with identity_columns[0]:
+            ticker_input = st.text_input(
+                "Ticker",
+                value=str(
+                    manual_context.get(
+                        "ticker",
+                        "",
+                    )
+                ),
+                help=(
+                    "Enter one ticker symbol. Canonical ticker normalization "
+                    "is performed by the Data Management mutation layer."
+                ),
+            )
+
+        with identity_columns[1]:
+            manual_date = st.date_input(
+                "Date",
+                value=stored_manual_date,
+                help=(
+                    "The observation date. Dates later than the Latest "
+                    "Expected Stored Session are rejected by canonical "
+                    "Data Management validation."
+                ),
+            )
+
+        price_columns_1 = st.columns(3)
+
+        with price_columns_1[0]:
+            manual_open = st.number_input(
+                "Open",
+                value=float(
+                    manual_context.get(
+                        "open",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_1[1]:
+            manual_high = st.number_input(
+                "High",
+                value=float(
+                    manual_context.get(
+                        "high",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_1[2]:
+            manual_low = st.number_input(
+                "Low",
+                value=float(
+                    manual_context.get(
+                        "low",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        price_columns_2 = st.columns(3)
+
+        with price_columns_2[0]:
+            manual_close = st.number_input(
+                "Close",
+                value=float(
+                    manual_context.get(
+                        "close",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+            )
+
+        with price_columns_2[1]:
+            manual_adj_close = st.number_input(
+                "Adj Close",
+                value=float(
+                    manual_context.get(
+                        "adj_close",
+                        0.0,
+                    )
+                ),
+                step=0.001,
+                format="%.3f",
+                help=(
+                    "Adjusted Close is required. Manual Entry does not "
+                    "silently substitute Close for Adj Close."
+                ),
+            )
+
+        with price_columns_2[2]:
+            manual_volume = st.number_input(
+                "Volume",
+                value=int(
+                    manual_context.get(
+                        "volume",
+                        0,
+                    )
+                ),
+                step=1,
+                help=(
+                    "Enter whole-share daily volume. Canonical validation "
+                    "owns final eligibility."
+                ),
+            )
+
+        preview_clicked = st.form_submit_button(
+            "Preview Changes",
+            type="primary",
+            use_container_width=True,
+            help=(
+                "Compare this manually entered observation with the "
+                "authoritative database. Nothing is saved by this preview."
+            ),
+        )
+
+    if not preview_clicked:
+        return
+
+    if not str(
+        ticker_input
+    ).strip():
+        st.error(
+            "Enter a ticker before previewing the manual observation."
+        )
+        return
+
+    operation_map = {
+        "Add a Record": "Manual Add",
+        "Replace a Record": "Manual Replace",
+    }
+
+    backend_operation = operation_map[
+        selected_operation
+    ]
+
+    manual_context = {
+        "ui_operation": selected_operation,
+        "backend_operation": backend_operation,
+        "ticker": ticker_input,
+        "date": manual_date,
+        "open": manual_open,
+        "high": manual_high,
+        "low": manual_low,
+        "close": manual_close,
+        "adj_close": manual_adj_close,
+        "volume": manual_volume,
+    }
+
+    st.session_state[
+        _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY
+    ] = manual_context
+
+    candidate = {
+        "Ticker": ticker_input,
+        "Date": manual_date,
+        "Open": manual_open,
+        "High": manual_high,
+        "Low": manual_low,
+        "Close": manual_close,
+        "Adj Close": manual_adj_close,
+        "Volume": manual_volume,
+    }
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        plan = mutation_manager.build_plan(
+            operation=backend_operation,
+            source="Manual Entry",
+            candidates=[
+                candidate
+            ],
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build Manual Entry Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
+
+def _render_data_management_deletion_controls(
+    *,
+    inventory: list[Dict[str, Any]],
+) -> None:
+    """
+    Render explicit Delete Range / Delete Ticker controls.
+
+    Deletion operates only on stored daily_prices rows and always enters the
+    existing Preview / Approve / Apply mutation lifecycle. It does not alter
+    configured universe or bucket membership.
+    """
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if active_plan is not None:
+        if (
+            isinstance(
+                active_plan,
+                MutationPlan,
+            )
+            and active_plan.operation
+            in {
+                "Delete Range",
+                "Delete Ticker",
+            }
+        ):
+            st.markdown("---")
+            st.subheader("Data Deletion")
+            st.info(
+                "A deletion Preview is active. Review the exact deletion "
+                "scope below, then approve and apply it, or Cancel Preview "
+                "before starting another deletion request."
+            )
+
+        return
+
+    st.markdown("---")
+    st.subheader("Data Deletion")
+
+    st.caption(
+        "Explicitly remove stored OHLCV from daily_prices. Deletion never "
+        "occurs because a source omitted a row, and deleting a ticker does "
+        "not remove it from configured Custom, Sector, or Country membership."
+    )
+
+    if not inventory:
+        st.info(
+            "No stored tickers are available for deletion."
+        )
+        return
+
+    inventory_by_ticker = {
+        str(row["ticker"]).strip().upper(): row
+        for row in inventory
+    }
+
+    stored_tickers = sorted(
+        inventory_by_ticker
+    )
+
+    selected_operation = st.radio(
+        "Deletion Operation",
+        options=[
+            "Delete a Date Range",
+            "Delete a Ticker",
+        ],
+        horizontal=True,
+        key="data_management_deletion_operation",
+        help=(
+            "Delete a Date Range removes stored rows for one ticker inside "
+            "an inclusive date interval. Delete a Ticker removes every "
+            "stored daily_prices row for one ticker."
+        ),
+    )
+
+    selected_ticker = st.selectbox(
+        "Stored Ticker",
+        options=stored_tickers,
+        key="data_management_deletion_ticker",
+        help=(
+            "Only tickers currently stored in daily_prices are available."
+        ),
+    )
+
+    selected_inventory = inventory_by_ticker[
+        selected_ticker
+    ]
+
+    record_count = int(
+        selected_inventory.get(
+            "records",
+            0,
+        ) or 0
+    )
+
+    first_date_text = str(
+        selected_inventory.get(
+            "first_date",
+            "",
+        )
+    )
+    last_date_text = str(
+        selected_inventory.get(
+            "last_date",
+            "",
+        )
+    )
+
+    stored_columns = st.columns(3)
+
+    stored_columns[0].metric(
+        "Stored Records",
+        f"{record_count:,}",
+    )
+    stored_columns[1].metric(
+        "First Stored Date",
+        first_date_text or "—",
+    )
+    stored_columns[2].metric(
+        "Last Stored Date",
+        last_date_text or "—",
+    )
+
+    buckets = selected_inventory.get(
+        "buckets",
+        [],
+    )
+
+    bucket_text = (
+        ", ".join(
+            str(bucket)
+            for bucket in buckets
+        )
+        if buckets
+        else "Unassigned"
+    )
+
+    st.caption(
+        f"Configured universe membership: {bucket_text}. "
+        "Deletion affects daily_prices only; this membership is not changed."
+    )
+
+    backend_operation: str
+    requested_start_date: Optional[date]
+    requested_end_date: Optional[date]
+
+    if selected_operation == "Delete a Date Range":
+        backend_operation = "Delete Range"
+
+        try:
+            default_start_date = pd.Timestamp(
+                first_date_text
+            ).date()
+            default_end_date = pd.Timestamp(
+                last_date_text
+            ).date()
+        except Exception:
+            st.error(
+                "Stored ticker inventory does not contain a usable "
+                "First Date / Last Date range."
+            )
+            return
+
+        date_columns = st.columns(2)
+
+        with date_columns[0]:
+            requested_start_date = st.date_input(
+                "Start Date",
+                value=default_start_date,
+                key=(
+                    "data_management_delete_"
+                    "range_start_date"
+                ),
+                help=(
+                    "Inclusive first calendar date of the deletion scope."
+                ),
+            )
+
+        with date_columns[1]:
+            requested_end_date = st.date_input(
+                "End Date",
+                value=default_end_date,
+                key=(
+                    "data_management_delete_"
+                    "range_end_date"
+                ),
+                help=(
+                    "Inclusive last calendar date of the deletion scope."
+                ),
+            )
+
+        st.warning(
+            "This operation will permanently delete every stored "
+            f"{selected_ticker} OHLCV row inside the selected inclusive "
+            "date range after Preview approval and Apply."
+        )
+    else:
+        backend_operation = "Delete Ticker"
+        requested_start_date = None
+        requested_end_date = None
+
+        st.warning(
+            f"This operation will permanently delete all {record_count:,} "
+            f"stored {selected_ticker} OHLCV record(s) from daily_prices "
+            "after Preview approval and Apply. Configured universe "
+            "membership will remain unchanged."
+        )
+
+    preview_clicked = st.button(
+        "Preview Deletion",
+        key="data_management_deletion_preview",
+        type="primary",
+        use_container_width=True,
+        help=(
+            "Build an exact read-only deletion Preview. This button does "
+            "not delete anything."
+        ),
+    )
+
+    if not preview_clicked:
+        return
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        plan = mutation_manager.build_deletion_plan(
+            operation=backend_operation,
+            source="Data Management Deletion",
+            ticker=selected_ticker,
+            requested_start_date=requested_start_date,
+            requested_end_date=requested_end_date,
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to build deletion Preview: "
+            f"{exc}"
+        )
+        return
+
+    _set_data_management_mutation_plan(
+        plan
+    )
+
+    st.rerun()
+
+
+def _set_data_management_mutation_plan(
+    plan: MutationPlan,
+) -> None:
+    """
+    Store one exact materialized MutationPlan as the active Preview.
+
+    A new Preview invalidates any confirmation, prior Commit result, or
+    prior Commit error belonging to an older Preview.
+    """
+    if not isinstance(plan, MutationPlan):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    st.session_state[
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    ] = plan
+
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+        None,
+    )
+
+
+def _discard_data_management_mutation_plan(
+    *,
+    preserve_manual_entry_context: bool = False,
+) -> None:
+    """
+    Discard the active mutation Preview and its confirmation state.
+
+    Manual Entry may explicitly preserve its session-only draft while editing
+    the values that produced a Preview. Ordinary Cancel discards that draft.
+    """
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+        None,
+    )
+    st.session_state.pop(
+        _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+        None,
+    )
+
+    if not preserve_manual_entry_context:
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY,
+            None,
+        )
+
+
+def _render_data_management_source_data_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render bounded source-data evidence from the exact materialized Preview.
+
+    The displayed/exported rows come only from MutationPlan observations.
+    This helper does not refetch source data, read SQLite, or reinterpret
+    mutation actions.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    source_rows = [
+        observation.candidate.to_dict()
+        for observation in plan.observations
+    ]
+
+    if not source_rows:
+        return
+
+    source_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    source_columns = [
+        "Ticker",
+        "Date",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Adj Close",
+        "Volume",
+    ]
+
+    source_df = pd.DataFrame(
+        source_rows,
+        columns=source_columns,
+    )
+
+    with st.expander(
+        "Incoming Source Data",
+        expanded=False,
+    ):
+        st.caption(
+            "Inspect the canonical source records contained in this exact "
+            "Database Change Preview. These are the eligible source rows "
+            "being evaluated for the actions shown below. Rows Not Eligible "
+            "are listed separately and are not included here."
+        )
+
+        source_tickers = list(
+            dict.fromkeys(
+                source_df["Ticker"].tolist()
+            )
+        )
+
+        for ticker in source_tickers:
+            ticker_df = (
+                source_df.loc[
+                    source_df["Ticker"] == ticker,
+                    source_columns,
+                ]
+                .sort_values("Date")
+                .reset_index(drop=True)
+            )
+
+            ticker_count = len(
+                ticker_df
+            )
+
+            st.markdown(
+                f"**{ticker} — "
+                f"{ticker_count:,} eligible source record(s)**"
+            )
+
+            if ticker_count <= 6:
+                display_df = ticker_df
+                st.caption(
+                    "Showing all eligible source records "
+                    "for this ticker."
+                )
+            else:
+                display_df = pd.concat(
+                    [
+                        ticker_df.head(3),
+                        ticker_df.tail(3),
+                    ],
+                    ignore_index=True,
+                )
+                st.caption(
+                    "Showing the first 3 and last 3 eligible source "
+                    "records for this ticker. Download the CSV below "
+                    "to inspect the complete source dataset."
+                )
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        requested_start = (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "start"
+        )
+        requested_end = (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "end"
+        )
+
+        csv_bytes = source_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "Download All Source Records CSV",
+            data=csv_bytes,
+            file_name=(
+                "data_management_source_"
+                f"{requested_start}_to_{requested_end}.csv"
+            ),
+            mime="text/csv",
+            key=(
+                "data_management_source_preview_csv_"
+                f"{plan.plan_fingerprint[:12]}"
+            ),
+            help=(
+                "Download every eligible canonical source record contained "
+                "in this exact Database Change Preview, not just the rows "
+                "shown in the first/last sample."
+            ),
+        )
+
+
+def _render_data_management_stored_vs_proposed_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render exact stored-versus-proposed values for replacement candidates.
+
+    Every displayed/exported value comes from the already-materialized
+    MutationPlan. This helper does not refetch source data, reread SQLite,
+    rebuild the plan, or reinterpret mutation actions.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    replacement_observations = [
+        observation
+        for observation in plan.observations
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "replacement_candidate"
+            and observation.existing is not None
+        )
+    ]
+
+    if not replacement_observations:
+        return
+
+    comparison_rows = []
+
+    for observation in replacement_observations:
+        stored = observation.existing.to_dict()
+        proposed = observation.candidate.to_dict()
+
+        comparison_rows.append(
+            {
+                "Ticker": observation.candidate.ticker,
+                "Date": observation.candidate.date.isoformat(),
+                "Stored Open": stored["Open"],
+                "Proposed Open": proposed["Open"],
+                "Stored High": stored["High"],
+                "Proposed High": proposed["High"],
+                "Stored Low": stored["Low"],
+                "Proposed Low": proposed["Low"],
+                "Stored Close": stored["Close"],
+                "Proposed Close": proposed["Close"],
+                "Stored Adj Close": stored["Adj Close"],
+                "Proposed Adj Close": proposed["Adj Close"],
+                "Stored Volume": stored["Volume"],
+                "Proposed Volume": proposed["Volume"],
+                "Fields That Differ": (
+                    ", ".join(
+                        observation.differing_fields
+                    )
+                    if observation.differing_fields
+                    else "—"
+                ),
+            }
+        )
+
+    comparison_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    comparison_columns = [
+        "Ticker",
+        "Date",
+        "Stored Open",
+        "Proposed Open",
+        "Stored High",
+        "Proposed High",
+        "Stored Low",
+        "Proposed Low",
+        "Stored Close",
+        "Proposed Close",
+        "Stored Adj Close",
+        "Proposed Adj Close",
+        "Stored Volume",
+        "Proposed Volume",
+        "Fields That Differ",
+    ]
+
+    comparison_df = pd.DataFrame(
+        comparison_rows,
+        columns=comparison_columns,
+    )
+
+    st.markdown(
+        "#### Preview Changes — Stored vs Proposed"
+    )
+    st.caption(
+        "These are the existing database records that this exact Preview "
+        "would replace. Stored values are what is currently authoritative; "
+        "Proposed values are the canonical source values that would replace "
+        "them only if this Preview is approved and applied."
+    )
+
+    comparison_tickers = list(
+        dict.fromkeys(
+            comparison_df["Ticker"].tolist()
+        )
+    )
+
+    for ticker in comparison_tickers:
+        ticker_df = (
+            comparison_df.loc[
+                comparison_df["Ticker"] == ticker,
+                comparison_columns,
+            ]
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+        ticker_count = len(
+            ticker_df
+        )
+
+        st.markdown(
+            f"**{ticker} — "
+            f"{ticker_count:,} stored record(s) would be replaced**"
+        )
+
+        if ticker_count <= 6:
+            display_df = ticker_df
+
+            st.caption(
+                "Showing all proposed replacements for this ticker."
+            )
+        else:
+            display_df = pd.concat(
+                [
+                    ticker_df.head(3),
+                    ticker_df.tail(3),
+                ],
+                ignore_index=True,
+            )
+
+            st.caption(
+                "Showing the first 3 and last 3 proposed replacements "
+                "for this ticker. Download the full comparison CSV below "
+                "to inspect every proposed replacement."
+            )
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    requested_start = (
+        plan.requested_start_date.isoformat()
+        if plan.requested_start_date is not None
+        else "start"
+    )
+
+    requested_end = (
+        plan.requested_end_date.isoformat()
+        if plan.requested_end_date is not None
+        else "end"
+    )
+
+    comparison_csv_bytes = (
+        comparison_df.to_csv(
+            index=False
+        ).encode("utf-8")
+    )
+
+    st.download_button(
+        "Download Full Comparison CSV",
+        data=comparison_csv_bytes,
+        file_name=(
+            "data_management_stored_vs_proposed_"
+            f"{requested_start}_to_{requested_end}.csv"
+        ),
+        mime="text/csv",
+        key=(
+            "data_management_stored_vs_proposed_csv_"
+            f"{plan.plan_fingerprint[:12]}"
+        ),
+        help=(
+            "Download every stored-versus-proposed replacement contained "
+            "in this exact Preview, including records not shown in the "
+            "first/last sample."
+        ),
+    )
+
+
+def _render_data_management_deletion_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render bounded evidence for one exact materialized deletion Preview.
+
+    The complete deletion set remains stored in MutationPlan and participates
+    in the exact plan fingerprint. The table is intentionally bounded for
+    large deletion scopes, while the CSV exposes every affected row.
+    """
+    if plan.operation not in {
+        "Delete Range",
+        "Delete Ticker",
+    }:
+        raise ValueError(
+            "Deletion Preview requires a deletion MutationPlan."
+        )
+
+    deletion_rows = [
+        deletion.record.to_dict()
+        for deletion in plan.deletions
+    ]
+
+    deletion_rows.sort(
+        key=lambda row: (
+            str(row.get("Ticker", "")),
+            str(row.get("Date", "")),
+        )
+    )
+
+    deletion_count = len(
+        deletion_rows
+    )
+
+    st.markdown("---")
+    st.subheader("Database Deletion Preview")
+
+    st.caption(
+        "Review the exact stored OHLCV scope that will be permanently "
+        "removed if this Preview is approved and applied. Nothing has been "
+        "deleted yet."
+    )
+
+    request_columns = st.columns(4)
+
+    request_columns[0].metric(
+        "Operation",
+        plan.operation,
+    )
+    request_columns[1].metric(
+        "Ticker",
+        (
+            plan.requested_tickers[0]
+            if plan.requested_tickers
+            else "—"
+        ),
+    )
+    request_columns[2].metric(
+        "Rows to Delete",
+        f"{deletion_count:,}",
+    )
+    request_columns[3].metric(
+        "Source",
+        plan.source,
+    )
+
+    if deletion_rows:
+        first_affected_date = str(
+            deletion_rows[0]["Date"]
+        )
+        last_affected_date = str(
+            deletion_rows[-1]["Date"]
+        )
+    else:
+        first_affected_date = "—"
+        last_affected_date = "—"
+
+    scope_columns = st.columns(4)
+
+    scope_columns[0].metric(
+        "Requested Start Date",
+        (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "All Stored Dates"
+        ),
+    )
+    scope_columns[1].metric(
+        "Requested End Date",
+        (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "All Stored Dates"
+        ),
+    )
+    scope_columns[2].metric(
+        "First Affected Date",
+        first_affected_date,
+    )
+    scope_columns[3].metric(
+        "Last Affected Date",
+        last_affected_date,
+    )
+
+    st.warning(
+        "Applying this approved Preview permanently removes these rows from "
+        "daily_prices. It does not remove the ticker from Custom, Sector, "
+        "Country, or other configured universe membership, and it does not "
+        "delete prior audit history."
+    )
+
+    if not deletion_rows:
+        st.info(
+            "No stored OHLCV rows match this deletion scope. There is "
+            "nothing to delete, so this Preview cannot be applied."
+        )
+        return
+
+    deletion_columns = [
+        "Ticker",
+        "Date",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Adj Close",
+        "Volume",
+    ]
+
+    deletion_df = pd.DataFrame(
+        deletion_rows,
+        columns=deletion_columns,
+    )
+
+    st.markdown("#### Affected Stored Records")
+
+    if deletion_count <= 20:
+        st.caption(
+            "This deletion affects 20 or fewer records, so every affected "
+            "stored row is shown."
+        )
+
+        display_df = deletion_df
+    else:
+        st.caption(
+            "This deletion affects more than 20 records. The table shows "
+            "the first 3 and last 3 affected rows; the complete deletion "
+            "set is available in the CSV below."
+        )
+
+        first_rows = deletion_df.head(
+            3
+        ).copy()
+        last_rows = deletion_df.tail(
+            3
+        ).copy()
+
+        first_rows.insert(
+            0,
+            "Preview Position",
+            "First 3",
+        )
+        last_rows.insert(
+            0,
+            "Preview Position",
+            "Last 3",
+        )
+
+        display_df = pd.concat(
+            [
+                first_rows,
+                last_rows,
+            ],
+            ignore_index=True,
+        )
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    full_csv = deletion_df.to_csv(
+        index=False
+    ).encode(
+        "utf-8"
+    )
+
+    st.download_button(
+        "Download Full Deletion Preview CSV",
+        data=full_csv,
+        file_name=(
+            "data_management_deletion_preview_"
+            f"{plan.plan_fingerprint[:12]}.csv"
+        ),
+        mime="text/csv",
+        key=(
+            "data_management_deletion_preview_csv_"
+            f"{plan.plan_fingerprint[:12]}"
+        ),
+        help=(
+            "Download every stored OHLCV row contained in this exact "
+            "deletion Preview, including rows not shown in the bounded table."
+        ),
+    )
+
+    st.caption(
+        "Approval is bound to the complete materialized deletion set and "
+        "plan fingerprint, not only to the rows displayed in this table."
+    )
+
+def _render_data_management_duplicate_repair_preview(
+    plan: MutationPlan,
+) -> None:
+    """
+    Render one exact materialized Duplicate Stored Key repair Preview.
+
+    All stored and proposed values come from MutationPlan.duplicate_repairs.
+    This helper does not refetch source data or reread SQLite.
+    """
+    if not isinstance(
+        plan,
+        MutationPlan,
+    ):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_duplicate_repair_plan()."
+        )
+
+    repair_count = len(
+        plan.duplicate_repairs
+    )
+    physical_rows_to_remove = sum(
+        repair.physical_row_count
+        for repair
+        in plan.duplicate_repairs
+    )
+    canonical_rows_to_insert = (
+        repair_count
+    )
+    net_rows_removed = (
+        physical_rows_to_remove
+        - canonical_rows_to_insert
+    )
+
+    st.markdown("---")
+    st.subheader(
+        "Database Change Preview"
+    )
+
+    st.caption(
+        "Review the exact Duplicate Stored Key repair. Nothing is changed by "
+        "this Preview. Approval is bound to every physical stored duplicate "
+        "row plus the exact canonical replacement observation."
+    )
+
+    request_columns = st.columns(
+        4
+    )
+
+    request_columns[0].metric(
+        "Operation",
+        plan.operation,
+    )
+    request_columns[1].metric(
+        "Source",
+        plan.source,
+    )
+    request_columns[2].metric(
+        "Duplicate Keys to Repair",
+        f"{repair_count:,}",
+    )
+    request_columns[3].metric(
+        "Latest Expected Session",
+        plan.latest_expected_stored_session.isoformat(),
+    )
+
+    requested_start = (
+        plan.requested_start_date.isoformat()
+        if plan.requested_start_date
+        is not None
+        else "—"
+    )
+    requested_end = (
+        plan.requested_end_date.isoformat()
+        if plan.requested_end_date
+        is not None
+        else "—"
+    )
+
+    st.caption(
+        "Acquisition envelope represented by this Preview: "
+        f"{requested_start} through {requested_end}. "
+        "Only the exact duplicate keys materialized below can be changed."
+    )
+
+    summary_columns = st.columns(
+        4
+    )
+
+    summary_columns[0].metric(
+        "Duplicate Keys",
+        f"{repair_count:,}",
+    )
+    summary_columns[1].metric(
+        "Stored Physical Rows",
+        f"{physical_rows_to_remove:,}",
+        help=(
+            "Every physical stored row captured for the duplicate keys "
+            "in this exact Preview."
+        ),
+    )
+    summary_columns[2].metric(
+        "Canonical Rows to Insert",
+        f"{canonical_rows_to_insert:,}",
+        help=(
+            "Exactly one validated canonical source observation will remain "
+            "for each successfully repaired logical key."
+        ),
+    )
+    summary_columns[3].metric(
+        "Net Excess Rows Removed",
+        f"{net_rows_removed:,}",
+        help=(
+            "Stored physical rows removed minus canonical rows inserted."
+        ),
+    )
+
+    if plan.duplicate_repairs:
+        st.info(
+            "**What this preview will do:** "
+            f"{repair_count:,} duplicate logical key(s) contain "
+            f"{physical_rows_to_remove:,} stored physical row(s). "
+            "If approved and applied, Data Management will atomically remove "
+            "all stored physical copies for each exact key and insert exactly "
+            f"{canonical_rows_to_insert:,} validated canonical source row(s), "
+            f"removing {net_rows_removed:,} net excess row(s)."
+        )
+
+        st.markdown(
+            "#### Duplicate Repair Actions"
+        )
+
+        action_rows = []
+
+        for repair in plan.duplicate_repairs:
+            action_rows.append(
+                {
+                    "Ticker": (
+                        repair.candidate.ticker
+                    ),
+                    "Date": (
+                        repair.candidate.date.isoformat()
+                    ),
+                    "Stored Physical Rows": (
+                        repair.physical_row_count
+                    ),
+                    "Canonical Rows After Repair": 1,
+                    "What Will Happen": (
+                        f"Replace {repair.physical_row_count} stored "
+                        "physical rows with 1 canonical row"
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(
+                action_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        for repair in plan.duplicate_repairs:
+            st.markdown(
+                f"##### {repair.candidate.ticker} — "
+                f"{repair.candidate.date.isoformat()}"
+            )
+
+            stored_rows = []
+
+            for row_number, stored_record in enumerate(
+                repair.stored_records,
+                start=1,
+            ):
+                stored_values = (
+                    stored_record.to_dict()
+                )
+
+                stored_rows.append(
+                    {
+                        "Stored Copy": row_number,
+                        "Open": stored_values[
+                            "Open"
+                        ],
+                        "High": stored_values[
+                            "High"
+                        ],
+                        "Low": stored_values[
+                            "Low"
+                        ],
+                        "Close": stored_values[
+                            "Close"
+                        ],
+                        "Adj Close": stored_values[
+                            "Adj Close"
+                        ],
+                        "Volume": stored_values[
+                            "Volume"
+                        ],
+                    }
+                )
+
+            st.caption(
+                "Physical stored copies captured by this exact Preview:"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    stored_rows
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            candidate_values = (
+                repair.candidate.to_dict()
+            )
+
+            st.caption(
+                "Canonical source observation that will replace all stored "
+                "copies for this logical key:"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Open": candidate_values[
+                                "Open"
+                            ],
+                            "High": candidate_values[
+                                "High"
+                            ],
+                            "Low": candidate_values[
+                                "Low"
+                            ],
+                            "Close": candidate_values[
+                                "Close"
+                            ],
+                            "Adj Close": candidate_values[
+                                "Adj Close"
+                            ],
+                            "Volume": candidate_values[
+                                "Volume"
+                            ],
+                        }
+                    ]
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+    else:
+        st.warning(
+            "No valid duplicate repair actions were materialized."
+        )
+
+    if plan.validation_warnings:
+        st.markdown(
+            "#### Warnings"
+        )
+
+        warning_rows = [
+            {
+                "Ticker": warning.ticker
+                or "—",
+                "Date": warning.date
+                or "—",
+                "Code": warning.code,
+                "Message": warning.message,
+            }
+            for warning
+            in plan.validation_warnings
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                warning_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.excluded_observations:
+        st.markdown(
+            "#### Rows Not Eligible"
+        )
+
+        excluded_rows = []
+
+        for observation in plan.excluded_observations:
+            for issue in observation.issues:
+                excluded_rows.append(
+                    {
+                        "Ticker": (
+                            observation.ticker
+                            or "—"
+                        ),
+                        "Date": (
+                            observation.date
+                            or "—"
+                        ),
+                        "Code": issue.code,
+                        "Reason": (
+                            issue.message
+                        ),
+                    }
+                )
+
+        st.dataframe(
+            pd.DataFrame(
+                excluded_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.validation_issues:
+        st.markdown(
+            "#### Blocking Issues"
+        )
+
+        st.caption(
+            "These issues prevent this duplicate-repair Preview from being "
+            "applied. Build a fresh valid Preview before making database "
+            "changes."
+        )
+
+        issue_rows = [
+            {
+                "Ticker": issue.ticker
+                or "—",
+                "Date": issue.date
+                or "—",
+                "Code": issue.code,
+                "Message": issue.message,
+            }
+            for issue
+            in plan.validation_issues
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                issue_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "Preview ID: "
+        f"{plan.plan_fingerprint} "
+        "— used internally to bind approval to this exact duplicate repair."
+    )
+
+
+def _render_data_management_mutation_preview(
+    plan: MutationPlan,
+) -> None:
+    """Render the exact materialized MutationPlan for administrator review."""
+    if not isinstance(plan, MutationPlan):
+        raise TypeError(
+            "plan must be a MutationPlan produced by "
+            "DataMutationManager.build_plan()."
+        )
+
+    if plan.operation in {
+        "Delete Range",
+        "Delete Ticker",
+    }:
+        _render_data_management_deletion_preview(
+            plan
+        )
+        return
+
+    if (
+        plan.operation
+        == "Repair Duplicate Stored Keys"
+    ):
+        _render_data_management_duplicate_repair_preview(
+            plan
+        )
+        return
+
+    summary = plan.summary()
+
+    new_count = int(
+        summary.get("new", 0) or 0
+    )
+    same_count = int(
+        summary.get("unchanged", 0) or 0
+    )
+    different_count = int(
+        summary.get("changed", 0) or 0
+    )
+    insert_count = int(
+        summary.get("insert", 0) or 0
+    )
+    replacement_count = int(
+        summary.get(
+            "replacement_candidate",
+            0,
+        ) or 0
+    )
+    preserve_count = int(
+        summary.get(
+            "preserve_existing",
+            0,
+        ) or 0
+    )
+    no_change_count = int(
+        summary.get(
+            "no_change",
+            0,
+        ) or 0
+    )
+    warning_count = int(
+        summary.get(
+            "validation_warnings",
+            0,
+        ) or 0
+    )
+    excluded_count = int(
+        summary.get(
+            "excluded_observations",
+            0,
+        ) or 0
+    )
+    source_missing_count = int(
+        summary.get(
+            "source_missing",
+            0,
+        ) or 0
+    )
+
+    source_missing_preserved_count = sum(
+        1
+        for observation in plan.source_missing
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "preserve_existing"
+            and observation.existing is not None
+        )
+    )
+
+    source_missing_unresolved_count = sum(
+        1
+        for observation in plan.source_missing
+        if (
+            str(
+                observation.planned_action
+            ).strip().lower()
+            == "unresolved"
+            and observation.existing is None
+        )
+    )
+
+    blocking_count = int(
+        summary.get(
+            "validation_issues",
+            0,
+        ) or 0
+    )
+    duplicate_count = int(
+        summary.get(
+            "duplicate_keys",
+            0,
+        ) or 0
+    )
+
+    compared_count = (
+        new_count
+        + same_count
+        + different_count
+    )
+
+    st.markdown("---")
+    st.subheader("Database Change Preview")
+    st.caption(
+        "Review exactly what Data Management would do to the authoritative "
+        "OHLCV database. Nothing is saved by this preview. First approve "
+        "these exact changes; then use Apply Approved Changes to execute "
+        "only the actions shown below. For an Add operation, existing "
+        "records are never overwritten; use a replacement operation when "
+        "you intend to replace stored values."
+    )
+
+    is_manual_entry = (
+        str(
+            plan.source
+        ).strip()
+        == "Manual Entry"
+    )
+
+    if is_manual_entry:
+        request_columns = st.columns(3)
+
+        request_columns[0].metric(
+            "Operation",
+            plan.operation,
+        )
+        request_columns[1].metric(
+            "Source",
+            plan.source,
+        )
+        request_columns[2].metric(
+            "Latest Expected Session",
+            plan.latest_expected_stored_session.isoformat(),
+        )
+
+        st.caption(
+            "Manual Entry evaluates only the explicitly entered observation. "
+            "Source Missing inference is not used for this Preview."
+        )
+
+    else:
+        request_columns = st.columns(4)
+
+        request_columns[0].metric(
+            "Operation",
+            plan.operation,
+        )
+        request_columns[1].metric(
+            "Source",
+            plan.source,
+        )
+        request_columns[2].metric(
+            "Requested Tickers",
+            f"{len(plan.requested_tickers):,}",
+        )
+        request_columns[3].metric(
+            "Latest Expected Session",
+            plan.latest_expected_stored_session.isoformat(),
+        )
+
+        requested_start = (
+            plan.requested_start_date.isoformat()
+            if plan.requested_start_date is not None
+            else "—"
+        )
+        requested_end = (
+            plan.requested_end_date.isoformat()
+            if plan.requested_end_date is not None
+            else "—"
+        )
+
+        st.caption(
+            f"Effective database range: {requested_start} through "
+            f"{requested_end}"
+        )
+
+    if plan.requested_tickers:
+        with st.expander(
+            "Requested ticker scope",
+            expanded=False,
+        ):
+            st.write(", ".join(plan.requested_tickers))
+
+    consequence_text = (
+        f"{compared_count:,} eligible source observations were compared "
+        f"with stored data: {new_count:,} new, {same_count:,} the same, "
+        f"and {different_count:,} different. "
+        f"If applied, {insert_count:,} records will be added, "
+        f"{replacement_count:,} existing records will be replaced, "
+        f"{preserve_count:,} differing existing records will be kept "
+        f"unchanged, and {no_change_count:,} matching records require "
+        "no change."
+    )
+
+    if excluded_count:
+        consequence_text += (
+            f" {excluded_count:,} returned source rows are not eligible "
+            "and will not be applied."
+        )
+
+    if source_missing_count:
+        consequence_text += (
+            f" {source_missing_count:,} expected sessions were missing "
+            "from the current yFinance response. Of those, "
+            f"{source_missing_preserved_count:,} stored records will be "
+            "kept unchanged despite the yFinance omission and "
+            f"{source_missing_unresolved_count:,} sessions remain missing "
+            "because neither the current yFinance response nor the database "
+            "contains a record. Data Management will not fabricate or "
+            "delete observations because yFinance omitted them from this "
+            "request."
+        )
+
+    if blocking_count or duplicate_count:
+        consequence_text += (
+            " This preview contains blocking issues and cannot be applied "
+            "until a new valid preview is built."
+        )
+
+    st.info(
+        "**What this preview will do:** "
+        + consequence_text
+    )
+
+    st.markdown("#### Change Summary")
+
+    summary_columns_1 = st.columns(5)
+
+    summary_columns_1[0].metric(
+        "New Records",
+        f"{new_count:,}",
+        help=(
+            "No stored record currently exists for this ticker and date."
+        ),
+    )
+    summary_columns_1[1].metric(
+        "Same as Stored",
+        f"{same_count:,}",
+        help=(
+            "The source OHLCV values exactly match the record already "
+            "stored for the same ticker and date."
+        ),
+    )
+    summary_columns_1[2].metric(
+        "Different from Stored",
+        f"{different_count:,}",
+        help=(
+            "The ticker and date already exist, but one or more stored "
+            "OHLCV values differ from the newly acquired source values. "
+            "This does not mean the database has already been changed."
+        ),
+    )
+    summary_columns_1[3].metric(
+        "Records to Add",
+        f"{insert_count:,}",
+        help=(
+            "New records that will be inserted if this preview is "
+            "approved and applied."
+        ),
+    )
+    summary_columns_1[4].metric(
+        "Records to Replace",
+        f"{replacement_count:,}",
+        help=(
+            "Existing records explicitly proposed for replacement if "
+            "this preview is approved and applied."
+        ),
+    )
+
+    summary_columns_2 = st.columns(4)
+
+    summary_columns_2[0].metric(
+        "Warnings",
+        f"{warning_count:,}",
+        help=(
+            "Items that deserve review but do not, by themselves, block "
+            "the database operation."
+        ),
+    )
+    summary_columns_2[1].metric(
+        "Rows Not Eligible",
+        f"{excluded_count:,}",
+        help=(
+            "Source rows that were returned but failed required validation. "
+            "They are excluded and will not be saved."
+        ),
+    )
+    summary_columns_2[2].metric(
+        "Blocking Issues",
+        f"{blocking_count:,}",
+        help=(
+            "Problems that prevent the entire preview from being applied. "
+            "A new valid preview must be built before database changes can "
+            "be made."
+        ),
+    )
+    summary_columns_2[3].metric(
+        "Duplicate Incoming Records",
+        f"{duplicate_count:,}",
+        help=(
+            "The same ticker/date appears more than once in the incoming "
+            "source set. Duplicate incoming identities block the preview "
+            "because Data Management cannot safely choose between them."
+        ),
+    )
+
+    if not is_manual_entry:
+        summary_columns_3 = st.columns(3)
+
+        summary_columns_3[0].metric(
+            "Missing From Current yFinance Response",
+            f"{source_missing_count:,}",
+            help=(
+                "Expected NYSE trading sessions for which the current "
+                "yFinance request returned no ticker-date row. This does not "
+                "mean yFinance never had the record; it means the row was "
+                "absent from the response used to build this Preview."
+            ),
+        )
+        summary_columns_3[1].metric(
+            "Stored Records Kept Despite yFinance Omission",
+            f"{source_missing_preserved_count:,}",
+            help=(
+                "yFinance returned no row for these expected ticker-date "
+                "sessions, but the database already contains one. The stored "
+                "record will be kept unchanged; a missing row in the current "
+                "yFinance response does not authorize deletion."
+            ),
+        )
+        summary_columns_3[2].metric(
+            "Still Missing After yFinance Check",
+            f"{source_missing_unresolved_count:,}",
+            help=(
+                "Neither the current yFinance response nor the database "
+                "contains a record for these expected trading sessions. "
+                "Data Management will not fabricate OHLCV values, so these "
+                "sessions remain missing."
+            ),
+        )
+
+    _render_data_management_source_data_preview(
+        plan
+    )
+
+    _render_data_management_stored_vs_proposed_preview(
+        plan
+    )
+
+    if plan.observations:
+        st.markdown("#### Record Comparison & Actions")
+        st.caption(
+            "Each row shows how the acquired source observation compares "
+            "with the authoritative stored record and what Data Management "
+            "would actually do if the preview is applied."
+        )
+
+        classification_labels = {
+            "new": "New",
+            "unchanged": "Same",
+            "changed": "Different",
+        }
+
+        action_labels = {
+            "insert": "Add Record",
+            "no_change": "No Change",
+            "preserve_existing": "Keep Stored Record",
+            "replacement_candidate": "Replace Stored Record",
+        }
+
+        observation_rows = []
+
+        for observation in plan.observations:
+            classification_key = str(
+                observation.classification
+            ).strip().lower()
+
+            action_key = str(
+                observation.planned_action
+            ).strip().lower()
+
+            observation_rows.append(
+                {
+                    "Ticker": observation.candidate.ticker,
+                    "Date": (
+                        observation.candidate.date.isoformat()
+                    ),
+                    "Compared with Stored Data": (
+                        classification_labels.get(
+                            classification_key,
+                            observation.classification,
+                        )
+                    ),
+                    "What Will Happen": (
+                        action_labels.get(
+                            action_key,
+                            observation.planned_action,
+                        )
+                    ),
+                    "Existing Record": (
+                        "Yes"
+                        if observation.collision
+                        else "No"
+                    ),
+                    "Fields That Differ": (
+                        ", ".join(
+                            observation.differing_fields
+                        )
+                        if observation.differing_fields
+                        else "—"
+                    ),
+                }
+            )
+
+        comparison_df = pd.DataFrame(
+            observation_rows
+        )
+
+        filter_row_one = st.columns(
+            [1.2, 1.4, 1.0]
+        )
+
+        with filter_row_one[0]:
+            comparison_filter = st.selectbox(
+                "Compared with Stored Data",
+                options=[
+                    "All",
+                    "New",
+                    "Same",
+                    "Different",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "classification_filter"
+                ),
+            )
+
+        with filter_row_one[1]:
+            action_filter = st.selectbox(
+                "What Will Happen",
+                options=[
+                    "All",
+                    "Add Record",
+                    "No Change",
+                    "Keep Stored Record",
+                    "Replace Stored Record",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "action_filter"
+                ),
+            )
+
+        with filter_row_one[2]:
+            existing_record_filter = st.selectbox(
+                "Existing Record",
+                options=[
+                    "All",
+                    "Yes",
+                    "No",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "existing_record_filter"
+                ),
+            )
+
+        filter_row_two = st.columns(
+            [1.2, 1.8]
+        )
+
+        with filter_row_two[0]:
+            differing_field_filter = st.selectbox(
+                "Fields That Differ",
+                options=[
+                    "All",
+                    "Any Difference",
+                    "Open",
+                    "High",
+                    "Low",
+                    "Close",
+                    "Adj Close",
+                    "Volume",
+                ],
+                index=0,
+                key=(
+                    "data_management_record_comparison_"
+                    "differing_field_filter"
+                ),
+            )
+
+        with filter_row_two[1]:
+            date_search = st.text_input(
+                "Search Date",
+                value="",
+                key=(
+                    "data_management_record_comparison_"
+                    "date_search"
+                ),
+                placeholder="Examples: 2024, 2024-12, 2024-12-18",
+                help=(
+                    "Filters the ISO Date column using partial text matching. "
+                    "For example, 2024-12 shows all December 2024 records."
+                ),
+            ).strip()
+
+        filtered_comparison_df = (
+            comparison_df.copy()
+        )
+
+        if comparison_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Compared with Stored Data"
+                    ]
+                    == comparison_filter
+                ]
+            )
+
+        if action_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "What Will Happen"
+                    ]
+                    == action_filter
+                ]
+            )
+
+        if existing_record_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Existing Record"
+                    ]
+                    == existing_record_filter
+                ]
+            )
+
+        if differing_field_filter == "Any Difference":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Fields That Differ"
+                    ]
+                    != "—"
+                ]
+            )
+        elif differing_field_filter != "All":
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Fields That Differ"
+                    ].apply(
+                        lambda value: (
+                            differing_field_filter
+                            in {
+                                field.strip()
+                                for field in str(
+                                    value
+                                ).split(",")
+                                if field.strip()
+                                and field.strip()
+                                != "—"
+                            }
+                        )
+                    )
+                ]
+            )
+
+        if date_search:
+            filtered_comparison_df = (
+                filtered_comparison_df[
+                    filtered_comparison_df[
+                        "Date"
+                    ]
+                    .astype(str)
+                    .str.contains(
+                        date_search,
+                        case=False,
+                        regex=False,
+                        na=False,
+                    )
+                ]
+            )
+
+        st.caption(
+            f"Showing {len(filtered_comparison_df):,} of "
+            f"{len(comparison_df):,} comparison row(s). "
+            "Filters affect display only; approval and Apply remain bound "
+            "to the complete unfiltered Database Change Preview."
+        )
+
+        if filtered_comparison_df.empty:
+            st.info(
+                "No comparison rows match the selected filters."
+            )
+        else:
+            st.dataframe(
+                filtered_comparison_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Compared with Stored Data": (
+                        st.column_config.TextColumn(
+                            "Compared with Stored Data",
+                            help=(
+                                "New: no stored ticker/date exists. "
+                                "Same: source and stored OHLCV values match. "
+                                "Different: the ticker/date exists but one or "
+                                "more OHLCV values differ."
+                            ),
+                        )
+                    ),
+                    "What Will Happen": (
+                        st.column_config.TextColumn(
+                            "What Will Happen",
+                            help=(
+                                "The exact database action authorized by this "
+                                "preview: Add Record, No Change, Keep Stored "
+                                "Record, or Replace Stored Record."
+                            ),
+                        )
+                    ),
+                    "Existing Record": (
+                        st.column_config.TextColumn(
+                            "Existing Record",
+                            help=(
+                                "Yes means the authoritative database already "
+                                "contains this ticker/date. This is not an "
+                                "error."
+                            ),
+                        )
+                    ),
+                    "Fields That Differ": (
+                        st.column_config.TextColumn(
+                            "Fields That Differ",
+                            help=(
+                                "The stored OHLCV fields whose values differ "
+                                "from the newly acquired source observation."
+                            ),
+                        )
+                    ),
+                },
+            )
+
+        if is_manual_entry:
+            manual_value_rows = []
+
+            for observation in plan.observations:
+                candidate_values = (
+                    observation.candidate.to_dict()
+                )
+
+                manual_value_rows.append(
+                    {
+                        "Open": candidate_values["Open"],
+                        "High": candidate_values["High"],
+                        "Low": candidate_values["Low"],
+                        "Close": candidate_values["Close"],
+                        "Adj Close": candidate_values["Adj Close"],
+                        "Volume": candidate_values["Volume"],
+                    }
+                )
+
+            if manual_value_rows:
+                st.caption(
+                    "Manual Entry values bound to this exact Preview:"
+                )
+
+                st.dataframe(
+                    pd.DataFrame(
+                        manual_value_rows,
+                        columns=[
+                            "Open",
+                            "High",
+                            "Low",
+                            "Close",
+                            "Adj Close",
+                            "Volume",
+                        ],
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Open": st.column_config.NumberColumn(
+                            "Open",
+                            format="%.3f",
+                        ),
+                        "High": st.column_config.NumberColumn(
+                            "High",
+                            format="%.3f",
+                        ),
+                        "Low": st.column_config.NumberColumn(
+                            "Low",
+                            format="%.3f",
+                        ),
+                        "Close": st.column_config.NumberColumn(
+                            "Close",
+                            format="%.3f",
+                        ),
+                        "Adj Close": st.column_config.NumberColumn(
+                            "Adj Close",
+                            format="%.3f",
+                        ),
+                        "Volume": st.column_config.NumberColumn(
+                            "Volume",
+                            format="%d",
+                        ),
+                    },
+                )
+
+    if plan.validation_warnings:
+        st.markdown("#### Warnings")
+
+        warning_rows = [
+            {
+                "Ticker": warning.ticker or "—",
+                "Date": warning.date or "—",
+                "Code": warning.code,
+                "Message": warning.message,
+            }
+            for warning in plan.validation_warnings
+        ]
+
+        st.dataframe(
+            pd.DataFrame(warning_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.excluded_observations:
+        st.markdown("#### Rows Not Eligible")
+        st.caption(
+            "These source rows were returned, but failed required "
+            "row-level validation. They are excluded from the database "
+            "actions and will not be saved."
+        )
+
+        excluded_rows = []
+
+        for observation in plan.excluded_observations:
+            for issue in observation.issues:
+                excluded_rows.append(
+                    {
+                        "Candidate Index": (
+                            observation.candidate_index
+                        ),
+                        "Ticker": (
+                            observation.ticker or "—"
+                        ),
+                        "Date": (
+                            observation.date or "—"
+                        ),
+                        "Code": issue.code,
+                        "Reason": issue.message,
+                    }
+                )
+
+        st.dataframe(
+            pd.DataFrame(excluded_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if plan.source_missing:
+        st.markdown(
+            "#### Missing From Current yFinance Response"
+        )
+        st.caption(
+            "These expected NYSE trading sessions were not returned in the "
+            "current yFinance response used for this Preview. If the "
+            "database already contains that ticker-date record, Data "
+            "Management keeps it unchanged. If neither yFinance nor the "
+            "database has the record, the session remains missing."
+        )
+
+        source_missing_action_labels = {
+            "preserve_existing": "Keep Stored Record",
+            "unresolved": "No Record Available",
+        }
+
+        source_missing_rows = []
+
+        for observation in plan.source_missing:
+            action_key = str(
+                observation.planned_action
+            ).strip().lower()
+
+            source_missing_rows.append(
+                {
+                    "Ticker": observation.ticker,
+                    "Date": observation.date.isoformat(),
+                    "Stored Record Exists": (
+                        "Yes"
+                        if observation.existing is not None
+                        else "No"
+                    ),
+                    "What Will Happen": (
+                        source_missing_action_labels.get(
+                            action_key,
+                            observation.planned_action,
+                        )
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(source_missing_rows),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Stored Record Exists": (
+                    st.column_config.TextColumn(
+                        "Stored Record Exists",
+                        help=(
+                            "Yes means the authoritative database already "
+                            "contains this ticker/date even though the source "
+                            "did not return it."
+                        ),
+                    )
+                ),
+                "What Will Happen": (
+                    st.column_config.TextColumn(
+                        "What Will Happen",
+                        help=(
+                            "Keep Stored Record: retain the existing database "
+                            "observation unchanged. No Record Available: "
+                            "neither source nor database contains an "
+                            "observation, so nothing can be added."
+                        ),
+                    )
+                ),
+            },
+        )
+
+    if plan.validation_issues:
+        st.markdown("#### Blocking Issues")
+        st.caption(
+            "These problems prevent the entire preview from being applied. "
+            "Correct the request and build a new valid preview before "
+            "making database changes."
+        )
+
+        issue_rows = [
+            {
+                "Ticker": issue.ticker or "—",
+                "Date": issue.date or "—",
+                "Code": issue.code,
+                "Message": issue.message,
+            }
+            for issue in plan.validation_issues
+        ]
+
+        st.dataframe(
+            pd.DataFrame(issue_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "Preview ID: "
+        f"{plan.plan_fingerprint} "
+        "— used internally to bind approval to this exact preview."
+    )
+
+
+def _invalidate_data_derived_session_state_after_mutation(
+    *,
+    rows_affected: int,
+) -> bool:
+    """
+    Invalidate session-derived dashboard state after authoritative OHLCV changes.
+
+    This runs only after DataMutationManager.commit_plan() has succeeded.
+    It does not touch database state, source acquisition, indicator formulas,
+    scoring semantics, ticker universes, or user selections.
+
+    Returns True when downstream state was invalidated.
+    """
+    affected = int(
+        rows_affected or 0
+    )
+
+    if affected <= 0:
+        return False
+
+    # Performance Heatmaps / Volume:
+    # Clearing the completed request state causes the existing dashboard
+    # path to fetch/rebuild from current authoritative data on next use.
+    st.session_state.performance_data = None
+    st.session_state.last_update = None
+    st.session_state.performance_request_signature = None
+
+    st.session_state.volume_data = None
+    st.session_state.volume_last_update = None
+    st.session_state.volume_request_signature = None
+
+    # Technical Analysis:
+    # Retain user controls, but retire analysis/results derived from the
+    # superseded OHLCV. Existing compute gating will rebuild on next use.
+    for key in (
+        "technical_analysis_data",
+        "technical_analysis_ticker",
+        "technical_analysis_timestamp",
+        "technical_analysis_rolling_days",
+        "technical_analysis_save_to_db",
+        "price_extremes_data",
+        "rh_last_params",
+        "rh_last_signals",
+    ):
+        st.session_state.pop(
+            key,
+            None,
+        )
+
+    # Stock Comparison:
+    # Clear all session-only data-derived caches plus rendered matrices.
+    # The stale flag intentionally suppresses Single Indicator's normal
+    # first-load auto-build so the administrator explicitly rebuilds.
+    _clear_scd_session_cache()
+
+    st.session_state.scd_signal_matrix = None
+    st.session_state.scd_matrix_last_run = None
+    st.session_state.scd_single_indicator_matrix = None
+    st.session_state.scd_single_indicator_matrix_last_run = None
+
+    st.session_state[
+        _DATA_MANAGEMENT_SCD_STALE_KEY
+    ] = True
+
+    return True
+
+
+def _render_data_management_mutation_controls(
+    plan: MutationPlan,
+) -> None:
+    """Render explicit confirmation and exact-plan Commit controls."""
+    confirmed_fingerprint = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY
+    )
+
+    is_confirmed = (
+        confirmed_fingerprint == plan.plan_fingerprint
+    )
+
+    is_deletion = (
+        plan.operation
+        in {
+            "Delete Range",
+            "Delete Ticker",
+        }
+    )
+
+    if not plan.can_commit:
+        st.error(
+            "This preview contains blocking issues. Changes cannot be "
+            "applied until a new valid preview is built."
+        )
+    elif is_confirmed:
+        st.success(
+            "These exact changes are approved and ready to apply."
+        )
+    else:
+        st.info(
+            "Review the database changes above, then approve them before "
+            "applying anything to the authoritative database."
+        )
+
+    is_manual_entry = (
+        str(
+            plan.source
+        ).strip()
+        == "Manual Entry"
+        and plan.operation
+        in {
+            "Manual Add",
+            "Manual Replace",
+        }
+    )
+
+    if is_manual_entry:
+        (
+            confirm_column,
+            commit_column,
+            edit_column,
+            discard_column,
+        ) = st.columns(4)
+    else:
+        (
+            confirm_column,
+            commit_column,
+            discard_column,
+        ) = st.columns(3)
+
+        edit_column = None
+
+    with confirm_column:
+        confirm_clicked = st.button(
+            "Approve These Changes",
+            key="data_management_mutation_confirm",
+            type="primary",
+            disabled=not plan.can_commit,
+            use_container_width=True,
+            help=(
+                "Approve this exact Database Change Preview. Approval does "
+                "not change the database. If a new preview is built, this "
+                "approval no longer applies."
+            ),
+        )
+
+    if confirm_clicked:
+        st.session_state[
+            _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY
+        ] = plan.plan_fingerprint
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+            None,
+        )
+        st.rerun()
+
+    with commit_column:
+        commit_clicked = st.button(
+            "Apply Approved Changes",
+            key="data_management_mutation_commit",
+            disabled=(
+                not plan.can_commit
+                or not is_confirmed
+            ),
+            use_container_width=True,
+            help=(
+                (
+                    "Apply only the approved deletion shown in this preview "
+                    "to the authoritative OHLCV database. This is the step "
+                    "that permanently deletes the approved stored records."
+                )
+                if is_deletion
+                else (
+                    "Apply only the approved actions shown in this preview "
+                    "to the authoritative OHLCV database. This is the step "
+                    "that actually inserts or replaces records when the "
+                    "approved plan calls for those actions."
+                )
+            ),
+        )
+
+    if commit_clicked:
+        mutation_manager = DataMutationManager()
+
+        try:
+            result = mutation_manager.commit_plan(
+                plan,
+                confirmed_plan_fingerprint=(
+                    confirmed_fingerprint
+                ),
+            )
+        except Exception as exc:
+            st.session_state[
+                _DATA_MANAGEMENT_MUTATION_ERROR_KEY
+            ] = str(exc)
+
+            st.session_state.pop(
+                _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+                None,
+            )
+
+            st.rerun()
+
+        derived_state_invalidated = (
+            _invalidate_data_derived_session_state_after_mutation(
+                rows_affected=result.rows_affected,
+            )
+        )
+
+        st.session_state[
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY
+        ] = {
+            "operation": plan.operation,
+            "plan_fingerprint": (
+                plan.plan_fingerprint
+            ),
+            "rows_affected": result.rows_affected,
+            "audit_id": result.audit_id,
+            "derived_state_invalidated": (
+                derived_state_invalidated
+            ),
+        }
+
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_PLAN_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_CONFIRMED_FINGERPRINT_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_ERROR_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_ACQUISITION_CONTEXT_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MAINTENANCE_REQUEST_KEY,
+            None,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MANUAL_ENTRY_CONTEXT_KEY,
+            None,
+        )
+
+        st.rerun()
+
+    edit_clicked = False
+
+    if edit_column is not None:
+        with edit_column:
+            edit_clicked = st.button(
+                "Edit Manual Inputs",
+                key=(
+                    "data_management_manual_entry_"
+                    "edit_inputs"
+                ),
+                use_container_width=True,
+                help=(
+                    "Discard this Preview and its approval while preserving "
+                    "the Manual Entry values so they can be corrected and "
+                    "previewed again. No database changes are made."
+                ),
+            )
+
+    if edit_clicked:
+        _discard_data_management_mutation_plan(
+            preserve_manual_entry_context=True,
+        )
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+            None,
+        )
+        st.rerun()
+
+    with discard_column:
+        discard_clicked = st.button(
+            "Cancel Preview",
+            key="data_management_mutation_discard",
+            use_container_width=True,
+            help=(
+                "Discard this preview and its approval so you can change "
+                "the Data Management request. No database changes are made."
+            ),
+        )
+
+    if discard_clicked:
+        _discard_data_management_mutation_plan()
+        st.session_state.pop(
+            _DATA_MANAGEMENT_MUTATION_RESULT_KEY,
+            None,
+        )
+        st.rerun()
+
+
+def _render_data_management_audit_history(
+    *,
+    mutation_manager: DataMutationManager,
+) -> None:
+    """
+    Render bounded, read-only Data Management Audit History.
+
+    This surface inspects successfully committed Data Management operations
+    only. It does not create, update, delete, replay, or otherwise mutate
+    audit events or daily_prices.
+    """
+    st.markdown("---")
+    st.subheader("Audit History")
+
+    st.caption(
+        "Review successfully committed Data Management operations. "
+        "A successful committed operation may have zero Rows Affected when "
+        "the approved operation required no physical database changes."
+    )
+
+    try:
+        audit_actions = (
+            mutation_manager.get_audit_actions()
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read Audit History actions: "
+            f"{exc}"
+        )
+        return
+
+    filter_columns = st.columns(
+        [1.2, 1.2, 1, 1]
+    )
+
+    with filter_columns[0]:
+        ticker_filter = st.text_input(
+            "Ticker",
+            value="",
+            key="data_management_audit_ticker_filter",
+            help=(
+                "Show committed audit events involving this ticker. "
+                "The filter includes ticker evidence stored in requested "
+                "scope, committed mutations, Source Missing evidence, "
+                "deletions, and duplicate repairs."
+            ),
+        )
+
+    with filter_columns[1]:
+        action_filter = st.selectbox(
+            "Action",
+            options=[
+                "All",
+                *audit_actions,
+            ],
+            index=0,
+            key="data_management_audit_action_filter",
+            help=(
+                "Filter by the committed Data Management action stored "
+                "in Audit History."
+            ),
+        )
+
+    with filter_columns[2]:
+        commit_date_from = st.date_input(
+            "Commit Date From",
+            value=None,
+            key="data_management_audit_commit_date_from",
+            help=(
+                "Filter by when the operation committed. "
+                "This is not the requested OHLCV Start Date."
+            ),
+        )
+
+    with filter_columns[3]:
+        commit_date_to = st.date_input(
+            "Commit Date To",
+            value=None,
+            key="data_management_audit_commit_date_to",
+            help=(
+                "Filter by when the operation committed. "
+                "This is not the requested OHLCV End Date."
+            ),
+        )
+
+    if (
+        commit_date_from is not None
+        and commit_date_to is not None
+        and commit_date_from > commit_date_to
+    ):
+        st.error(
+            "Commit Date From cannot be later than Commit Date To."
+        )
+        return
+
+    selected_action = (
+        None
+        if action_filter == "All"
+        else action_filter
+    )
+
+    try:
+        audit_history = (
+            mutation_manager.get_audit_history(
+                ticker=(
+                    ticker_filter
+                    if str(
+                        ticker_filter
+                    ).strip()
+                    else None
+                ),
+                action=selected_action,
+                start_commit_date=commit_date_from,
+                end_commit_date=commit_date_to,
+                limit=100,
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read Audit History: "
+            f"{exc}"
+        )
+        return
+
+    st.caption(
+        "Showing up to the 100 newest matching committed operations."
+    )
+
+    if not audit_history:
+        st.info(
+            "No Audit History events match the current filters."
+        )
+        return
+
+    history_rows = []
+
+    for record in audit_history:
+        history_rows.append(
+            {
+                "Audit ID": record.audit_id,
+                "Timestamp": record.timestamp,
+                "Action": record.action,
+                "Ticker": record.display_ticker,
+                "Start Date": (
+                    record.start_date
+                    or "\u2014"
+                ),
+                "End Date": (
+                    record.end_date
+                    or "\u2014"
+                ),
+                "Source": record.source,
+                "Rows Affected": (
+                    record.rows_affected
+                ),
+            }
+        )
+
+    history_frame = pd.DataFrame(
+        history_rows
+    )
+
+    st.dataframe(
+        history_frame,
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    records_by_id = {
+        record.audit_id: record
+        for record in audit_history
+    }
+
+    audit_id_options = [
+        None,
+        *[
+            record.audit_id
+            for record in audit_history
+        ],
+    ]
+
+    if (
+        st.session_state.get(
+            "data_management_audit_selected_event"
+        )
+        not in audit_id_options
+    ):
+        st.session_state[
+            "data_management_audit_selected_event"
+        ] = None
+
+    selected_audit_id = st.selectbox(
+        "View Audit Event",
+        options=audit_id_options,
+        index=0,
+        format_func=lambda audit_id: (
+            "Select an audit event..."
+            if audit_id is None
+            else (
+                f"#{audit_id} — "
+                f"{records_by_id[audit_id].timestamp} — "
+                f"{records_by_id[audit_id].action} — "
+                f"{records_by_id[audit_id].display_ticker}"
+            )
+        ),
+        key="data_management_audit_selected_event",
+        help=(
+            "Select one committed operation to inspect its stored "
+            "request scope, affected scope, summary, and audit evidence."
+        ),
+    )
+
+    if selected_audit_id is None:
+        return
+
+    record = records_by_id[
+        selected_audit_id
+    ]
+
+    details = record.details
+
+    st.markdown("#### Audit Event")
+
+    event_columns = st.columns(4)
+
+    event_columns[0].metric(
+        "Audit ID",
+        record.audit_id,
+    )
+    event_columns[1].metric(
+        "Action",
+        record.action,
+    )
+    event_columns[2].metric(
+        "Source",
+        record.source,
+    )
+    event_columns[3].metric(
+        "Rows Affected",
+        record.rows_affected,
+        help=(
+            "Physical database mutation effects performed by the "
+            "committed operation. Zero is a valid successful result."
+        ),
+    )
+
+    st.caption(
+        "Committed: "
+        f"{record.timestamp}"
+    )
+
+    if record.details_parse_error:
+        st.warning(
+            "Structured Audit Details could not be parsed. "
+            "The authoritative summary row remains available, and the "
+            "exact stored details value is preserved in the advanced "
+            "raw-details section below. "
+            f"Parser message: {record.details_parse_error}"
+        )
+
+    st.markdown("#### Requested Scope")
+
+    requested_ticker_label = (
+        ", ".join(
+            record.requested_tickers
+        )
+        if record.requested_tickers
+        else (
+            record.ticker
+            or "\u2014"
+        )
+    )
+
+    requested_scope_columns = (
+        st.columns(3)
+    )
+
+    requested_scope_columns[0].metric(
+        "Requested Ticker(s)",
+        requested_ticker_label,
+    )
+    requested_scope_columns[1].metric(
+        "Requested Start Date",
+        record.start_date
+        or "\u2014",
+    )
+    requested_scope_columns[2].metric(
+        "Requested End Date",
+        record.end_date
+        or "\u2014",
+    )
+
+    st.caption(
+        "Requested Scope reflects the scope persisted with the "
+        "committed operation. Manual Entry may legitimately have no "
+        "stored requested ticker/date scope because its affected record "
+        "identity is carried in committed mutation evidence."
+    )
+
+    st.markdown("#### Affected Scope")
+
+    affected_ticker_label = (
+        ", ".join(
+            record.affected_tickers
+        )
+        if record.affected_tickers
+        else "\u2014"
+    )
+
+    affected_scope_columns = (
+        st.columns(3)
+    )
+
+    affected_scope_columns[0].metric(
+        "Affected Ticker(s)",
+        affected_ticker_label,
+    )
+    affected_scope_columns[1].metric(
+        "First Affected Date",
+        record.affected_start_date
+        or "\u2014",
+    )
+    affected_scope_columns[2].metric(
+        "Last Affected Date",
+        record.affected_end_date
+        or "\u2014",
+    )
+
+    if record.rows_affected == 0:
+        st.caption(
+            "No physical database rows were changed by this committed "
+            "operation."
+        )
+
+    summary = details.get(
+        "summary",
+        {},
+    )
+
+    if isinstance(
+        summary,
+        dict,
+    ):
+        summary_labels = {
+            "new": "New Observations",
+            "changed": "Changed Observations",
+            "unchanged": "Unchanged Observations",
+            "insert": "Rows Inserted",
+            "replacement_candidate": (
+                "Replacement Candidates"
+            ),
+            "preserve_existing": (
+                "Existing Records Preserved"
+            ),
+            "no_change": "No Change",
+            "delete": "Rows Deleted",
+            "source_missing": "Source Missing",
+            "source_missing_preserved": (
+                "Source Missing Preserved"
+            ),
+            "source_missing_unresolved": (
+                "Source Missing Unresolved"
+            ),
+            "duplicate_keys": "Duplicate Keys",
+            "validation_issues": (
+                "Validation Issues"
+            ),
+            "validation_warnings": (
+                "Validation Warnings"
+            ),
+            "excluded_observations": (
+                "Excluded Observations"
+            ),
+            "excluded_validation_issues": (
+                "Excluded Validation Issues"
+            ),
+        }
+
+        summary_rows = []
+
+        for key, label in summary_labels.items():
+            if key not in summary:
+                continue
+
+            value = summary.get(
+                key
+            )
+
+            show_zero = (
+                record.rows_affected == 0
+                and key
+                in {
+                    "insert",
+                    "replacement_candidate",
+                    "delete",
+                }
+            )
+
+            if (
+                value
+                or show_zero
+            ):
+                summary_rows.append(
+                    {
+                        "Metric": label,
+                        "Count": value,
+                    }
+                )
+
+        if summary_rows:
+            st.markdown(
+                "#### Operation Summary"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    summary_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    validation_warnings = details.get(
+        "validation_warnings",
+        [],
+    )
+
+    if (
+        isinstance(
+            validation_warnings,
+            list,
+        )
+        and validation_warnings
+    ):
+        st.markdown(
+            "#### Validation Warnings"
+        )
+
+        st.dataframe(
+            pd.DataFrame(
+                validation_warnings
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    excluded_observations = details.get(
+        "excluded_observations",
+        [],
+    )
+
+    if (
+        isinstance(
+            excluded_observations,
+            list,
+        )
+        and excluded_observations
+    ):
+        st.markdown(
+            "#### Excluded Observations"
+        )
+
+        excluded_rows = []
+
+        for observation in excluded_observations:
+            if not isinstance(
+                observation,
+                dict,
+            ):
+                continue
+
+            issues = observation.get(
+                "issues",
+                [],
+            )
+
+            issue_messages = []
+
+            if isinstance(
+                issues,
+                list,
+            ):
+                for issue in issues:
+                    if not isinstance(
+                        issue,
+                        dict,
+                    ):
+                        continue
+
+                    message = str(
+                        issue.get(
+                            "message",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+
+                    code = str(
+                        issue.get(
+                            "code",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+
+                    if code and message:
+                        issue_messages.append(
+                            f"{code}: {message}"
+                        )
+                    elif message:
+                        issue_messages.append(
+                            message
+                        )
+                    elif code:
+                        issue_messages.append(
+                            code
+                        )
+
+            excluded_rows.append(
+                {
+                    "Candidate Index": (
+                        observation.get(
+                            "candidate_index"
+                        )
+                    ),
+                    "Ticker": (
+                        observation.get(
+                            "ticker"
+                        )
+                    ),
+                    "Date": (
+                        observation.get(
+                            "date"
+                        )
+                    ),
+                    "Issues": (
+                        " | ".join(
+                            issue_messages
+                        )
+                        if issue_messages
+                        else "\u2014"
+                    ),
+                }
+            )
+
+        if excluded_rows:
+            st.dataframe(
+                pd.DataFrame(
+                    excluded_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    mutations = details.get(
+        "mutations",
+        [],
+    )
+
+    if (
+        isinstance(
+            mutations,
+            list,
+        )
+        and mutations
+    ):
+        st.markdown(
+            "#### Committed Mutations"
+        )
+
+        mutation_rows = []
+
+        for mutation in mutations:
+            if not isinstance(
+                mutation,
+                dict,
+            ):
+                continue
+
+            differing_fields = (
+                mutation.get(
+                    "differing_fields",
+                    [],
+                )
+            )
+
+            if isinstance(
+                differing_fields,
+                list,
+            ):
+                differing_fields_label = (
+                    ", ".join(
+                        str(
+                            field
+                        )
+                        for field
+                        in differing_fields
+                    )
+                    if differing_fields
+                    else "\u2014"
+                )
+            else:
+                differing_fields_label = (
+                    str(
+                        differing_fields
+                    )
+                )
+
+            mutation_rows.append(
+                {
+                    "Ticker": (
+                        mutation.get(
+                            "Ticker"
+                        )
+                    ),
+                    "Date": (
+                        mutation.get(
+                            "Date"
+                        )
+                    ),
+                    "Classification": (
+                        mutation.get(
+                            "classification"
+                        )
+                    ),
+                    "Planned Action": (
+                        mutation.get(
+                            "planned_action"
+                        )
+                    ),
+                    "Differing Fields": (
+                        differing_fields_label
+                    ),
+                }
+            )
+
+        if mutation_rows:
+            st.dataframe(
+                pd.DataFrame(
+                    mutation_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    source_missing = details.get(
+        "source_missing",
+        [],
+    )
+
+    if (
+        isinstance(
+            source_missing,
+            list,
+        )
+        and source_missing
+    ):
+        st.markdown(
+            "#### Source Missing"
+        )
+
+        st.dataframe(
+            pd.DataFrame(
+                source_missing
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    deletion = details.get(
+        "deletion"
+    )
+
+    if isinstance(
+        deletion,
+        dict,
+    ):
+        st.markdown(
+            "#### Deletion Details"
+        )
+
+        deletion_rows = [
+            {
+                "Planned Action": (
+                    deletion.get(
+                        "planned_action"
+                    )
+                ),
+                "Materialized Rows": (
+                    deletion.get(
+                        "materialized_rows"
+                    )
+                ),
+                "First Affected Date": (
+                    deletion.get(
+                        "first_affected_date"
+                    )
+                ),
+                "Last Affected Date": (
+                    deletion.get(
+                        "last_affected_date"
+                    )
+                ),
+            }
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                deletion_rows
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    duplicate_repairs = details.get(
+        "duplicate_repairs",
+        [],
+    )
+
+    if (
+        isinstance(
+            duplicate_repairs,
+            list,
+        )
+        and duplicate_repairs
+    ):
+        st.markdown(
+            "#### Duplicate Repair Details"
+        )
+
+        for repair_index, repair in enumerate(
+            duplicate_repairs,
+            start=1,
+        ):
+            if not isinstance(
+                repair,
+                dict,
+            ):
+                continue
+
+            repair_ticker = str(
+                repair.get(
+                    "Ticker",
+                    "",
+                )
+                or ""
+            )
+
+            repair_date = str(
+                repair.get(
+                    "Date",
+                    "",
+                )
+                or ""
+            )
+
+            with st.expander(
+                (
+                    f"Repair {repair_index}: "
+                    f"{repair_ticker or '\u2014'} "
+                    f"{repair_date or '\u2014'}"
+                ),
+                expanded=False,
+            ):
+                repair_columns = (
+                    st.columns(3)
+                )
+
+                repair_columns[0].metric(
+                    "Planned Action",
+                    repair.get(
+                        "planned_action"
+                    )
+                    or "\u2014",
+                )
+
+                repair_columns[1].metric(
+                    "Physical Rows Removed",
+                    repair.get(
+                        "physical_rows_removed",
+                        0,
+                    ),
+                )
+
+                stored_records = repair.get(
+                    "stored_records",
+                    [],
+                )
+
+                stored_record_count = (
+                    len(
+                        stored_records
+                    )
+                    if isinstance(
+                        stored_records,
+                        list,
+                    )
+                    else 0
+                )
+
+                repair_columns[2].metric(
+                    "Stored Records",
+                    stored_record_count,
+                )
+
+                canonical_candidate = (
+                    repair.get(
+                        "canonical_candidate"
+                    )
+                )
+
+                if isinstance(
+                    canonical_candidate,
+                    dict,
+                ):
+                    st.caption(
+                        "Canonical replacement"
+                    )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            [
+                                canonical_candidate
+                            ]
+                        ),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+
+                if (
+                    isinstance(
+                        stored_records,
+                        list,
+                    )
+                    and stored_records
+                ):
+                    st.caption(
+                        "Stored physical records removed"
+                    )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            stored_records
+                        ),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+
+    st.markdown(
+        "#### Technical Identity"
+    )
+
+    technical_rows = [
+        {
+            "Field": "Plan Fingerprint",
+            "Value": (
+                record.plan_fingerprint
+            ),
+        },
+        {
+            "Field": "Baseline Fingerprint",
+            "Value": (
+                details.get(
+                    "baseline_fingerprint"
+                )
+                or "\u2014"
+            ),
+        },
+    ]
+
+    st.dataframe(
+        pd.DataFrame(
+            technical_rows
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander(
+        "Advanced — Raw Audit Details",
+        expanded=False,
+    ):
+        if record.raw_details is None:
+            st.caption(
+                "No raw Audit Details value is stored for this event."
+            )
+        elif not record.raw_details:
+            st.caption(
+                "The stored Audit Details value is empty."
+            )
+        else:
+            st.code(
+                record.raw_details,
+                language="json",
+            )
+
+
+def _render_data_management_mutation_workflow() -> None:
+    """
+    Render mutation result/error state and the active Preview when present.
+
+    With no active mutation state this helper is intentionally a no-op.
+    """
+    mutation_result = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_RESULT_KEY
+    )
+
+    mutation_error = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_ERROR_KEY
+    )
+
+    active_plan = st.session_state.get(
+        _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+    )
+
+    if (
+        mutation_result is None
+        and mutation_error is None
+        and active_plan is None
+    ):
+        return
+
+    if mutation_result is not None:
+        st.markdown("---")
+        st.subheader("Database Change Result")
+        st.success(
+            "The approved database changes were applied successfully."
+        )
+
+        result_columns = st.columns(3)
+
+        result_columns[0].metric(
+            "Operation",
+            mutation_result["operation"],
+        )
+        result_columns[1].metric(
+            "Rows Affected",
+            f"{mutation_result['rows_affected']:,}",
+        )
+        result_columns[2].metric(
+            "Audit ID",
+            str(mutation_result["audit_id"]),
+        )
+
+        if mutation_result.get(
+            "derived_state_invalidated"
+        ):
+            st.info(
+                "Authoritative OHLCV changed. Cached or previously rendered "
+                "dashboard results derived from the older data were cleared. "
+                "Performance and Technical Analysis will refresh through their "
+                "existing workflows; Stock Comparison will ask you to rebuild "
+                "its matrix."
+            )
+        elif int(
+            mutation_result.get(
+                "rows_affected",
+                0,
+            ) or 0
+        ) == 0:
+            st.caption(
+                "No OHLCV rows changed, so downstream dashboard state "
+                "did not need to be invalidated."
+            )
+
+        st.caption(
+            "Committed Preview fingerprint: "
+            f"{mutation_result['plan_fingerprint']}"
+        )
+
+    if mutation_error is not None:
+        st.markdown("---")
+        st.subheader("Database Change Error")
+        st.error(mutation_error)
+        st.caption(
+            "Approval was cleared. Review the error and build a fresh "
+            "Database Change Preview when required."
+        )
+
+    if active_plan is None:
+        return
+
+    if not isinstance(active_plan, MutationPlan):
+        st.error(
+            "Stored Data Management mutation state is invalid. "
+            "Discard the Preview and build a fresh one."
+        )
+        return
+
+    _render_data_management_mutation_preview(
+        active_plan
+    )
+    _render_data_management_mutation_controls(
+        active_plan
+    )
+
+
+def _render_data_management_universe_management(
+    *,
+    inventory: list[Dict[str, Any]],
+) -> None:
+    """
+    Render persistent ticker-universe membership and metadata controls.
+
+    Universe mutations are intentionally independent from authoritative
+    OHLCV storage. These controls do not acquire, replace, or delete
+    daily_prices observations.
+    """
+    universe_manager = UniverseManager()
+
+    stored_ticker_set = {
+        str(row["ticker"]).strip().upper()
+        for row in inventory
+        if row.get("ticker")
+    }
+
+    st.markdown("---")
+    st.subheader("Ticker Universe Management")
+    st.caption(
+        "Manage persistent Custom, Sector, and Country membership. "
+        "Universe membership is independent from stored market data: "
+        "adding a ticker to a bucket does not acquire OHLCV, and removing "
+        "a ticker from a bucket does not delete OHLCV."
+    )
+
+    try:
+        schema_status = (
+            universe_manager.get_schema_status()
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read persistent ticker-universe infrastructure: "
+            f"{exc}"
+        )
+        return
+
+    if not schema_status.compatible:
+        st.error(
+            "Persistent ticker-universe infrastructure is not compatible. "
+            "Universe management is unavailable until the schema is "
+            "corrected."
+        )
+        return
+
+    result_message = st.session_state.pop(
+        "data_management_universe_result",
+        None,
+    )
+    error_message = st.session_state.pop(
+        "data_management_universe_error",
+        None,
+    )
+
+    if result_message:
+        st.success(
+            result_message
+        )
+
+    if error_message:
+        st.error(
+            error_message
+        )
+
+    try:
+        custom_records = (
+            universe_manager.get_bucket_records(
+                "Custom"
+            )
+        )
+        sector_records = (
+            universe_manager.get_bucket_records(
+                "Sector"
+            )
+        )
+        country_records = (
+            universe_manager.get_bucket_records(
+                "Country"
+            )
+        )
+    except Exception as exc:
+        st.error(
+            "Unable to read persistent universe membership: "
+            f"{exc}"
+        )
+        return
+
+    summary_columns = st.columns(3)
+
+    summary_columns[0].metric(
+        "Custom",
+        len(custom_records),
+    )
+    summary_columns[1].metric(
+        "Sector",
+        len(sector_records),
+    )
+    summary_columns[2].metric(
+        "Country",
+        len(country_records),
+    )
+
+    (
+        add_tab,
+        remove_tab,
+        rename_tab,
+        reorder_tab,
+    ) = st.tabs(
+        [
+            "Add to Bucket",
+            "Remove from Bucket",
+            "Edit Display Name",
+            "Reorder in Bucket",
+        ]
+    )
+
+    with add_tab:
+        st.caption(
+            "Add one persistent bucket membership. "
+            "If the ticker has no metadata row yet, one is created. "
+            "No market data is acquired. A stored ticker with no "
+            "Custom, Sector, or Country membership is Unassigned; "
+            "adding it here assigns it to the selected bucket."
+        )
+
+        add_columns = st.columns(
+            [1, 1, 2]
+        )
+
+        with add_columns[0]:
+            add_ticker = st.text_input(
+                "Ticker",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "add_ticker"
+                ),
+            ).strip().upper()
+
+        with add_columns[1]:
+            add_bucket = st.selectbox(
+                "Bucket",
+                options=[
+                    "Custom",
+                    "Sector",
+                    "Country",
+                ],
+                key=(
+                    "data_management_universe_"
+                    "add_bucket"
+                ),
+            )
+
+        with add_columns[2]:
+            add_display_name = st.text_input(
+                "Display name for new ticker (optional)",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "add_display_name"
+                ),
+                help=(
+                    "Used only when ticker metadata does not already "
+                    "exist. Existing display names are not silently "
+                    "overwritten."
+                ),
+            ).strip()
+
+        if add_ticker:
+            try:
+                current_memberships = (
+                    universe_manager.get_bucket_memberships(
+                        add_ticker
+                    )
+                )
+
+                current_display_name = (
+                    universe_manager.get_display_name(
+                        add_ticker
+                    )
+                )
+
+                membership_labels = [
+                    membership.bucket
+                    for membership
+                    in current_memberships
+                ]
+
+                if membership_labels:
+                    membership_text = ", ".join(
+                        membership_labels
+                    )
+                    state_text = (
+                        "Current membership"
+                        if len(membership_labels) == 1
+                        else "Current memberships"
+                    )
+
+                    st.info(
+                        f"{state_text}: {membership_text}"
+                    )
+
+                elif add_ticker in stored_ticker_set:
+                    st.info(
+                        "Current status: Unassigned — "
+                        "stored OHLCV exists, but this ticker has "
+                        "no persistent Custom, Sector, or Country "
+                        "membership."
+                    )
+
+                else:
+                    st.info(
+                        "Current memberships: none — "
+                        "this ticker is not currently stored in "
+                        "daily_prices."
+                    )
+
+                st.caption(
+                    "Current display name: "
+                    f"{current_display_name}"
+                )
+
+            except Exception as exc:
+                st.warning(
+                    "Unable to inspect current ticker state: "
+                    f"{exc}"
+                )
+
+        if st.button(
+            "Add to Bucket",
+            key=(
+                "data_management_universe_"
+                "add_button"
+            ),
+            type="primary",
+        ):
+            if not add_ticker:
+                st.warning(
+                    "Enter a ticker before adding membership."
+                )
+            else:
+                try:
+                    add_result = (
+                        universe_manager.add_to_bucket(
+                            ticker=add_ticker,
+                            bucket=add_bucket,
+                            display_name=(
+                                add_display_name
+                                if add_display_name
+                                else None
+                            ),
+                        )
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Added {add_result.ticker} to "
+                        f"{add_result.bucket} at position "
+                        f"{add_result.sort_order}."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+    with remove_tab:
+        st.caption(
+            "Remove exactly one bucket membership. "
+            "Other memberships, ticker metadata, and stored OHLCV "
+            "are preserved. If this is the ticker's final bucket "
+            "membership and stored OHLCV exists, the ticker will "
+            "become Unassigned."
+        )
+
+        remove_bucket = st.selectbox(
+            "Bucket",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+            ],
+            key=(
+                "data_management_universe_"
+                "remove_bucket"
+            ),
+        )
+
+        remove_record_map = {
+            "Custom": custom_records,
+            "Sector": sector_records,
+            "Country": country_records,
+        }
+
+        remove_records = remove_record_map[
+            remove_bucket
+        ]
+
+        if not remove_records:
+            st.info(
+                f"{remove_bucket} has no persistent members."
+            )
+        else:
+            remove_name_map = {
+                record.ticker: record.display_name
+                for record in remove_records
+            }
+
+            remove_ticker = st.selectbox(
+                "Ticker to remove",
+                options=[
+                    record.ticker
+                    for record in remove_records
+                ],
+                format_func=lambda ticker: (
+                    f"{remove_name_map[ticker]} "
+                    f"({ticker})"
+                    if (
+                        remove_name_map[ticker]
+                        and remove_name_map[ticker]
+                        != ticker
+                    )
+                    else ticker
+                ),
+                key=(
+                    "data_management_universe_"
+                    "remove_ticker"
+                ),
+            )
+
+            remove_confirmed = st.checkbox(
+                (
+                    "I understand this removes only the "
+                    f"{remove_bucket} membership and does "
+                    "not delete stored market data."
+                ),
+                key=(
+                    "data_management_universe_"
+                    "remove_confirmed"
+                ),
+            )
+
+            if st.button(
+                "Remove from Bucket",
+                key=(
+                    "data_management_universe_"
+                    "remove_button"
+                ),
+            ):
+                if not remove_confirmed:
+                    st.warning(
+                        "Confirm the membership-only removal "
+                        "before continuing."
+                    )
+                else:
+                    try:
+                        remove_result = (
+                            universe_manager.remove_from_bucket(
+                                ticker=remove_ticker,
+                                bucket=remove_bucket,
+                            )
+                        )
+
+                        st.session_state[
+                            "data_management_universe_result"
+                        ] = (
+                            f"Removed {remove_result.ticker} "
+                            f"from {remove_result.bucket}. "
+                            "Ticker metadata and stored market "
+                            "data were preserved."
+                        )
+
+                        st.session_state.pop(
+                            "data_management_universe_error",
+                            None,
+                        )
+
+                        st.rerun()
+
+                    except Exception as exc:
+                        st.session_state[
+                            "data_management_universe_error"
+                        ] = str(exc)
+
+                        st.rerun()
+
+    with rename_tab:
+        st.caption(
+            "Edit the canonical ticker-level display name. "
+            "This does not change bucket membership or stored OHLCV."
+        )
+
+        rename_columns = st.columns(
+            [1, 2]
+        )
+
+        with rename_columns[0]:
+            rename_ticker = st.text_input(
+                "Ticker",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "rename_ticker"
+                ),
+            ).strip().upper()
+
+        with rename_columns[1]:
+            rename_display_name = st.text_input(
+                "New display name",
+                value="",
+                key=(
+                    "data_management_universe_"
+                    "rename_display_name"
+                ),
+            ).strip()
+
+        if rename_ticker:
+            try:
+                current_name = (
+                    universe_manager.get_display_name(
+                        rename_ticker
+                    )
+                )
+                current_memberships = (
+                    universe_manager.get_bucket_memberships(
+                        rename_ticker
+                    )
+                )
+
+                st.caption(
+                    "Current persistent state — "
+                    f"Display name: {current_name}; "
+                    "Memberships: "
+                    + (
+                        ", ".join(
+                            membership.bucket
+                            for membership
+                            in current_memberships
+                        )
+                        if current_memberships
+                        else "none"
+                    )
+                )
+            except Exception as exc:
+                st.warning(
+                    "Unable to inspect current ticker state: "
+                    f"{exc}"
+                )
+
+        if st.button(
+            "Update Display Name",
+            key=(
+                "data_management_universe_"
+                "rename_button"
+            ),
+        ):
+            if not rename_ticker:
+                st.warning(
+                    "Enter a ticker before updating its display name."
+                )
+            elif not rename_display_name:
+                st.warning(
+                    "Enter a new display name."
+                )
+            else:
+                try:
+                    rename_result = (
+                        universe_manager.update_display_name(
+                            ticker=rename_ticker,
+                            display_name=rename_display_name,
+                        )
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Updated {rename_result.ticker} display "
+                        f"name from "
+                        f"'{rename_result.previous_display_name}' "
+                        f"to '{rename_result.display_name}'."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+    with reorder_tab:
+        st.caption(
+            "Move one ticker up or down within a single persistent "
+            "bucket. Membership in all buckets remains unchanged."
+        )
+
+        reorder_bucket = st.selectbox(
+            "Bucket",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+            ],
+            key=(
+                "data_management_universe_"
+                "reorder_bucket"
+            ),
+        )
+
+        reorder_record_map = {
+            "Custom": custom_records,
+            "Sector": sector_records,
+            "Country": country_records,
+        }
+
+        reorder_records = list(
+            reorder_record_map[
+                reorder_bucket
+            ]
+        )
+
+        if not reorder_records:
+            st.info(
+                f"{reorder_bucket} has no persistent members."
+            )
+        else:
+            reorder_name_map = {
+                record.ticker: record.display_name
+                for record in reorder_records
+            }
+
+            reorder_tickers = [
+                record.ticker
+                for record in reorder_records
+            ]
+
+            reorder_ticker = st.selectbox(
+                "Ticker to move",
+                options=reorder_tickers,
+                format_func=lambda ticker: (
+                    f"{reorder_name_map[ticker]} "
+                    f"({ticker})"
+                    if (
+                        reorder_name_map[ticker]
+                        and reorder_name_map[ticker]
+                        != ticker
+                    )
+                    else ticker
+                ),
+                key=(
+                    "data_management_universe_"
+                    "reorder_ticker"
+                ),
+            )
+
+            current_index = reorder_tickers.index(
+                reorder_ticker
+            )
+
+            st.caption(
+                f"Current position: "
+                f"{current_index + 1} of "
+                f"{len(reorder_tickers)}"
+            )
+
+            up_column, down_column = st.columns(2)
+
+            with up_column:
+                move_up = st.button(
+                    "Move Up",
+                    key=(
+                        "data_management_universe_"
+                        "move_up"
+                    ),
+                    disabled=(
+                        current_index == 0
+                    ),
+                )
+
+            with down_column:
+                move_down = st.button(
+                    "Move Down",
+                    key=(
+                        "data_management_universe_"
+                        "move_down"
+                    ),
+                    disabled=(
+                        current_index
+                        == len(reorder_tickers) - 1
+                    ),
+                )
+
+            if move_up or move_down:
+                proposed_order = list(
+                    reorder_tickers
+                )
+
+                target_index = (
+                    current_index - 1
+                    if move_up
+                    else current_index + 1
+                )
+
+                (
+                    proposed_order[current_index],
+                    proposed_order[target_index],
+                ) = (
+                    proposed_order[target_index],
+                    proposed_order[current_index],
+                )
+
+                try:
+                    reorder_result = (
+                        universe_manager.reorder_bucket(
+                            bucket=reorder_bucket,
+                            ordered_tickers=proposed_order,
+                        )
+                    )
+
+                    new_position = (
+                        reorder_result.ordered_tickers.index(
+                            reorder_ticker
+                        )
+                        + 1
+                    )
+
+                    st.session_state[
+                        "data_management_universe_result"
+                    ] = (
+                        f"Moved {reorder_ticker} to position "
+                        f"{new_position} in {reorder_bucket}."
+                    )
+
+                    st.session_state.pop(
+                        "data_management_universe_error",
+                        None,
+                    )
+
+                    st.rerun()
+
+                except Exception as exc:
+                    st.session_state[
+                        "data_management_universe_error"
+                    ] = str(exc)
+
+                    st.rerun()
+
+
+def show_data_management():
+    """Render Data Management inspection and controlled mutation workflows."""
+    st.title("Data Management")
+    st.caption(
+        "Inspect authoritative OHLCV coverage and use controlled "
+        "Preview → Approve → Apply workflows to manage stored market data."
+    )
+
+    mutation_manager = DataMutationManager()
+
+    try:
+        audit_status = (
+            mutation_manager.get_audit_schema_status()
+        )
+
+        if not audit_status.exists:
+            audit_status = (
+                mutation_manager.initialize_audit_schema()
+            )
+
+        if not audit_status.compatible:
+            missing_columns = ", ".join(
+                audit_status.missing_columns
+            )
+
+            st.error(
+                "Data Management audit infrastructure is incompatible. "
+                "Database changes are unavailable until the audit schema "
+                "is corrected."
+                + (
+                    f" Missing required column(s): {missing_columns}."
+                    if missing_columns
+                    else ""
+                )
+            )
+            return
+
+    except Exception as exc:
+        st.error(
+            "Unable to initialize Data Management audit infrastructure: "
+            f"{exc}"
+        )
+        return
+
+    manager = DatabaseManager()
+
+    try:
+        inventory = manager.get_ticker_inventory()
+        overview = manager.get_database_overview(
+            inventory=inventory
+        )
+    except Exception as exc:
+        st.error(f"Unable to read the market-data database: {exc}")
+        return
+
+    st.subheader("Database Overview")
+
+    primary_metric_columns = st.columns(4)
+
+    primary_metric_columns[0].metric(
+        "Unique Tickers",
+        f"{overview['unique_tickers']:,}",
+    )
+    primary_metric_columns[1].metric(
+        "Total OHLCV Records",
+        f"{overview['total_records']:,}",
+    )
+    primary_metric_columns[2].metric(
+        "Earliest Stored Record",
+        overview["earliest_date"] or "—",
+    )
+    primary_metric_columns[3].metric(
+        "Latest Expected Stored Session",
+        overview["latest_expected_stored_session"] or "—",
+    )
+
+    health_metric_columns = st.columns(4)
+
+    health_metric_columns[0].metric(
+        "Tickers Current",
+        f"{overview['current_tickers']:,}",
+    )
+    health_metric_columns[1].metric(
+        "Tickers Stale",
+        f"{overview['stale_tickers']:,}",
+    )
+    health_metric_columns[2].metric(
+        "Tickers with Internal Gaps",
+        f"{overview['tickers_with_internal_gaps']:,}",
+    )
+    health_metric_columns[3].metric(
+        "Tickers with Large Price Moves",
+        f"{overview['tickers_with_large_price_moves']:,}",
+    )
+
+    st.markdown("---")
+    st.subheader("Ticker Inventory")
+
+    universe_column, health_column, search_column = st.columns([1, 1, 2])
+
+    with universe_column:
+        universe_filter = st.selectbox(
+            "Universe",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+                "Unassigned",
+                "All",
+            ],
+            index=0,
+            key="data_management_universe_filter",
+        )
+
+    with health_column:
+        health_filter = st.selectbox(
+            "Health Filter",
+            options=[
+                "All",
+                "Current",
+                "Stale",
+                "Internal Gaps",
+                "Large Price Moves",
+            ],
+            index=0,
+            key="data_management_health_filter",
+        )
+
+    with search_column:
+        ticker_search = st.text_input(
+            "Search ticker",
+            value="",
+            key="data_management_ticker_search",
+        ).strip().upper()
+
+    filtered_inventory = []
+
+    for row in inventory:
+        buckets = row["buckets"]
+
+        if universe_filter == "All":
+            include_row = True
+        elif universe_filter == "Unassigned":
+            include_row = not buckets
+        else:
+            include_row = universe_filter in buckets
+
+        if health_filter == "Current":
+            include_row = (
+                include_row
+                and row["is_current"]
+            )
+        elif health_filter == "Stale":
+            include_row = (
+                include_row
+                and row["is_stale"]
+            )
+        elif health_filter == "Internal Gaps":
+            include_row = (
+                include_row
+                and row["internal_gaps"] > 0
+            )
+        elif health_filter == "Large Price Moves":
+            include_row = (
+                include_row
+                and bool(row["large_price_moves"])
+            )
+
+        if ticker_search:
+            include_row = (
+                include_row
+                and ticker_search in row["ticker"]
+            )
+
+        if include_row:
+            filtered_inventory.append(row)
+
+    display_rows = [
+        {
+            "Ticker": row["ticker"],
+            "Bucket(s)": (
+                ", ".join(row["buckets"])
+                if row["buckets"]
+                else "Unassigned"
+            ),
+            "Records": row["records"],
+            "First Date": row["first_date"],
+            "Last Date": row["last_date"],
+            "Coverage": (
+                f"{row['coverage']:.1f}%"
+                if row["coverage"] is not None
+                else "—"
+            ),
+            "Internal Gaps": row["internal_gaps"],
+            "Status": row["status"] or "—",
+            "Large Price Moves": (
+                ", ".join(
+                    event["date"]
+                    for event in row["large_price_moves"]
+                )
+                if row["large_price_moves"]
+                else "—"
+            ),
+        }
+        for row in filtered_inventory
+    ]
+
+    st.caption(
+        f"Showing {len(display_rows):,} of "
+        f"{len(inventory):,} stored tickers."
+    )
+
+    if display_rows:
+        inventory_df = pd.DataFrame(display_rows)
+
+        st.dataframe(
+            inventory_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info(
+            "No stored tickers match the selected universe and search."
+        )
+
+    st.caption(
+        "**Coverage** — Percentage of expected NYSE sessions present "
+        "between First Date and Last Date. "
+        "**Internal Gaps** — Expected NYSE sessions missing between "
+        "First Date and Last Date. "
+        "**Status** — Current when Last Date reaches the latest session "
+        "expected to be stored under the next-day daily-data policy; "
+        "Stale when Last Date is earlier. "
+        "**Large Price Moves** — Dates where Close changed by at least 25% "
+        "versus the immediately preceding expected NYSE session. If that "
+        "prior session is missing from the database, no Large Price Move "
+        "is evaluated."
+    )
+
+    _render_data_management_universe_management(
+        inventory=inventory,
+    )
+
+    st.markdown("---")
+    st.subheader("Data Explorer")
+    st.caption(
+        "Inspect raw stored OHLCV records. Select stored ticker(s), a Start Date, "
+        "and an End Date, then run the query. Calendar endpoints do not need to "
+        "be NYSE trading sessions."
+    )
+
+    stored_tickers = [row["ticker"] for row in inventory]
+    stored_ticker_set = set(stored_tickers)
+
+    def _parse_data_explorer_tickers(raw_value):
+        seen = set()
+        parsed = []
+
+        for value in str(raw_value or "").split(","):
+            ticker = value.strip().upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            parsed.append(ticker)
+
+        return parsed
+
+    def _sync_data_explorer_end_date():
+        selected_start_date = st.session_state.get(
+            "data_management_explorer_start_date"
+        )
+        if selected_start_date is not None:
+            st.session_state[
+                "data_management_explorer_end_date"
+            ] = selected_start_date
+
+    def _add_data_explorer_browse_tickers(candidate_tickers):
+        current_tickers = _parse_data_explorer_tickers(
+            st.session_state.get(
+                "data_management_explorer_ticker_input",
+                "",
+            )
+        )
+        selected_browse_tickers = [
+            ticker
+            for ticker in candidate_tickers
+            if st.session_state.get(
+                f"data_management_explorer_browse_{ticker}",
+                False,
+            )
+        ]
+
+        merged_tickers = []
+        seen = set()
+        for ticker in current_tickers + selected_browse_tickers:
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            merged_tickers.append(ticker)
+
+        st.session_state[
+            "data_management_explorer_ticker_input"
+        ] = ", ".join(merged_tickers)
+
+    if "data_management_explorer_ticker_input" not in st.session_state:
+        st.session_state["data_management_explorer_ticker_input"] = ""
+
+    ticker_input = st.text_input(
+        "Ticker(s)",
+        key="data_management_explorer_ticker_input",
+        placeholder="AAPL, MSFT, NVDA",
+        help=(
+            "Enter one or more stored ticker symbols separated by commas. "
+            "Ticker matching is case-insensitive."
+        ),
+    )
+
+    parsed_tickers = _parse_data_explorer_tickers(ticker_input)
+    invalid_tickers = [
+        ticker
+        for ticker in parsed_tickers
+        if ticker not in stored_ticker_set
+    ]
+    selected_tickers = [
+        ticker
+        for ticker in parsed_tickers
+        if ticker in stored_ticker_set
+    ]
+
+    if invalid_tickers:
+        st.warning(
+            "Not stored in database: "
+            + ", ".join(invalid_tickers)
+        )
+    elif selected_tickers:
+        st.caption(
+            "Selected: "
+            + " · ".join(selected_tickers)
+        )
+
+    with st.expander("Browse / Select Tickers", expanded=False):
+        browse_universe = st.selectbox(
+            "Universe",
+            options=[
+                "Custom",
+                "Sector",
+                "Country",
+                "Unassigned",
+                "All",
+            ],
+            index=0,
+            key="data_management_explorer_browse_universe",
+        )
+
+        browse_candidates = []
+        for row in inventory:
+            buckets = row["buckets"]
+
+            if browse_universe == "All":
+                include_ticker = True
+            elif browse_universe == "Unassigned":
+                include_ticker = not buckets
+            else:
+                include_ticker = browse_universe in buckets
+
+            if include_ticker:
+                browse_candidates.append(row["ticker"])
+
+        if browse_candidates:
+            browse_columns = st.columns(4)
+            for index, ticker in enumerate(browse_candidates):
+                with browse_columns[index % len(browse_columns)]:
+                    st.checkbox(
+                        ticker,
+                        key=f"data_management_explorer_browse_{ticker}",
+                    )
+
+            st.button(
+                "Add Selected",
+                key="data_management_explorer_add_selected",
+                on_click=_add_data_explorer_browse_tickers,
+                args=(tuple(browse_candidates),),
+            )
+        else:
+            st.info(
+                "No stored tickers are available in the selected universe."
+            )
+
+    if "data_management_explorer_start_date" not in st.session_state:
+        st.session_state["data_management_explorer_start_date"] = None
+    if "data_management_explorer_end_date" not in st.session_state:
+        st.session_state["data_management_explorer_end_date"] = None
+
+    start_date_column, end_date_column = st.columns(2)
+
+    with start_date_column:
+        explorer_start_date = st.date_input(
+            "Start Date",
+            key="data_management_explorer_start_date",
+            on_change=_sync_data_explorer_end_date,
+        )
+
+    with end_date_column:
+        explorer_end_date = st.date_input(
+            "End Date",
+            key="data_management_explorer_end_date",
+        )
+
+    run_explorer_query = st.button(
+        "Run Query",
+        key="data_management_explorer_run_query",
+        type="primary",
+    )
+
+    if run_explorer_query:
+        if invalid_tickers:
+            st.error(
+                "Remove or correct tickers that are not stored in the database "
+                "before running the query."
+            )
+        elif not selected_tickers:
+            st.error("Enter at least one ticker stored in the database.")
+        elif explorer_start_date is None or explorer_end_date is None:
+            st.error("Start Date and End Date are required.")
+        elif explorer_start_date > explorer_end_date:
+            st.error("Start Date cannot be later than End Date.")
+        else:
+            try:
+                explorer_records = manager.get_ohlcv_records(
+                    tickers=selected_tickers,
+                    start_date=explorer_start_date,
+                    end_date=explorer_end_date,
+                )
+                st.session_state[
+                    "data_management_explorer_result"
+                ] = explorer_records
+                st.session_state[
+                    "data_management_explorer_query"
+                ] = {
+                    "tickers": list(selected_tickers),
+                    "start_date": explorer_start_date.isoformat(),
+                    "end_date": explorer_end_date.isoformat(),
+                }
+            except Exception as exc:
+                st.error(f"Unable to read OHLCV records: {exc}")
+
+    explorer_query = st.session_state.get(
+        "data_management_explorer_query"
+    )
+    explorer_records = st.session_state.get(
+        "data_management_explorer_result"
+    )
+
+    if explorer_query is not None and explorer_records is not None:
+        query_tickers = explorer_query.get("tickers", [])
+        query_start_date = explorer_query.get("start_date")
+        query_end_date = explorer_query.get("end_date")
+
+        st.caption(
+            "Last query: "
+            f"{', '.join(query_tickers)} | "
+            f"{query_start_date} → {query_end_date} | "
+            f"{len(explorer_records):,} record(s)"
+        )
+
+        if explorer_records:
+            explorer_columns = [
+                "Ticker",
+                "Date",
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Adj Close",
+                "Volume",
+            ]
+            explorer_df = pd.DataFrame(
+                explorer_records,
+                columns=explorer_columns,
+            )
+
+            st.dataframe(
+                explorer_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            csv_bytes = explorer_df.to_csv(
+                index=False
+            ).encode("utf-8")
+            st.download_button(
+                "Download CSV",
+                data=csv_bytes,
+                file_name=(
+                    "OHLCV_"
+                    f"{query_start_date}_to_{query_end_date}.csv"
+                ),
+                mime="text/csv",
+                key="data_management_explorer_download_csv",
+            )
+        else:
+            st.info(
+                "No stored OHLCV records were found for the selected "
+                "ticker(s) and date range."
+            )
+
+    st.markdown("---")
+    st.subheader("Ticker Diagnostics")
+    st.caption(
+        "Inspect detailed database-health evidence for one stored ticker."
+    )
+
+    diagnostics_ticker_options = [""] + stored_tickers
+    selected_diagnostics_ticker = st.selectbox(
+        "Ticker",
+        options=diagnostics_ticker_options,
+        index=0,
+        key="data_management_diagnostics_ticker",
+        format_func=lambda ticker: (
+            "Select a stored ticker"
+            if ticker == ""
+            else ticker
+        ),
+    )
+
+    def _set_explorer_from_diagnostics(
+        ticker,
+        start_date_value=None,
+        end_date_value=None,
+    ):
+        st.session_state[
+            "data_management_explorer_ticker_input"
+        ] = str(ticker).strip().upper()
+
+        if start_date_value is not None:
+            st.session_state[
+                "data_management_explorer_start_date"
+            ] = date.fromisoformat(str(start_date_value))
+
+        if end_date_value is not None:
+            st.session_state[
+                "data_management_explorer_end_date"
+            ] = date.fromisoformat(str(end_date_value))
+
+        st.session_state.pop(
+            "data_management_explorer_result",
+            None,
+        )
+        st.session_state.pop(
+            "data_management_explorer_query",
+            None,
+        )
+
+    maintenance_handoff_disabled = (
+        st.session_state.get(
+            _DATA_MANAGEMENT_MUTATION_PLAN_KEY
+        )
+        is not None
+    )
+
+    if not selected_diagnostics_ticker:
+        st.info(
+            "Select a stored ticker to view detailed "
+            "database-health diagnostics."
+        )
+    else:
+        try:
+            diagnostics = manager.get_ticker_diagnostics(
+                selected_diagnostics_ticker
+            )
+        except Exception as exc:
+            st.error(
+                f"Unable to read ticker diagnostics: {exc}"
+            )
+            diagnostics = None
+
+        if diagnostics is not None:
+            st.markdown(
+                f"### Ticker Diagnostics — {diagnostics['ticker']}"
+            )
+
+            bucket_label = (
+                " · ".join(diagnostics["buckets"])
+                if diagnostics["buckets"]
+                else "Unassigned"
+            )
+            st.caption(f"Bucket(s): {bucket_label}")
+
+            summary_row_one = st.columns(4)
+            summary_row_one[0].metric(
+                "Records",
+                f"{diagnostics['records']:,}",
+            )
+            summary_row_one[1].metric(
+                "First Date",
+                diagnostics["first_date"],
+            )
+            summary_row_one[2].metric(
+                "Last Date",
+                diagnostics["last_date"],
+            )
+            summary_row_one[3].metric(
+                "Coverage",
+                (
+                    f"{diagnostics['coverage']:.1f}%"
+                    if diagnostics["coverage"] is not None
+                    else "—"
+                ),
+            )
+
+            summary_row_two = st.columns(4)
+            summary_row_two[0].metric(
+                "Status",
+                diagnostics["status"] or "—",
+            )
+            summary_row_two[1].metric(
+                "Expected Through",
+                diagnostics["latest_expected_stored_session"],
+            )
+            summary_row_two[2].metric(
+                "Internal Gaps",
+                f"{diagnostics['internal_gaps']:,}",
+            )
+            summary_row_two[3].metric(
+                "Large Price Moves",
+                f"{len(diagnostics['large_price_moves']):,}",
+            )
+
+            st.caption(
+                "**Expected Through** = Latest Expected Stored Session "
+                "under the next-calendar-day daily-data policy."
+            )
+
+            st.button(
+                "Inspect This Ticker in Data Explorer",
+                key=(
+                    "data_management_diagnostics_open_explorer_"
+                    f"{diagnostics['ticker']}"
+                ),
+                on_click=_set_explorer_from_diagnostics,
+                args=(diagnostics["ticker"],),
+            )
+
+            st.markdown(
+                "#### Duplicate Stored Key Diagnostics"
+            )
+
+            duplicate_stored_keys = diagnostics[
+                "duplicate_stored_keys"
+            ]
+
+            if duplicate_stored_keys:
+                st.warning(
+                    f"{len(duplicate_stored_keys):,} duplicate stored "
+                    "(Ticker, Date) key(s) were found, representing "
+                    f"{diagnostics['duplicate_stored_excess_rows']:,} "
+                    "excess physical row(s)."
+                )
+
+                duplicate_key_rows = [
+                    {
+                        "Date": duplicate_key[
+                            "date"
+                        ],
+                        "Physical Rows": (
+                            duplicate_key[
+                                "physical_rows"
+                            ]
+                        ),
+                        "Excess Rows": (
+                            duplicate_key[
+                                "excess_rows"
+                            ]
+                        ),
+                    }
+                    for duplicate_key
+                    in duplicate_stored_keys
+                ]
+
+                st.dataframe(
+                    pd.DataFrame(
+                        duplicate_key_rows
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                duplicate_dates = [
+                    str(
+                        duplicate_key[
+                            "date"
+                        ]
+                    )
+                    for duplicate_key
+                    in duplicate_stored_keys
+                ]
+
+                duplicate_repair_request = {
+                    "operation": (
+                        "Repair Duplicate Stored Keys"
+                    ),
+                    "ticker": diagnostics[
+                        "ticker"
+                    ],
+                    "origin": (
+                        "Ticker Diagnostics"
+                    ),
+                    "reason": (
+                        f"{len(duplicate_stored_keys):,} duplicate stored "
+                        "(Ticker, Date) key(s) were detected, representing "
+                        f"{diagnostics['duplicate_stored_excess_rows']:,} "
+                        "excess physical row(s)."
+                    ),
+                    "suggested_start_date": (
+                        duplicate_dates[0]
+                    ),
+                    "suggested_end_date": (
+                        duplicate_dates[-1]
+                    ),
+                    "evidence": {
+                        "duplicate_stored_key_count": (
+                            len(
+                                duplicate_stored_keys
+                            )
+                        ),
+                        "duplicate_stored_excess_rows": (
+                            diagnostics[
+                                "duplicate_stored_excess_rows"
+                            ]
+                        ),
+                        "duplicate_dates": list(
+                            duplicate_dates
+                        ),
+                        "duplicate_stored_keys": [
+                            dict(
+                                duplicate_key
+                            )
+                            for duplicate_key
+                            in duplicate_stored_keys
+                        ],
+                    },
+                }
+
+                st.info(
+                    "Recommended maintenance: Repair Duplicate Stored Keys. "
+                    "The repair will reacquire canonical yFinance history "
+                    "covering the affected dates, but only the exact duplicate "
+                    "(Ticker, Date) keys shown above are eligible for repair. "
+                    "Every physical copy for an approved duplicate key will "
+                    "be replaced atomically with one validated canonical "
+                    "source observation."
+                )
+
+                st.button(
+                    "Prepare Duplicate Repair",
+                    key=(
+                        "data_management_diagnostics_prepare_"
+                        "duplicate_repair_"
+                        f"{diagnostics['ticker']}"
+                    ),
+                    on_click=(
+                        _prepare_data_management_maintenance_request
+                    ),
+                    args=(
+                        duplicate_repair_request,
+                    ),
+                    disabled=maintenance_handoff_disabled,
+                    help=(
+                        "Prepare the canonical duplicate-repair workflow "
+                        "below. This does not fetch source data, build a "
+                        "Preview, approve changes, or modify the database."
+                    ),
+                )
+
+                st.caption(
+                    "Continue below in Acquire Market Data to review the "
+                    "exact duplicate-key repair scope, then explicitly build "
+                    "the Preview."
+                )
+            else:
+                st.info(
+                    "No duplicate stored (Ticker, Date) keys found."
+                )
+
+            st.caption(
+                "Duplicate Stored Keys are detected by logical identity "
+                "only: the same ticker and date appearing in more than one "
+                "physical database row. OHLCV and Adj Close values do not "
+                "need to match for the rows to be duplicates."
+            )
+
+            st.markdown("#### Internal Gap Diagnostics")
+
+            internal_gap_dates = diagnostics[
+                "internal_gap_dates"
+            ]
+            internal_gap_ranges = diagnostics[
+                "internal_gap_ranges"
+            ]
+
+            if internal_gap_dates:
+                st.write(
+                    f"{len(internal_gap_dates):,} expected NYSE "
+                    "session(s) are missing between First Date "
+                    "and Last Date."
+                )
+
+                internal_gap_range_rows = []
+                for gap_range in internal_gap_ranges:
+                    start_value = gap_range["start_date"]
+                    end_value = gap_range["end_date"]
+                    range_label = (
+                        start_value
+                        if start_value == end_value
+                        else f"{start_value} → {end_value}"
+                    )
+
+                    internal_gap_range_rows.append(
+                        {
+                            "Missing Range": range_label,
+                            "Missing Sessions": (
+                                gap_range["missing_sessions"]
+                            ),
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(internal_gap_range_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                with st.expander(
+                    "Show exact missing sessions",
+                    expanded=False,
+                ):
+                    st.dataframe(
+                        pd.DataFrame(
+                            {
+                                "Missing Session": (
+                                    internal_gap_dates
+                                )
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                repair_request = {
+                    "operation": "Repair Missing",
+                    "ticker": diagnostics["ticker"],
+                    "origin": "Ticker Diagnostics",
+                    "reason": (
+                        f"{len(internal_gap_dates):,} expected NYSE "
+                        "session(s) are missing inside stored coverage."
+                    ),
+                    "suggested_start_date": (
+                        internal_gap_dates[0]
+                    ),
+                    "suggested_end_date": (
+                        internal_gap_dates[-1]
+                    ),
+                    "evidence": {
+                        "internal_gap_count": (
+                            len(
+                                internal_gap_dates
+                            )
+                        ),
+                        "internal_gap_dates": (
+                            list(
+                                internal_gap_dates
+                            )
+                        ),
+                        "internal_gap_ranges": [
+                            dict(
+                                gap_range
+                            )
+                            for gap_range
+                            in internal_gap_ranges
+                        ],
+                    },
+                }
+
+                st.info(
+                    "Recommended maintenance: Repair Missing. "
+                    "This operation reacquires the envelope containing the "
+                    "known Internal Gaps while preserving existing stored rows."
+                )
+
+                st.button(
+                    "Prepare Repair Missing",
+                    key=(
+                        "data_management_diagnostics_prepare_repair_"
+                        f"{diagnostics['ticker']}"
+                    ),
+                    on_click=(
+                        _prepare_data_management_maintenance_request
+                    ),
+                    args=(
+                        repair_request,
+                    ),
+                    disabled=maintenance_handoff_disabled,
+                    help=(
+                        "Prepare the existing Repair Missing workflow below. "
+                        "This does not fetch source data, build a Preview, "
+                        "approve changes, or modify the database."
+                    ),
+                )
+
+                st.caption(
+                    "Continue below in Acquire Market Data to review the "
+                    "prepared ticker and repair scope, then explicitly build "
+                    "the Preview."
+                )
+            else:
+                st.info(
+                    "No missing expected NYSE sessions were found "
+                    "between First Date and Last Date."
+                )
+
+            st.markdown("#### Staleness Diagnostics")
+
+            missing_tail_dates = diagnostics[
+                "missing_tail_dates"
+            ]
+            missing_tail_ranges = diagnostics[
+                "missing_tail_ranges"
+            ]
+
+            staleness_rows = [
+                {
+                    "Field": "Last Stored Date",
+                    "Value": diagnostics["last_date"],
+                },
+                {
+                    "Field": "Latest Expected Stored Session",
+                    "Value": diagnostics[
+                        "latest_expected_stored_session"
+                    ],
+                },
+                {
+                    "Field": "Missing Tail Sessions",
+                    "Value": len(missing_tail_dates),
+                },
+                {
+                    "Field": "Status",
+                    "Value": diagnostics["status"] or "—",
+                },
+            ]
+
+            st.dataframe(
+                pd.DataFrame(staleness_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            if diagnostics["is_current"]:
+                st.info(
+                    "This ticker reaches the latest session currently "
+                    "expected to be stored."
+                )
+            elif diagnostics["is_stale"]:
+                if missing_tail_ranges:
+                    missing_tail_range_rows = []
+
+                    for tail_range in missing_tail_ranges:
+                        start_value = tail_range["start_date"]
+                        end_value = tail_range["end_date"]
+                        range_label = (
+                            start_value
+                            if start_value == end_value
+                            else f"{start_value} → {end_value}"
+                        )
+
+                        missing_tail_range_rows.append(
+                            {
+                                "Missing Tail Range": range_label,
+                                "Missing Sessions": (
+                                    tail_range[
+                                        "missing_sessions"
+                                    ]
+                                ),
+                            }
+                        )
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            missing_tail_range_rows
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                if missing_tail_dates:
+                    try:
+                        update_start_date = (
+                            date.fromisoformat(
+                                str(
+                                    diagnostics[
+                                        "last_date"
+                                    ]
+                                )
+                            )
+                            + timedelta(days=1)
+                        ).isoformat()
+                    except Exception:
+                        update_start_date = None
+
+                    if update_start_date is not None:
+                        update_request = {
+                            "operation": "Update to Current",
+                            "ticker": diagnostics["ticker"],
+                            "origin": "Ticker Diagnostics",
+                            "reason": (
+                                f"{len(missing_tail_dates):,} expected NYSE "
+                                "session(s) are missing after Last Date."
+                            ),
+                            "suggested_start_date": (
+                                update_start_date
+                            ),
+                            "suggested_end_date": (
+                                diagnostics[
+                                    "latest_expected_stored_session"
+                                ]
+                            ),
+                            "evidence": {
+                                "missing_tail_count": (
+                                    len(
+                                        missing_tail_dates
+                                    )
+                                ),
+                                "missing_tail_dates": (
+                                    list(
+                                        missing_tail_dates
+                                    )
+                                ),
+                                "missing_tail_ranges": [
+                                    dict(
+                                        tail_range
+                                    )
+                                    for tail_range
+                                    in missing_tail_ranges
+                                ],
+                            },
+                        }
+
+                        st.info(
+                            "Recommended maintenance: Update to Current. "
+                            "This operation acquires the stale tail after the "
+                            "current Last Date through the Latest Expected "
+                            "Stored Session while preserving existing rows."
+                        )
+
+                        st.button(
+                            "Prepare Update to Current",
+                            key=(
+                                "data_management_diagnostics_prepare_update_"
+                                f"{diagnostics['ticker']}"
+                            ),
+                            on_click=(
+                                _prepare_data_management_maintenance_request
+                            ),
+                            args=(
+                                update_request,
+                            ),
+                            disabled=maintenance_handoff_disabled,
+                            help=(
+                                "Prepare the existing Update to Current "
+                                "workflow below. This does not fetch source "
+                                "data, build a Preview, approve changes, or "
+                                "modify the database."
+                            ),
+                        )
+
+                        st.caption(
+                            "Continue below in Acquire Market Data to review "
+                            "the prepared ticker and stale-tail scope, then "
+                            "explicitly build the Preview."
+                        )
+            else:
+                st.warning(
+                    "The ticker's Last Date does not fit the normal "
+                    "Current/Stale relationship to the Latest Expected "
+                    "Stored Session. Review the stored dates."
+                )
+
+            st.caption(
+                "Missing Tail Sessions occur after Last Date and are "
+                "not counted as Internal Gaps."
+            )
+
+            st.markdown(
+                "#### Large Price Move Diagnostics"
+            )
+
+            large_price_moves = diagnostics[
+                "large_price_moves"
+            ]
+
+            if large_price_moves:
+                st.write(
+                    f"{len(large_price_moves):,} Large Price Move "
+                    "event(s) require inspection."
+                )
+
+                large_move_rows = [
+                    {
+                        "Date": event["date"],
+                        "Prior Expected Session": (
+                            event["prior_date"]
+                        ),
+                        "Prior Close": (
+                            f"{event['prior_close']:.2f}"
+                        ),
+                        "Close": f"{event['close']:.2f}",
+                        "Change": (
+                            f"{event['change_pct']:+.2f}%"
+                        ),
+                    }
+                    for event in large_price_moves
+                ]
+
+                st.dataframe(
+                    pd.DataFrame(large_move_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                for event in large_price_moves:
+                    event_date = date.fromisoformat(
+                        str(
+                            event[
+                                "date"
+                            ]
+                        )
+                    )
+
+                    explorer_start_date = (
+                        event_date
+                        - timedelta(days=2)
+                    ).isoformat()
+
+                    explorer_end_date = (
+                        event_date
+                        + timedelta(days=2)
+                    ).isoformat()
+
+                    st.button(
+                        (
+                            f"Inspect {event['date']} "
+                            "in Data Explorer"
+                        ),
+                        key=(
+                            "data_management_diagnostics_lpm_"
+                            f"{diagnostics['ticker']}_"
+                            f"{event['date']}"
+                        ),
+                        on_click=_set_explorer_from_diagnostics,
+                        args=(
+                            diagnostics["ticker"],
+                            explorer_start_date,
+                            explorer_end_date,
+                        ),
+                        help=(
+                            "Open Data Explorer for the Large Price Move "
+                            "event date plus two calendar days before and "
+                            "two calendar days after."
+                        ),
+                    )
+            else:
+                st.info("No Large Price Moves found.")
+
+            st.caption(
+                "Large Price Moves are dates where Close changed by "
+                "at least 25% versus the immediately preceding expected "
+                "NYSE session. They are inspection warnings, not "
+                "automatic evidence of bad data or a corporate action."
+            )
+
+    _render_data_management_acquisition_controls(
+        inventory=inventory,
+        database_manager=manager,
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
+
+    _render_data_management_reconciliation_controls(
+        inventory=inventory,
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
+
+    _render_data_management_manual_entry_controls(
+        latest_expected_stored_session=(
+            overview[
+                "latest_expected_stored_session"
+            ]
+        ),
+    )
+
+    _render_data_management_deletion_controls(
+        inventory=inventory,
+    )
+
+    _render_data_management_audit_history(
+        mutation_manager=mutation_manager,
+    )
+
+    _render_data_management_mutation_workflow()
+
+
 def main():
     """Main application function with page navigation"""
     # Page config
@@ -11139,41 +18679,26 @@ def main():
     # Initialize session state
     initialize_session_state()
     
-    # Background update: Pre-load technical indicators for CUSTOM_DEFAULT tickers
-    if 'technical_background_updated' not in st.session_state:
-        custom_default_tickers = get_tickers_only(CUSTOM_DEFAULT)
-
-        with st.spinner(f'Refreshing technical indicators for {len(custom_default_tickers)} tickers...'):
-            for ticker in custom_default_tickers:
-                try:
-                    # Calculate latest indicators
-                    st.session_state.tech_calculator.calculate_comprehensive_analysis(
-                        ticker=ticker,
-                        save_to_db=True
-                    )
-                    # Backfill 22-day history for rolling heatmap
-                    st.session_state.tech_calculator.backfill_technical_indicators(
-                        ticker=ticker,
-                        days=22
-                    )
-                    # Calculate 52-week price extremes
-                    st.session_state.tech_calculator.calculate_52_week_analysis(ticker)
-                except Exception as e:
-                    # Silent failure - don't break app load for individual ticker failures
-                    pass
-        st.session_state.technical_background_updated = True
-    
     # Page navigation in sidebar
     st.sidebar.title("📊 Navigation")
+
+    page_options = [
+        'performance_heatmaps',
+        'technical_analysis',
+        'stock_comparison',
+        'data_management',
+    ]
+
     st.session_state.selected_page = st.sidebar.selectbox(
         "Choose Dashboard:",
-        options=['performance_heatmaps', 'technical_analysis', 'stock_comparison'],
+        options=page_options,
         format_func=lambda x: {
             'performance_heatmaps': '📈 Performance Heatmaps',
-            'technical_analysis': '🎯 Technical Analysis',  
-            'stock_comparison': '📋 Stock Comparison'
+            'technical_analysis': '🎯 Technical Analysis',
+            'stock_comparison': '📋 Stock Comparison',
+            'data_management': '🗄️ Data Management',
         }[x],
-        index=['performance_heatmaps', 'technical_analysis', 'stock_comparison'].index(
+        index=page_options.index(
             st.session_state.selected_page
         ),
         key='page_navigation'
@@ -11186,6 +18711,8 @@ def main():
         show_technical_analysis_dashboard()
     elif st.session_state.selected_page == 'stock_comparison':
         show_stock_comparison_dashboard()
+    elif st.session_state.selected_page == 'data_management':
+        show_data_management()
 
 if __name__ == "__main__":
     main()
