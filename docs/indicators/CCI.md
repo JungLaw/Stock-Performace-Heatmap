@@ -2,13 +2,23 @@
 **<u>Class</u>**: Momentum / Oscillator
 **<u>aka</u>**: Commodity Channel Index
 
+
+CCI is essentially asking:
+> **"*How unusual is the market's current price position compared with its own recent behavior?*"**
+
+- A strongly positive CCI means '**Price is unusually high relative to its recent norm**'.
+- A strongly negative CCI means **'Price is unusually low relative to its recent norm'**.
+
+$$\Large{\bf{-----------}}$$
+
 CCI tells you whether the current price is unusually high or unusually low relative to its recent normal behavior.
+
 - measures how far the market's current **typical price** has moved away from its recent statistical average.
 - tells you how far price is from its recent average, adjusted by the typical amount of deviation.
 - measures the deviation from average price, typically oscillating around 0.
 
 
-$$----------$$
+$$\Large{\bf{-----------}}$$
 At the simplest level, this app asks:
 1. **Has CCI moved far enough below its normal range to indicate meaningful downside stretch?**
 2. **Has CCI moved far enough above its normal range to indicate meaningful upside stretch?**
@@ -101,6 +111,9 @@ The primary Signal answers:
 The context fields answer different questions.
 
 ---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
+
+---
 
 ## CCI — brief overview
 The Commodity Channel Index (CCI) measures how far the market's current **typical price** has moved away from its recent statistical average.
@@ -114,6 +127,7 @@ At the simplest level, this app asks:
 
 **Purpose:** Identify cyclical turns and measure how far price deviates from its statistical average to spot potential reversal points.
 **Use when:** You want to identify when prices are extremely stretched from their normal range, particularly in cyclical markets.
+
 ### What CCI measures
 
 CCI compares the market's current **Typical Price** with the average Typical Price over a specified lookback period.
@@ -271,6 +285,9 @@ $$----------$$
 > - **CCI(20):** <u>strongest</u> local-extrema / slower exhaustion locator.
  > 	- the best *'location'/'exhaustion'* indicator
 > - **CCI(10):** fast 'exhaustion'/'reversal' detector.
+
+
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
 
@@ -548,6 +565,9 @@ not:
 > **Did CCI cross an extreme threshold today?**
 
 Event information belongs in separate context fields such as the zero-line crossover.
+
+---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
 
@@ -875,7 +895,9 @@ An unavailable field means:
 > **The context is evaluable, and no divergence event occurred here.**
 
 ---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
+---
 ## CCI Zero-Line Crossover
 
 The zero line is CCI's central reference:
@@ -1090,7 +1112,9 @@ The app is saying:
 That is useful information without changing the primary score.
 
 ---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
+---
 ## How to Read the CCI heatmap
 
 A useful reading sequence is:
@@ -1285,7 +1309,9 @@ Combined interpretation:
 > **CCI itself is not extreme enough for a contrarian score, but price/CCI swing behavior is showing bullish divergence and CCI has just moved above its zero midpoint. Secondary momentum context is constructive even though the primary score remains Neutral.**
 
 ---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
+---
 ## Industry-standard baseline versus this project
 
 ### Conventional CCI foundation
@@ -1428,7 +1454,10 @@ This higher threshold is intentional.
 
 It reduces the number of moderate ±100 excursions that the heatmap treats as actionable extremes.
 
+---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
+---
 ## Strengths/Weaknesses
 ### Strengths
 
@@ -1590,7 +1619,9 @@ It can mean:
 > **The very recent move is severely stretched, the intermediate move is materially stretched, and the longer-horizon deviation has not yet become extreme.**
 
 ---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
+---
 ## Beginner's checklist
 
 When reading a CCI heatmap cell, ask these questions in order:
@@ -1709,26 +1740,10 @@ blue/red number
 **Verification status:** The adopted CCI implementation completed rule-contract verification, warmup verification, production-path context verification, adapter/UI structural verification, and manual acceptance across the Rolling Heatmap, SCD Multiple Indicators, and SCD Single Indicator views. Date-specific AAPL checks also confirmed combined Signal / Divergence / Zero-Line presentation.
 
 ---
-
-## References
-
-### External conceptual references
-
-* **TradingView — Commodity Channel Index (CCI):** conventional CCI construction, centered-zero behavior, ±100 reference levels, and divergence interpretation.
-* **StockCharts — Commodity Channel Index (CCI):** CCI momentum interpretation, zero-line behavior, extreme readings, and practical use of threshold filtering.
-
-### Project references
-
-* `src/config/master_rules_normalized.json` — primary CCI five-state scoring rules and project thresholds.
-* `src/calculations/indicator_preprocessor.py` — CCI numeric computation.
-* `src/calculations/signal_classifier.py` — five-state classification and CCI missing/warmup handling.
-* `src/calculations/technical.py` — CCI rolling transport, confirmed divergence, and zero-line crossover context.
-* `src/ui/rolling_heatmap_adapter.py` — CCI value formatting, divergence font overlay, zero-line glyphs, and hover presentation.
-* `streamlit_app.py` — Rolling Heatmap / SCD consumer integration.
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
-
-# My Notes: CCI
+## My Notes: CCI
 
 Measures deviation from average price, typically oscillating around 0.
 
@@ -1767,3 +1782,8 @@ Measures deviation from average price, typically oscillating around 0.
 **Limitations:** Unbounded oscillator can stay in extreme territory longer than expected. May produce false signals in strongly trending markets.
 
 **Complexity Level:** Intermediate
+
+---
+${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
+
+---

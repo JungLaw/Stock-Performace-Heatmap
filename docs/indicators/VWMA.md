@@ -66,14 +66,14 @@ These layers are related but should not be treated as three votes that must alwa
 
 | Signal | VWMA/SMA context | Volume / price context | Beginner interpretation |
 | --- | --- | --- | --- |
-| **Strong Buy** | VWMA sufficiently above SMA; spread rising | **Blue ▲** | **Broad VWMA trend and today's high-volume price move both point bullish.** The latest session reinforces the already-qualified Strong Buy state. |
-| **Strong Buy** | VWMA sufficiently above SMA; spread rising | **Red ▲** | **The broader VWMA state remains strongly bullish, but today's individual session fell on exceptionally high volume.** That short-term disagreement deserves attention; it does not retroactively erase the Strong Buy rule state. |
+| **Strong Buy** | VWMA sufficiently above SMA; spread rising | ${\textcolor{blue}{\textsf{▲}}}$ | **Broad VWMA trend and today's high-volume price move both point bullish.** The latest session reinforces the already-qualified Strong Buy state. |
+| **Strong Buy** | VWMA sufficiently above SMA; spread rising | ${\textcolor{Red}{\textsf{▲}}}$ | **The broader VWMA state remains strongly bullish, but today's individual session fell on exceptionally high volume.** That short-term disagreement deserves attention; it does not retroactively erase the Strong Buy rule state. |
 | **Buy** | VWMA below SMA but spread rising | Ordinary volume | **Price is above a rising VWMA, but VWMA has not yet achieved the required Strong-Buy separation above SMA.** The spread may be improving without being strong enough. |
-| **Buy** | Strong confirmation incomplete | **Blue ▼** | **The broader VWMA trend is bullish, but today's up move occurred on exceptionally light participation.** That is weaker current-session confirmation, not an automatic downgrade of the score. |
-| **Neutral** | Any non-Strong context | **Blue ▲** | **Today's price rose on exceptional volume, but Price-vs-VWMA and normalized slope do not currently satisfy the VWMA bullish rule.** Current-session enthusiasm is not enough by itself to create a Buy state. |
+| **Buy** | Strong confirmation incomplete | ${\textcolor{blue}{\textsf{▼}}}$ | **The broader VWMA trend is bullish, but today's up move occurred on exceptionally light participation.** That is weaker current-session confirmation, not an automatic downgrade of the score. |
+| **Neutral** | Any non-Strong context | ${\textcolor{blue}{\textsf{▲ }}}$ | **Today's price rose on exceptional volume, but Price-vs-VWMA and normalized slope do not currently satisfy the VWMA bullish rule.** Current-session enthusiasm is not enough by itself to create a Buy state. |
 | **Sell** | VWMA above SMA but spread falling | Ordinary volume | **Price is below a falling VWMA, but VWMA has not yet achieved the required Strong-Sell separation below SMA.** The VWMA/SMA relationship may be deteriorating without being strong enough. |
-| **Strong Sell** | VWMA sufficiently below SMA; spread falling | **Red ▲** | **Broad VWMA trend and today's high-volume down move both point bearish.** Current-session participation reinforces the already-qualified Strong Sell state. |
-| **Strong Sell** | VWMA sufficiently below SMA; spread falling | **Blue ▼** | **The broader VWMA state remains strongly bearish, while today's counter-move higher occurred on exceptionally light volume.** The two layers describe different time horizons rather than contradicting one another. |
+| **Strong Sell** | VWMA sufficiently below SMA; spread falling | ${\textcolor{Red}{\textsf{▲ }}}$ | **Broad VWMA trend and today's high-volume down move both point bearish.** Current-session participation reinforces the already-qualified Strong Sell state. |
+| **Strong Sell** | VWMA sufficiently below SMA; spread falling | ${\textcolor{blue}{\textsf{▼}}}$ | **The broader VWMA state remains strongly bearish, while today's counter-move higher occurred on exceptionally light volume.** The two layers describe different time horizons rather than contradicting one another. |
 
 #### A practical reading order
 
@@ -199,6 +199,8 @@ $~~$
 > - VWMA below SMA can indicate relatively heavier volume on lower-closing sessions
 
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
 ---
 
 ## Value-added use
@@ -321,6 +323,8 @@ percentage difference = (Close / VWMA - 1) × 100
 ```
 
 The Signal does **not** score directly from this displayed percentage. The rulebook uses the ATR-normalized form explained below.
+
+> (:small[[Back to top](#summary-vwma-signals)])
 
 ---
 
@@ -807,6 +811,8 @@ A few boundaries are worth documenting explicitly:
 
 The ordinary Buy/Sell `or` clauses are the complement of the full Strong confirmation. This is what keeps the final five-state model mutually exclusive while allowing the same bullish or bearish base gate to feed either the ordinary or Strong state.
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
 ---
 
 ## Context and Hover fields
@@ -1023,6 +1029,8 @@ Red ▼
 The arrow/color context does **not** change the primary VWMA score.
 
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
 ---
 ## Worked examples
 > See Also: "Interpreting the full VWMA readout together"
@@ -1222,6 +1230,8 @@ The **blue ▼** tells you that price rose, but on exceptionally light volume.
 
 This context does not alter the primary VWMA Signal.
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
 ---
 
 ## Industry-standard foundation versus project calibration
@@ -1256,6 +1266,9 @@ The design goal is to make the VWMA state human-auditable:
 
 > **A user should be able to reconstruct whether the observation qualified because of Price-vs-VWMA distance, VWMA slope, VWMA-vs-SMA reinforcement, or the absence of one of those clauses.**
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
+
 ---
 
 ## Diagnostic and design decisions from the VWMA audit
@@ -1283,6 +1296,9 @@ In the bounded diagnostic sample, exceptionally high-volume observations were as
 The final decision was therefore:
 
 > **Use extreme-volume markers to explain the character of the current session, not to rewrite the VWMA trend score.**
+
+> (:small[[Back to top](#summary-vwma-signals)])
+
 
 ---
 
@@ -1338,6 +1354,9 @@ Price < VWMA
 
 **'Strong' does not mean certain**
 - Strong Buy and Strong Sell mean **more qualifying VWMA confirmation under the project rules**, not certainty about the next price move.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-vwma-signals)])
 
 ---
 
@@ -1501,6 +1520,8 @@ blue/red ▲ / ▼
 
 **Verification status:** The adopted VWMA implementation completed five-state classification verification, maturity/warmup verification, production-path context verification, VWMA/SMA crossover diagnostic review, extreme-volume diagnostic review, adapter/UI structural verification, and manual acceptance across the Rolling Signal Heatmap, SCD Multiple Indicators, and SCD Single Indicator views.
 
+> (:small[[Back to top](#summary-vwma-signals)])
+
 ---
 
 ## References
@@ -1514,6 +1535,7 @@ blue/red ▲ / ▼
 - `src/ui/rolling_heatmap_adapter.py` — VWMA hover construction, `VWMA vs SMA`, `1D Direction`, `Volume Activity`, extreme-volume text/color overlay, and Rolling Signal Heatmap hover presentation.
 - `streamlit_app.py` — SCD Single / Multiple consumer presentation and shared Price/Volume hover context.
 
+> (:small[[Back to top](#summary-vwma-signals)])
 
 ---
 ## My Notes
@@ -1645,3 +1667,5 @@ VWMA tends to work best in **trending markets with meaningful volume expansion**
 **4. Crossover logic**
 - Faster VWMA crossing above a slower SMA can signal improving participation.
 - A VWMA/SMA crossover system is often used for swing trading.
+
+> (:small[[Back to top](#summary-vwma-signals)])

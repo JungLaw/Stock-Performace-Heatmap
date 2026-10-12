@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import textwrap
 
+from src.ui.indicator_hover_explanations import (
+    get_hma_rule_explanation,
+    get_hma_context_interpretation,
+    get_uo_rule_explanation,
+)
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -2846,19 +2852,19 @@ def build_plotly_heatmap_inputs(
             return None
         return indicator_key.split("_", 1)[1]
 
-    def _find_rule_block(indicator_key: str, score: Any) -> tuple[str, str, str]:
+    def _find_rule_block(indicator_key: str, score: Any) -> tuple[str, str, str, dict]:
         """
-        Return (rule_expr, rule_notes, rule_text) for the current indicator row + score.
+        Return (rule_expr, rule_notes, rule_text, all_state_rules) for the row.
         Presentation-only. Falls back cleanly on misses.
         """
         rule_state = score_to_rule_key(score)
         if not rule_state:
-            return "", "", ""
+            return "", "", "", {}
 
         ind_name = _rulebook_indicator_name(indicator_key)
         param_key = _rulebook_param_key(indicator_key)
         if not ind_name or not param_key:
-            return "", "", ""
+            return "", "", "", {}
 
         rules = _load_rulebook()
         categories = rules.get("categories", {}) if isinstance(rules, dict) else {}
@@ -2898,9 +2904,12 @@ def build_plotly_heatmap_inputs(
             else:
                 rule_text = ""
 
-            return rule_expr, rule_notes, rule_text
+            return rule_expr, rule_notes, rule_text, {
+                k: str(rule_block.get(k, "") or "")
+                for k in ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+            }
 
-        return "", "", ""
+        return "", "", "", {}
 
     # ----------------------------
     # Phase III (UI-only): Display-Only Price row
@@ -3095,6 +3104,7 @@ def build_plotly_heatmap_inputs(
                         "crossover_summary_block": "",
                         "vwma_post_signal_block": "",
                         "hma_post_signal_block": "",
+                        "hma_context_interpretation_block": "",
                         "cci_context_block": "",
                         "uo_context_block": "",
                         "uo_semantic_state": None,
@@ -3226,7 +3236,24 @@ def build_plotly_heatmap_inputs(
             else:
                 signal_display_label = score_label
 
-            rule_expr, rule_notes, rule_text = _find_rule_block(key, s)
+            rule_expr, rule_notes, rule_text, all_state_rules = _find_rule_block(key, s)
+
+            # Only override HMA prose when the entire active five-state rule set
+            # matches the reviewed specification; Neutral has an empty rule.
+            hma_curated_rule_valid = False
+            if key.startswith("HMA_") and not _is_missing(s):
+                try:
+                    hma_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    hma_period = None
+                hma_rule_key = score_to_rule_key(s)
+                if hma_period is not None and hma_rule_key:
+                    hma_curated = get_hma_rule_explanation(
+                        hma_period, hma_rule_key, all_state_rules
+                    )
+                    if hma_curated:
+                        rule_text = hma_curated
+                        hma_curated_rule_valid = True
 
             # BB_BW no longer inherits the parent Bollinger directional rule.
             # Its score is Neutral / 0 by upstream semantic contract, so the
@@ -3268,6 +3295,7 @@ def build_plotly_heatmap_inputs(
             # HMA context-only display fields.
             # Semantic truth is derived upstream in technical.py.
             hma_post_signal_block = ""
+            hma_context_interpretation_block = ""
             hma_turn_value = None
             hma_trend_context_value = None
             hma_turn_context_value = None
@@ -3821,50 +3849,17 @@ def build_plotly_heatmap_inputs(
                         + "<br>"
                     )
 
-                # UO uses semantic-state-specific human-readable Rule text.
-                # The semantic truth remains upstream-owned; this block only
-                # translates the already-established state for display.
-                if uo_semantic_state_value == "Bullish Confirmed":
-                    rule_text = (
-                        "Qualifying bullish divergence + UO broke above its "
-                        "Classic Confirmation trigger within the 10-session window."
-                    )
-
-                elif uo_semantic_state_value == "Bullish Divergence":
-                    rule_text = (
-                        "Lower confirmed price low + higher UO pivot low, "
-                        "with a qualifying oversold reading; awaiting confirmation."
-                    )
-
-                elif uo_semantic_state_value == "Bullish Watch":
-                    bullish_watch_threshold = (
-                        30
-                        if key == "UO_5_10_15"
-                        else 35
-                    )
-                    rule_text = (
-                        f"UO < {bullish_watch_threshold}"
-                    )
-
-                elif uo_semantic_state_value == "Bearish Confirmed":
-                    rule_text = (
-                        "Qualifying bearish divergence + UO broke below its "
-                        "Classic Confirmation trigger within the 10-session window."
-                    )
-
-                elif uo_semantic_state_value == "Bearish Divergence":
-                    rule_text = (
-                        "Higher confirmed price high + lower UO pivot high, "
-                        "with a qualifying overbought reading; awaiting confirmation."
-                    )
-
-                elif uo_semantic_state_value == "Bearish Watch":
-                    rule_text = "UO > 70"
-
-                elif uo_semantic_state_value == "No Active Setup":
-                    rule_text = (
-                        "No active Watch, Divergence, or Confirmed setup."
-                    )
+                # Explain the authoritative upstream UO state via the shared
+                # fail-closed display-only module. An invalid/missing state or
+                # altered rulebook mapping retains the original rule fallback.
+                uo_curated = get_uo_rule_explanation(
+                    indicator_key=key,
+                    semantic_state=uo_semantic_state_value,
+                    active_rules=all_state_rules,
+                    score=s,
+                )
+                if uo_curated is not None:
+                    rule_text = uo_curated
 
             # MACD: Custom hover content (deltas) 
             if key.startswith("MACD_") and isinstance(extra_map, dict) and extra_map:
@@ -5376,6 +5371,18 @@ def build_plotly_heatmap_inputs(
                         f"{turn_context_display}<br>"
                     )
 
+                    if hma_curated_rule_valid:
+                        hma_context_text = get_hma_context_interpretation(
+                            hma_period,
+                            hma_rule_key,
+                            hma_turn_value,
+                            hma_trend_context_value,
+                            hma_turn_context_value,
+                        )
+                        hma_context_interpretation_block = _format_hover_block(
+                            "Context Interpretation", hma_context_text, width=80
+                        )
+
             elif (
                 not _is_crossover_key(key)
                 and (
@@ -5518,6 +5525,9 @@ def build_plotly_heatmap_inputs(
 
                     "hma_post_signal_block": (
                         hma_post_signal_block
+                    ),
+                    "hma_context_interpretation_block": (
+                        hma_context_interpretation_block
                     ),
                     "hma_turn": (
                         hma_turn_value
@@ -6450,6 +6460,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.hma_context_interpretation_block}"
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"
         "%{customdata.how_to_read_block}"

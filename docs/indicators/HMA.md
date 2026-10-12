@@ -66,6 +66,9 @@ ATR Distance
 | **14-bar HMA Slope** | The HMA's 14-bar regression slope normalized as % per bar.                 | Measures the direction and strength of HMA's established trajectory.                 |The other major HMA Signal input. <li>Positive supports Buy; <li>Negative supports Sell. <li>Larger magnitude = steeper trend. |
 
 ---
+> See Also: '[How to Read an HMA Heatmap Cell](#how-to-read-an-hma-heatmap-cell)' and '[HMA(21) Complete Signal Rule Map](#hma-21-complete-signal-rule-map)'
+
+---
 
 ### Secondary HMA Context — quick reference
 
@@ -73,9 +76,9 @@ The hover also contains information that does **not** change the primary Signal.
 
 | Field             | What is it?                                                                            | Question it answers                                        | Analytical purpose                                                                   | How to interpret it                                                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **HMA Direction** | A fresh HMA turning event. <li>Whether the designated HMA **changed direction today**. | **Did this HMA actually change direction today?**          | Flags a fresh turning event rather than an ongoing trend.                            | :gray-background[Turned Up ▲] / :gray-background[Turned Down ▼] appear on the reversal day. <br>:gray-background[None] means there was no new turn today.                                                                   |
-| **Trend Context** | The broader/reference trend used to judge the new turn                                 | **What direction is the broader trend moving?**            | Distinguishes a turn occurring with the broader trend from one occurring against it. | :gray-background[Rising], :gray-background[Falling], :gray-background[Flat], or :gray-background[—]. <li> :gray-badge[Rising]/:gray-badge[Falling] provide the directional context used for named 'Turn Context' labels. <li> Does not alter the Signal score. |
-| **Turn Context**  | The relationship between HMA Direction and Trend Context                               | **Is today's new turn with or against the broader trend?** | Summarizes whether the fresh turn is trend-aligned or counter-trend.                 | <li>:gray-background[Trend-Aligned] means they agree <li>:gray-background[Counter-Trend] means they oppose one another. <li>This is descriptive, no impact on score.                                    |
+| **[HMA Direction](#1-hma-direction)** | A fresh HMA turning event. <li>Whether the designated HMA **changed direction today**. | **Did this HMA actually change direction today?**          | Flags a fresh turning event rather than an ongoing trend.                            | :gray-background[Turned Up ▲] / :gray-background[Turned Down ▼] appear on the reversal day. <br>:gray-background[None] means there was no new turn today.                                                                   |
+| **[Trend Context](#2-trend-context)** | The broader/reference trend used to judge the new turn                                 | **What direction is the broader trend moving?**            | Distinguishes a turn occurring with the broader trend from one occurring against it. | :gray-background[Rising], :gray-background[Falling], :gray-background[Flat], or :gray-background[—]. <li> :gray-badge[Rising]/:gray-badge[Falling] provide the directional context used for named 'Turn Context' labels. <li> Does not alter the Signal score. |
+| **[Turn Context](#3-from-the-2-inputs-to-turn-context)**  | The relationship between HMA Direction and Trend Context                               | **Is today's new turn with or against the broader trend?** | Summarizes whether the fresh turn is trend-aligned or counter-trend.                 | <li>:gray-background[Trend-Aligned] means they agree <li>:gray-background[Counter-Trend] means they oppose one another. <li>This is descriptive, no impact on score.                                    |
 
 For designated turning-context HMAs:
 
@@ -103,12 +106,13 @@ Turn Context
 = Does today's change agree with that broader trend?
 ```
 
-$\large{\rightarrow}$ See "[What the heatmap display is telling you](#what-the-heatmap-display-is-telling-you)" below for more details.
+$\large{\rightarrow}$ :small[See "[What the heatmap display is telling you](#what-the-heatmap-display-is-telling-you)" and "[Understanding 'Turning' Context](#understanding-turning-context)" for more details.]
+
 
 ---
 
 ### The HMA patterns you should not overlook
-See: '*[Reference: Complete Signal + Turning Context](#reference-complete-signal-turning-context)*' for description of all 30 patterns
+:small[See '*[Reference: Complete Signal + Turning Context](#reference-complete-signal-turning-context)*' for description of all 30 patterns]
 
 An HMA cell can combine the primary Signal with a fresh turn and broader-trend context in several ways.
 
@@ -172,11 +176,11 @@ The ten patterns above fall into five practical tiers:
 
 | Tier       | Pattern group                                     | Technical meaning                                                                                        | Layman's translation                                                                                                                           |
 | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tier 1** | Qualified directional Signal + fresh aligned turn | Established trend state and fresh timing event point in the same direction, with broader-trend agreement | **“The trend is already established, and it has just received a fresh same-direction restart or re-acceleration.”**                            |
-| **Tier 2** | Strong Buy / Strong Sell + no new turn            | Maximum established HMA state, but no fresh local reversal occurred today                                | **“The trend is already very strong and is simply continuing; nothing newly turned today.”**                                                   |
-| **Tier 3** | Neutral + fresh trend-aligned turn                | Formal directional Signal has not qualified yet, but the local turn agrees with the broader trend        | **“The bigger trend already points this way, and the local HMA has just started moving with it—but the formal Signal has not caught up yet.”** |
-| **Tier 4** | Neutral + fresh counter-trend turn                | Formal directional Signal has not qualified, and the new local turn opposes the broader trend            | **“Something has started turning locally against the bigger trend. It may be an early reversal—or only a temporary counter-move.”**            |
-| **Tier 5** | Neutral + no turn                                 | No qualified directional Signal and no fresh local transition event                                      | **“HMA is not giving you a qualified trend state or a new turning event right now.”**                                                          |
+| **[Tier 1](#tier-1-qualified-trend-fresh-aligned-re-acceleration)** | Qualified directional Signal + fresh aligned turn | Established trend state and fresh timing event point in the same direction, with broader-trend agreement | **“The trend is already established, and it has just received a fresh same-direction restart or re-acceleration.”**                            |
+| **[Tier 2](#tier-2-strong-established-trend-no-new-turn)** | Strong Buy / Strong Sell + no new turn            | Maximum established HMA state, but no fresh local reversal occurred today                                | **“The trend is already very strong and is simply continuing; nothing newly turned today.”**                                                   |
+| **[Tier 3](#tier-3-neutral-fresh-turn-agrees-with-broader-trend)** | Neutral + fresh trend-aligned turn                | Formal directional Signal has not qualified yet, but the local turn agrees with the broader trend        | **“The bigger trend already points this way, and the local HMA has just started moving with it—but the formal Signal has not caught up yet.”** |
+| **[Tier 4](#tier-4-neutral-fresh-turn-against-broader-trend)** | Neutral + fresh counter-trend turn                | Formal directional Signal has not qualified, and the new local turn opposes the broader trend            | **“Something has started turning locally against the bigger trend. It may be an early reversal—or only a temporary counter-move.”**            |
+| **[Tier 5](#tier-5-neutral-no-turn)** | Neutral + no turn                                 | No qualified directional Signal and no fresh local transition event                                      | **“HMA is not giving you a qualified trend state or a new turning event right now.”**                                                          |
 
 These tiers describe **what kind of information deserves attention**. They are not a backtested ranking of future returns.
 
@@ -716,38 +720,38 @@ For a user scanning the heatmap for either strong established states or meaningf
 
 The tier framework can therefore be remembered as:
 
-```text
-Tier 1
-Qualified trend + fresh aligned re-acceleration
-→ “Has the established trend just restarted locally?”
 
-Tier 2
-Strong established trend + no fresh turn
-→ “Is the strong trend simply continuing?”
+**[Tier 1](#tier-1-qualified-trend-fresh-aligned-re-acceleration)**:
+> Qualified trend + fresh aligned re-acceleration
+→ “***Has the established trend just restarted locally?***”
 
-Tier 3
-Early trend-aligned development
-→ “Is the existing broader trend getting fresh local confirmation before the formal Signal qualifies?”
+**[Tier 2](#tier-2-strong-established-trend-no-new-turn)**:
+> Strong established trend + no fresh turn
+→ “***Is the strong trend simply continuing?***”
 
-Tier 4
-Early counter-trend reversal attempt
-→ “Could the existing broader trend be starting to change?”
+**[Tier 3](#tier-3-neutral-fresh-turn-agrees-with-broader-trend)**
+> Early trend-aligned development
+→ “***Is the existing broader trend getting fresh local confirmation before the formal Signal qualifies?***”
 
-Tier 5
-Neutral + no fresh event
-→ “Is HMA currently providing little new directional information?”
-```
+**[Tier 4](#tier-4-neutral-fresh-turn-against-broader-trend)**
+> Early counter-trend reversal attempt
+→ “***Could the existing broader trend be starting to change?***”
+
+**[Tier 5](#tier-5-neutral-no-turn)**
+> Neutral + no fresh event
+→ “***Is HMA currently providing little new directional information?***”
+
 
 These tiers should not be interpreted as five increasingly weak versions of the same phenomenon.
 
 They represent different situations:
 
 ```text
-trend already established + something new happened
-trend already established + nothing new happened
-trend not yet qualified + new evidence agrees with broader trend
-trend not yet qualified + new evidence opposes broader trend
-neither qualified state nor new event
+1. trend already established + something new happened
+2. trend already established + nothing new happened
+3. trend not yet qualified + new evidence agrees with broader trend
+4. trend not yet qualified + new evidence opposes broader trend
+5. neither qualified state nor new event
 ```
 
 The complete combination reference—including less-common Signal/turn disagreements and actual ticker/date examples—is provided later under **Reading Signal and Turning Context Together**.
@@ -756,7 +760,7 @@ The complete combination reference—including less-common Signal/turn disagreem
 ---
 
 ### What the heatmap display is telling you
-$\small{\textsf{See: 'How to Read an HMA Heatmap Cell' below}}$
+See: '[How to Read an HMA Heatmap Cell](#how-to-read-an-hma-heatmap-cell)' below and '[HMA(21) Complete Signal Rule Map](#hma-21-complete-signal-rule-map)'
 
 The cell uses several visual channels at once.
 
@@ -769,17 +773,17 @@ The cell uses several visual channels at once.
 
 For a turning-context row:
 
-${\textcolor{blue}{\textsf{▲ trend↑}}}$
-→ Turned Up + Rising = Bullish Trend-Aligned
+${\textcolor{blue}{\textsf{▲ trend}}}$
+→ ST HMA: **Turned Up** + LT HMA: **Rising** = Bullish Trend-Aligned
 
-${\textcolor{Red}{\textsf{▲ trend ↓}}}$
-→ Turned Up + Falling = Bullish Counter-Trend
+${\textcolor{Red}{\textsf{▲ trend}}}$
+→ ST HMA: **Turned Up** + LT HMA: **Falling** = Bullish Counter-Trend
 
-${\textcolor{Red}{\textsf{▼ trend ↓}}}$
-→ Turned Down + Falling = Bearish Trend-Aligned
+${\textcolor{Red}{\textsf{▼ trend}}}$
+→ ST HMA: **Turned Down** + LT HMA: **Falling** = Bearish Trend-Aligned
 
-${\textcolor{blue}{\textsf{▼ trend↑}}}$
-→ Turned Down + Rising = Bearish Counter-Trend
+${\textcolor{blue}{\textsf{▼ trend}}}$
+→ ST HMA: **Turned Down** + LT HMA: **Rising** = Bearish Counter-Trend
 
 The background and the arrow/text can legitimately tell different stories because they describe different dimensions.
 
@@ -820,7 +824,9 @@ It means:
 
 
 ---
+${\rightarrow}$ :small[[Back to top](#summary-how-to-interpret-hma)]
 
+---
 ## HMA — Brief Overview
 
 ### What HMA measures
@@ -873,6 +879,8 @@ but also:
 
 That second question is why the app supplements the normal HMA Signal with the separate :gray-background[HMA Direction], :gray-background[Trend Context], and :gray-background[Turn Context] fields.
 
+---
+${\rightarrow}$ :small[[Parent](#hma-brief-overview)]
 
 ---
 ### The 6 HMA Variants
@@ -938,6 +946,8 @@ The production rulebook therefore treats HMA(200) differently from merely applyi
 
 > **Important:** The HMA period changes the speed and threshold calibration of the measurement. It does not change what :gray-background[Buy], :gray-background[Sell], :gray-background[Strong Buy], or :gray-background[Strong Sell] fundamentally mean.
 
+---
+${\rightarrow}$ :small[[Parent](#hma-brief-overview)]
 
 ---
 ## Understanding the HMA "Signal"
@@ -1016,7 +1026,7 @@ It means:
 $\Large{\textsf{The Two Numbers That Drive the 'Signal'}}$:
 
 ### 1. ATR Distance
-$\small{\textsf{NOTE: see 'MU Example' below for real example.}}$
+:small[See 'MU Example' [below](#mu-example-atr-distance-and-slope) for real example.]
 
 `ATR Distance` measures:
 
@@ -1104,11 +1114,14 @@ means:
 
 > **Price is 0.80 ATR below HMA(21).**
 
+---
+$\small{\rightarrow}$ :small[[Parent](#understanding-the-hma-signal)]
 
 ---
 ### 2. 14-bar HMA Slope
-$\small{\textsf{NOTE: see 'MU Example' below for real example.}}$
+NOTE: see '[MU](#mu-example-atr-distance-and-slope)' below for real example.
 
+---
 The second Signal input measures the HMA's established trajectory.
 
 The app first calculates a linear-regression slope across the most recent 14 HMA observations.
@@ -1136,6 +1149,7 @@ This answers:
 > ***Over its recent 14-bar trajectory, how steeply has this HMA been rising or falling relative to its own level?***
 
 ----
+
 $\large{\textsf{Worked example: 14-day HMA Slope}}$
 
 Suppose:
@@ -1175,6 +1189,10 @@ not above +0.50%/bar
 So, assuming the ATR Distance requirement also qualifies, the slope supports :gray-background[Buy] rather than :gray-background[Strong Buy].
 
 
+---
+$\small{\rightarrow}$ :small[[Parent](#understanding-the-hma-signal)]
+
+---
 ### 'MU' Example: 'ATR Distance' and 'Slope'
 
 The easiest way to see their value is to start with what the displayed HMA number **doesn't** tell you.
@@ -1424,6 +1442,9 @@ and have no idea **why**.
 That's the main information value.
 
 ---
+$\small{\rightarrow}$ :small[[Parent](#understanding-the-hma-signal)]
+
+---
 ### HMA(21): Complete 'Signal' Rule Map
 
 A compact way to reconstruct the entire HMA(21) Signal is:
@@ -1463,6 +1484,9 @@ It requires both.
 $\large{\rightarrow}$ $\small{\textsf{Appendix: "Understanding the 'ATR' and 'Slope' Threshold Boundaries"}}$
 
 ---
+$\small{\rightarrow}$ :small[[Parent](#understanding-the-hma-signal)]
+
+---
 ### Checklist: Questions to understand 'Signal'
 
 When trying to reconstruct an HMA Signal from the hover, ask:
@@ -1490,6 +1514,8 @@ Together:
 ```
 
 ---
+$\small{\rightarrow}$ :small[[Back to top](#summary-how-to-interpret-hma)]
+
 ---
 
 ## Understanding "Turning Context"
@@ -1545,6 +1571,9 @@ Neither result is contradictory.
 They are describing different dimensions of the same observation.
 
 The current production rulebook explicitly states that HMA Direction and context fields are supplementary and do not change the Signal score.
+
+---
+$\small{\rightarrow}$ :small[[Back to top](#summary-how-to-interpret-hma)]
 
 ---
 
@@ -1603,6 +1632,8 @@ The first identifies the **new event**.
 
 The second identifies the **reference direction against which that event should be interpreted**.
 
+
+> $\small{\rightarrow}$ :small[[Parent](#understanding-turning-context)]
 
 ---
 
@@ -1733,6 +1764,8 @@ HMA Direction: Turned Down ▼
 
 **Bottom-line:** Answers the question **“Did HMA switch from rising/flat to falling today?”**
 
+> $\small{\rightarrow}$ :small[[Parent](#understanding-turning-context)]
+
 ---
 ### 2. Trend Context
 $\small{\textsf{See 'Appendix' for more on HMA(16,21,55)}}$
@@ -1769,6 +1802,7 @@ For HMA21, Trend Context answers:
 For HMA55, Trend Context answers:
 - **“Is the longer-term HMA55 turn moving with or against the structural HMA200 direction?”**
 
+> $\small{\rightarrow}$ :small[[Parent](#understanding-turning-context)]
 
 ---
 ### 3. From the 2 inputs to 'Turn Context'
@@ -1828,7 +1862,12 @@ Down + Rising
 ```
 
 ---
+> $\small{\rightarrow}$ :small[[Parent](#understanding-turning-context)]
+
+---
 ## Reading "Signal" and "Turning Context" Together
+:small[([Back to top](#summary-how-to-interpret-hma))]
+
 
 This is where the two HMA layers become most useful.
 
@@ -1901,7 +1940,7 @@ The second has much stronger **fresh timing information**.
 > **NOTE**:
 > **The bearish side mirrors the same structure.**
 > - The purpose of this table is not to rank historical forward returns; it is to separate **established trend-state strength** from **fresh timing significance**.
-> - See Also: '***Complete Signal + Turning Context reference***' above
+> - See Also: '***[Complete Signal + Turning Context reference](#reference-complete-signal-turning-context)***' above
 
 
 So the better question is not merely:
@@ -2589,6 +2628,9 @@ Turning Context
 A production observation can contain strong information in either dimension—or in both.
 
 ---
+> ${\rightarrow}$ [top](#summary-how-to-interpret-hma)
+
+---
 ## Understanding the HMA Hover
 The HMA hover contains several fields because it is trying to answer **different questions rather than repeat the same answer in different forms**.
 
@@ -2783,6 +2825,8 @@ The key is:
 
 ---
 ## How to Read an HMA Heatmap Cell
+- See also: [What the heatmap display is telling you](#what-the-heatmap-display-is-telling-you)
+
 
 The HMA cell combines several visual and hover elements.
 
@@ -2973,13 +3017,10 @@ confirmed bullish HMA trend
 ```
 
 ---
-
-$\large{\rightarrow}$ Next: $\large{\textsf{"Interpretation Boundaries and Limitations"}}$ (see Appendix)
-
+> ${\rightarrow}$ [top](#summary-how-to-interpret-hma)
 
 ---
 ## Signal Rules Translation
-[top](#summary-how-to-interpret-hma)
 
 HMA(9), HMA(16), HMA(21), HMA(50), HMA(55), and HMA(200) all use the same basic Signal architecture:
 
@@ -3920,6 +3961,8 @@ Turning Context
 → fresh directional transition
 ```
 
+---
+> ${\rightarrow}$ [top](#summary-how-to-interpret-hma)
 
 ---
 ## My Notes
@@ -3954,4 +3997,6 @@ The HMA is a fast, smooth moving average designed to reduce lag while maintainin
 
 In practice, HMA(55) on a daily chart behaves like a *living* trend line — it turns faster than a 50 SMA but without the whipsaw of a short EMA. It's particularly effective as a dynamic support/resistance level in trending markets.
 
+
 ---
+> ${\rightarrow}$ [top](#summary-how-to-interpret-hma)

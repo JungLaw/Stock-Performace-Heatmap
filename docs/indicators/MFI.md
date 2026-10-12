@@ -22,14 +22,16 @@ These signals describe the current MFI state. They do not require a threshold cr
 
 ## Key Points
 > Positive Money Flow: ***Price goes up + Volume is heavy = Cash is flowing in***.
+>
 > Negative Money Flow: ***Price goes down + Volume is heavy = Cash is flowing out***
 
 - If the "Inflow Days" (+MF) have drastically higher volume than the "Outflow Days" (-MF), the MFI score pushes toward 100. 
 - If the "Outflow Days" (-MF) dominate, the score drops toward 0.
 
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
 ---
-
 ## Indicator overview
 
 MFI combines price and trading volume into an oscillator bounded between `0` and `100`.
@@ -68,12 +70,14 @@ MFI = 100 - (100 / (1 + Money Flow Ratio))
 Because volume is included, MFI differs from a price-only oscillator such as RSI. A price move accompanied by greater volume generally has more influence on MFI than a similar price move accompanied by lower volume.
 
 The output scale is:
-
 * near `0` — unusually strong negative money-flow pressure
 * near `50` — relatively balanced money flow
 * near `100` — unusually strong positive money-flow pressure
 
 MFI does not directly measure future returns. It describes the current balance of price-and-volume pressure over its configured lookback.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
 ---
 
@@ -97,6 +101,9 @@ MFI is most useful as a contextual state measure rather than as a guaranteed rev
 A low reading can identify an oversold condition without proving that price has reached a durable bottom. A high reading can identify an overbought condition without proving that price will immediately decline.
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
+
+---
 
 ## Use with
 
@@ -112,7 +119,9 @@ MFI can be paired with:
 The project’s MFI score itself does not require these confirmations. They are supplementary analytical context.
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
+---
 ## MFI Rule Translation
 
 The same rule structure applies independently to:
@@ -190,8 +199,9 @@ The current MFI reading is above `15` and no higher than `25`.
 This represents an oversold opportunity state, but one that is less extreme than Strong Buy.
 
 **Why it receives a positive score**
+The reading remains in a low money-flow zone where selling pressure has been substantial.
 
-The reading remains in a low money-flow zone where selling pressure has been substantial. The project assigns a positive mean-reversion bias, but the condition is not sufficiently extreme for the strongest score.
+The project assigns a positive mean-reversion bias, but the condition is not sufficiently extreme for the strongest score.
 
 **Boundary behavior**
 
@@ -343,6 +353,9 @@ The rule does not require:
 Strong Sell means the current MFI state is deeply overbought under the project’s scoring model. It does not mean an immediate price decline is certain.
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
+
+---
 
 ## Project-specific rule summary
 
@@ -362,6 +375,9 @@ The rule bands are:
 * identical across periods `10`, `14`, and `30`.
 
 The model is a persistent state-band model. A signal remains active for as long as the current MFI value remains inside its corresponding band.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
 ---
 
@@ -397,6 +413,9 @@ It is not:
 * trend-regime scoring.
 
 The thresholds are defensible as a project-specific heatmap calibration, but they should not be described as a universal market standard.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
 ---
 
@@ -444,6 +463,9 @@ For stronger decision support, compare MFI with:
 * moving-average structure;
 * price-volume confirmation;
 * other momentum or money-flow indicators.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
 
 ---
 
@@ -521,8 +543,15 @@ $\large{\rightarrow}$ Divergence between the MFI and price can indicate a potent
 - **Signals:** Readings above 80 suggest an overbought market, while readings below 20 suggest an oversold market. 
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
+
+---
 #### Difference Btwn: Chaikin's Money Flow & MFI
 The main difference is that the MFI is a momentum oscillator that uses price and volume to identify overbought/oversold conditions, ranging from 0-100, while CMF measures the strength of buying and selling pressure over a <u>longer period</u>, using a multiplier based on the price's closing position within its high-low range, resulting in a range between -1 and +1. 
 
 MFI gives a more direct overbought/oversold signal, whereas CMF is more focused on the overall trend strength and direction of money flow.
 
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-mfi-signals)])
+
+---
