@@ -9,6 +9,8 @@ from src.ui.indicator_hover_explanations import (
     get_hma_rule_explanation,
     get_hma_context_interpretation,
     get_uo_rule_explanation,
+    get_vwma_rule_explanation,
+    get_vwma_volume_context_interpretation,
 )
 
 import numpy as np
@@ -3291,6 +3293,7 @@ def build_plotly_heatmap_inputs(
             bb_bw_context_block = ""
             ma_context_block = ""
             vwma_post_signal_block = ""
+            vwma_context_interpretation_block = ""
 
             # HMA context-only display fields.
             # Semantic truth is derived upstream in technical.py.
@@ -5165,6 +5168,34 @@ def build_plotly_heatmap_inputs(
                     except (TypeError, ValueError):
                         pass
 
+                # Explanation layer reads authoritative upstream score and
+                # context values. It never recalculates VWMA classification.
+                try:
+                    vwma_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    vwma_period = None
+                vwma_state = score_to_rule_key(s)
+                if vwma_period is not None and vwma_state:
+                    curated = get_vwma_rule_explanation(
+                        vwma_period,
+                        vwma_state,
+                        all_state_rules,
+                        extra_map.get("vwma_sma_spread_atr"),
+                        spread_direction,
+                    )
+                    if curated:
+                        rule_text = curated
+                        rule_block = _format_hover_block("Rule", curated, width=80)
+                        interpretation = get_vwma_volume_context_interpretation(
+                            vwma_state, vwma_volume_extreme_event_value
+                        )
+                        if interpretation:
+                            vwma_context_interpretation_block = (
+                                _format_hover_block(
+                                    "Context Interpretation", interpretation, width=72
+                                )
+                            )
+
                 if vwma_post_signal_lines:
                     vwma_post_signal_block = (
                         "<br>".join(
@@ -5522,6 +5553,7 @@ def build_plotly_heatmap_inputs(
                     "band_context_block": band_context_block,
                     "ma_context_block": ma_context_block,
                     "vwma_post_signal_block": vwma_post_signal_block,
+                    "vwma_context_interpretation_block": vwma_context_interpretation_block,
 
                     "hma_post_signal_block": (
                         hma_post_signal_block
@@ -6289,9 +6321,22 @@ def apply_vwma_volume_extreme_text_overlay(
                 else "▼"
             )
 
+            # High-volume events retain the existing colored value+arrow.
+            # Low-volume events retain colored VALUE but use a separate
+            # neutral arrow annotation, matching the UO symbol technique.
             overlay_text = (
                 f"{value_text} {arrow}"
+                if event.startswith("high_")
+                else str(value_text)
             )
+            if event.startswith("low_"):
+                fig.add_annotation(
+                    x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                    text="▼", showarrow=False, xshift=28, yshift=0,
+                    xanchor="center", yanchor="middle",
+                    font=dict(size=12, color="black"),
+                    captureevents=False,
+                )
 
             # Suppress the Heatmap's own text at this coordinate.
             # The sparse Scatter trace becomes the sole visible text while
@@ -6460,6 +6505,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"

@@ -3857,6 +3857,10 @@ class DatabaseIntegratedTechnicalCalculator:
                 vwma - sma
             )
 
+            # Display context only: reuse the same ATR-normalized separation
+            # already referenced by VWMA Strong-state rule expressions.
+            vwma_sma_spread_atr = vwma_sma_spread_abs / atr
+
             vwma_sma_spread_pct = (
                 (vwma / safe_sma) - 1.0
             ) * 100.0
@@ -3955,6 +3959,9 @@ class DatabaseIntegratedTechnicalCalculator:
                 ),
                 "vwma_sma_spread_abs": (
                     vwma_sma_spread_abs
+                ),
+                "vwma_sma_spread_atr": (
+                    vwma_sma_spread_atr
                 ),
                 "vwma_sma_spread_pct": (
                     vwma_sma_spread_pct
@@ -4732,6 +4739,9 @@ class DatabaseIntegratedTechnicalCalculator:
                         ),
                         "vwma_sma_spread_abs": (
                             "vwma_sma_spread_abs"
+                        ),
+                        "vwma_sma_spread_atr": (
+                            "vwma_sma_spread_atr"
                         ),
                         "vwma_sma_spread_pct": (
                             "vwma_sma_spread_pct"

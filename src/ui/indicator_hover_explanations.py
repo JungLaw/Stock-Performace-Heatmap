@@ -186,3 +186,120 @@ def get_uo_rule_explanation(
         "No Active Setup": "No active Watch, Divergence, or Confirmed setup.",
     }
     return descriptions[semantic_state]
+
+
+# VWMA approved heatmap expressions are checked in their entirety, including
+# strict versus inclusive boundaries and the relative-spread lag comparison.
+_VWMA_PRICE_DISTANCE = {10: 0.25, 20: 0.50, 50: 1.00}
+
+
+@lru_cache(maxsize=None)
+def _approved_vwma_expressions(period: int) -> dict[str, str]:
+    distance = _VWMA_PRICE_DISTANCE[period]
+    price = f"(Close - VWMA_{period}) / ATR_14"
+    slope = f"(VWMA_{period}_slope__linreg_14 / VWMA_{period}) * 100"
+    separation = f"(VWMA_{period} - SMA_{period}) / ATR_14"
+    spread = f"(VWMA_{period} / SMA_{period} - 1)"
+    previous = f"lag(VWMA_{period} / SMA_{period} - 1, 1)"
+    bull = f"{price} > {distance:.2f} and {slope} > 0.05"
+    bear = f"{price} < -{distance:.2f} and {slope} < -0.05"
+    return {
+        "strong_buy": f"{bull} and {separation} >= 0.15 and {spread} > {previous}",
+        "buy": f"{bull} and ({separation} < 0.15 or {spread} <= {previous})",
+        "neutral": "",
+        "sell": f"{bear} and ({separation} > -0.15 or {spread} >= {previous})",
+        "strong_sell": f"{bear} and {separation} <= -0.15 and {spread} < {previous}",
+    }
+
+
+def get_vwma_rule_explanation(
+    period: int,
+    state: str,
+    active_rules: Mapping[str, str],
+    spread_atr: object = None,
+    spread_direction: object = None,
+) -> Optional[str]:
+    """Describe upstream VWMA state; do not classify or manufacture a score."""
+    if period not in _VWMA_PRICE_DISTANCE or state not in _HMA_STATES:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_vwma_expressions(period)
+    for key in _HMA_STATES:
+        actual = str(active_rules.get(key, "") or "")
+        if key == "neutral":
+            if actual.strip():
+                return None
+        elif _fingerprint(actual) != _fingerprint(approved[key]):
+            return None
+
+    bullish = f"Price is convincingly above a rising VWMA({period})"
+    bearish = f"Price is meaningfully below a falling VWMA({period})"
+    if state == "neutral":
+        return ("Price position and VWMA direction do not jointly satisfy "
+                "a qualified bullish or bearish state.")
+    if state == "strong_buy":
+        return (bullish + ", and VWMA is both meaningfully above SMA "
+                "and strengthening relative to SMA.")
+    if state == "strong_sell":
+        return (bearish + ", and VWMA is both meaningfully below SMA "
+                "and weakening further relative to SMA.")
+
+    # Buy/Sell retain the upstream score. These facts only select which
+    # *explanation* applies; they never create a classification.
+    if isinstance(spread_atr, bool) or not isinstance(spread_atr, Real):
+        return None
+    import math
+    if not math.isfinite(float(spread_atr)):
+        return None
+    if spread_direction not in ("Rising", "Falling", "Unchanged"):
+        return None
+    separation = float(spread_atr)
+    if state == "buy":
+        separation_fails = separation < 0.15
+        direction_fails = spread_direction != "Rising"
+        intro = bullish + ", but "
+        separation_text = "VWMA is not meaningfully above SMA"
+        direction_text = "VWMA is not strengthening relative to SMA"
+    else:
+        separation_fails = separation > -0.15
+        direction_fails = spread_direction != "Falling"
+        intro = bearish + ", but "
+        separation_text = "VWMA is not meaningfully below SMA"
+        direction_text = "VWMA is not weakening further relative to SMA"
+    if not (separation_fails or direction_fails):
+        return None  # Contradicts the upstream non-Strong score.
+    if separation_fails and direction_fails:
+        return intro + separation_text + " and " + direction_text + "."
+    return intro + (separation_text if separation_fails else direction_text) + "."
+
+
+def get_vwma_volume_context_interpretation(state: str, event: str) -> Optional[str]:
+    """Interpret preclassified session participation, never infer an event."""
+    if state not in _HMA_STATES:
+        return None
+    event_text = {
+        "high_up": "an unusually high-volume price increase",
+        "high_down": "an unusually high-volume price decline",
+        "low_up": "a price increase on exceptionally light volume",
+        "low_down": "a price decline on exceptionally light volume",
+    }.get(event)
+    if event_text is None:
+        return None
+    trend = ("bullish" if state in ("buy", "strong_buy") else
+             "bearish" if state in ("sell", "strong_sell") else None)
+    if trend is None:
+        return (f"Today's session shows {event_text}, but no qualified directional "
+                "VWMA Signal is present.")
+    price_up = event.endswith("_up")
+    agrees = (trend == "bullish") == price_up
+    if event.startswith("low_"):
+        return (f"The VWMA Signal is {trend}; today's session shows {event_text}. "
+                "Light participation limits the strength of any current-session "
+                "confirmation and does not change the Signal.")
+    if agrees:
+        return (f"The VWMA Signal is {trend}; today's {event_text} provides "
+                "directionally aligned, unusually strong participation. "
+                "The Signal itself is unchanged.")
+    return (f"The VWMA Signal is {trend}, but today's {event_text} creates "
+            "short-term tension with that classification. The Signal itself is unchanged.")

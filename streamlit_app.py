@@ -4909,6 +4909,7 @@ def _build_scd_hover_customdata(
     for key in [
         "ma_context_block",
         "vwma_post_signal_block",
+        "vwma_context_interpretation_block",
         "crossover_context_block",
         "crossover_summary_block",
         "delta_abs_fmt",
@@ -5150,6 +5151,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
         "%{customdata.notes_block}"
         "%{customdata.definition_block}"
@@ -5733,6 +5735,8 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.ma_context_block}"
             "%{customdata.signal_line}"
             "%{customdata.vwma_post_signal_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.vwma_context_interpretation_block}"
             "%{customdata.notes_block}"
             "%{customdata.definition_block}"
             "%{customdata.how_to_read_block}"
