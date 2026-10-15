@@ -3244,6 +3244,15 @@ class DatabaseIntegratedTechnicalCalculator:
         # immediately preceding trading row.
         elder_ray_setup_by_display_key: Dict[str, pd.Series] = {}
         elder_ray_divergence_by_display_key: Dict[str, pd.Series] = {}
+        bbp_rule_history_by_display_key: Dict[str, Dict[str, pd.Series]] = {}
+        for bbp_period in (10, 13, 21):
+            bbp_col = f"BBP_{bbp_period}"
+            if bbp_col in df_ind.columns:
+                bbp_series = pd.to_numeric(df_ind[bbp_col], errors="coerce")
+                bbp_rule_history_by_display_key[f"BullBearPower_{bbp_period}"] = {
+                    "bbp_prior_value": bbp_series.shift(1),
+                    "bbp_two_sessions_ago": bbp_series.shift(2),
+                }
 
         # CCI context-only event truth.
         #
@@ -4524,6 +4533,14 @@ class DatabaseIntegratedTechnicalCalculator:
                 # Bull/Bear Power — carry the upstream Elder-Ray setup
                 # label as typed context only. This does not alter score truth.
                 if eng_name == "BullBearPower":
+                    # Display-only observations from full chronological history.
+                    # They select Rule prose; classification remains upstream-owned.
+                    for context_key, history_series in (
+                        bbp_rule_history_by_display_key.get(display_key, {}).items()
+                    ):
+                        observation = history_series.loc[dt]
+                        if pd.notna(observation) and np.isfinite(observation):
+                            extras[context_key] = float(observation)
                     setup_series = elder_ray_setup_by_display_key.get(
                         display_key
                     )

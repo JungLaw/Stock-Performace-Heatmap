@@ -11,6 +11,8 @@ from src.ui.indicator_hover_explanations import (
     get_uo_rule_explanation,
     get_vwma_rule_explanation,
     get_vwma_volume_context_interpretation,
+    get_bbp_rule_explanation,
+    get_bbp_context_interpretation,
 )
 
 import numpy as np
@@ -3273,6 +3275,7 @@ def build_plotly_heatmap_inputs(
             stoch_context_block = ""
             cmf_context_block = ""
             bullbear_context_block = ""
+            bbp_context_interpretation_block = ""
             bbp_exhaustion_context_block = ""
             elder_ray_setup_value = None
             elder_ray_divergence_value = None
@@ -4287,6 +4290,30 @@ def build_plotly_heatmap_inputs(
 
                 if parts:
                     bullbear_context_block = "<br>".join(parts) + "<br>"
+
+                if not _is_missing(s):
+                    try:
+                        bbp_period = int(key.rsplit("_", 1)[1])
+                    except (ValueError, IndexError):
+                        bbp_period = None
+                    bbp_state = score_to_rule_key(s)
+                    if bbp_period is not None and bbp_state:
+                        bbp_rule = get_bbp_rule_explanation(
+                            bbp_period, bbp_state, all_state_rules,
+                            current_bbp=v,
+                            prior_bbp=extra_map.get("bbp_prior_value"),
+                            two_sessions_ago_bbp=extra_map.get("bbp_two_sessions_ago"),
+                        )
+                        if bbp_rule:
+                            rule_text = bbp_rule
+                        bbp_context = get_bbp_context_interpretation(
+                            bbp_state, elder_ray_setup_value,
+                            elder_ray_divergence_value,
+                        )
+                        if bbp_rule and bbp_context:
+                            bbp_context_interpretation_block = _format_hover_block(
+                                "Context Interpretation", bbp_context, width=80
+                            )
 
             # BBP DOWNSIDE EXHAUSTION:
             # Format upstream-derived factual context only.
@@ -5647,6 +5674,7 @@ def build_plotly_heatmap_inputs(
                     "elder_ray_setup": elder_ray_setup_value,
                     "elder_ray_divergence": elder_ray_divergence_value,
                     "bullbear_context_block": bullbear_context_block,
+                    "bbp_context_interpretation_block": bbp_context_interpretation_block,
                     "bbp_exhaustion_context_block": (
                         bbp_exhaustion_context_block
                     ),
@@ -6505,6 +6533,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.bbp_context_interpretation_block}"
         "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
         "%{customdata.notes_block}"

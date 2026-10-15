@@ -1,5 +1,6 @@
 ## Summary: Bull Bear Power (BBP) signals
 **<u>Class</u>**: Momentum Indicators
+
 **<u>aka</u>**: 'Elder-Ray Index', 'Bull/Bear Power'
 
 Bull Bear Power (BBP) is a **trend-and-pressure indicator**.
@@ -25,15 +26,25 @@ The app uses five directional BBP states:
 ---
 ### Interpreting 'Signal', 'Setup', and 'Divergence' together
 
-| Signal                                              | Elder-Ray Setup                                                                 | Divergence                             | Beginner interpretation                                                                                                                                                                          |
-| --------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ${\textcolor{blue}{\textsf{Bullish Confirmation}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$                                          | ${\textsf{None}}$                      | A fresh bullish pressure shift agrees with a rising trend, while bearish pressure is also fading. **Several pieces point in the same bullish direction.**                                        |
-| ${\textcolor{blue}{\textsf{Bullish}}}$              | ${\textcolor{blue}{\textsf{Bullish}}}$                                          | ${\textcolor{blue}{\textsf{Bullish}}}$ | The primary regime is bullish, sellers are weakening inside the uptrend, and a prior price low also showed improving selling pressure.                                                           |
-| ${\textcolor{blue}{\textsf{Bullish}}}$              | ${\textsf{None}}$                                                               | ${\textcolor{Red}{\textsf{Bearish}}}$  | The current qualified regime remains bullish, but the latest confirmed price high was reached with weaker Bull Power. **The trend is bullish, but the pressure underneath it deserves caution.** |
-| ${\textcolor{Red}{\textsf{Bearish Confirmation}}}$  | ${\textcolor{Red}{\textsf{Bearish}}}$                                           | ${\textsf{None}}$                      | A fresh bearish pressure shift agrees with a falling trend, while the remaining bullish pressure is weakening.                                                                                   |
-| ${\textcolor{Red}{\textsf{Bearish}}}$               | ${\textcolor{Red}{\textsf{Bearish}}}$                                           | ${\textcolor{Red}{\textsf{Bearish}}}$  | The primary regime is bearish, buyers are losing strength inside the downtrend, and price also showed weaker Bull Power at a higher swing high.                                                  |
-| ${\textcolor{Red}{\textsf{Bearish}}}$               | ${\textsf{None}}$                                                               | ${\textcolor{blue}{\textsf{Bullish}}}$ | The primary regime remains bearish, but the most recent lower price low came with improving Bear Power. **The trend is bearish, but selling pressure may be losing force.**                      |
-| **Neutral**                                         | ${\textcolor{blue}{\textsf{Bullish}}}$ or ${\textcolor{Red}{\textsf{Bearish}}}$ | Any                                    | The primary trend/pressure test is unresolved, but the secondary Elder-Ray context can still be worth watching.                                                                                  |
+> **Note**: For the complete set of 'Signal–Setup–Divergence' interpretations, see [How to read ALL the combinations](#how-to-read-all-the-combinations).
+
+
+| [Signal](#signal-who-has-directional-control-now) | [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) | [Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another) | Beginner interpretation |
+| --- | --- | --- | --- |
+| ${\textcolor{blue}{\textsf{Bullish Confirmation}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textsf{None}}$ | **Reinforcement:** A fresh bullish pressure shift agrees with a rising trend, while selling pressure is fading. Several observations point in the same bullish direction. |
+| ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | **Reinforcement:** Sellers are weakening within the rising trend, and a confirmed lower price low showed improving Bear Power. Both observations indicate fading selling pressure. |
+| ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textsf{None}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | **Counter-trend warning:** The trend is bullish, but the latest confirmed price high was reached with weaker Bull Power. **The trend is bullish, but the pressure underneath it deserves caution.**|
+| ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textsf{None}}$ | **Tension:** Broader bullish classification, but today's buyers are losing strength within a falling one-day EMA. |
+| ${\textcolor{Red}{\textsf{Bearish Confirmation}}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textsf{None}}$ | **Reinforcement:** A fresh bearish pressure shift agrees with a falling trend, while buying pressure is fading. Several observations point in the same bearish direction. |
+| ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | **Reinforcement:** Buyers are weakening within the falling trend, and a confirmed higher price high showed weaker Bull Power. Both observations indicate fading buying pressure. |
+| ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textsf{None}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | **Counter-trend alert:** The trend is bearish, but a confirmed lower price low showed improving Bear Power. **The trend is bearish, but selling pressure may be losing force**. Stronger than 'Counter-trend development'. |
+| ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textsf{None}}$ | **Counter-trend development:** The broader trend remains bearish, but today's sellers are losing strength within a rising one-day EMA. |
+| ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textcolor{Red}{\textsf{Bearish}}}$ | **Mixed evidence:** Today's sellers are losing strength, but a confirmed higher price high showed weaker Bull Power. Short-term pressure and swing-level evidence disagree. |
+| **Neutral** | None  | ${\textcolor{blue}{\textsf{Bullish}}}$     | **Bullish pressure evidence**: Price made a lower confirmed swing low, but Bear Power improved. Selling pressure may be losing force.  (Note: The primary pressure test is unresolved, but the secondary Elder-Ray context can still be worth watching.) |
+| **Neutral** | None  | ${\textcolor{Red}{\textsf{Bearish}}}$    | **Bearish pressure evidence**: Price made a higher confirmed swing high, but Bull Power weakened. Buying pressure may be losing force. |
+| **Neutral** | ${\textcolor{blue}{\textsf{Bullish}}}$ | ${\textsf{None}}$ | **Bullish context:** Sellers are weakening within a rising EMA, even though the broader BBP conditions have not qualified. (Note: secondary to 'Neutral-None-Bullish')|
+| **Neutral** | ${\textcolor{Red}{\textsf{Bearish}}}$ | ${\textsf{None}}$ | **Bearish context:** Buyers are weakening within a falling EMA, even though the broader BBP conditions have not qualified.
+
 
 ---
 
@@ -457,6 +468,8 @@ Again:
 ---
 
 ## (HTR) Understanding the BBP Hover
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
+
 The BBP hover contains several related pieces of information.
 
 They should **not** be treated as multiple versions of the same signal.
@@ -469,7 +482,7 @@ The most useful mental model is:
 Another useful distinction is:
 > The '**Signal**' asks who currently has directional control;
 >
-> The '**Elder-Ray Setup**' asks whether the weaker side appears to be losing its remaining influence inside that trend.
+> The '**[Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend)**' asks whether the weaker side appears to be losing its remaining influence inside that trend.
 
 The app deliberately carries Setup and Divergence separately from the primary score rather than collapsing all Elder-Ray information into one classification.
 
@@ -539,7 +552,10 @@ The separate component lines therefore help answer:
 * Is Bull Power strengthening or weakening?
 * Is negative Bear Power becoming more or less severe?
 
-Those questions are especially relevant to interpreting **Elder-Ray Setup** and **Elder-Ray Divergence**.
+Those questions are especially relevant to interpreting **[Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend)** and **[Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another)**.
+
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
 
 ---
 
@@ -549,10 +565,14 @@ The three hover fields should be viewed as **different lenses**, not three votes
 
 | Layer                    | Main question                                                             | Simplest translation                                               |
 | ------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| **Signal**               | Does current combined BBP pressure agree with a meaningful EMA trend?     | **What is happening right now?**                                   |
-| **Elder-Ray Setup**      | Is the weaker side losing influence inside that trend?                    | **Is the market arranged in a way that may favor the trend side?** |
-| **Elder-Ray Divergence** | Is price making a new swing extreme without matching underlying pressure? | **Is price telling one story while pressure tells another?**       |
+| **[Signal](#signal-who-has-directional-control-now)**               | Does current combined BBP pressure agree with a meaningful EMA trend?     | **What is happening right now?**                                   |
+| **[Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend)**      | Is the weaker side losing influence inside that trend?                    | **Is the market arranged in a way that may favor the trend side?** |
+| **[Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another)** | Is price making a new swing extreme without matching underlying pressure? | **Is price telling one story while pressure tells another?**       |
 
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
+
+---
 ### How to interpret 'Signal', 'Setup', and 'Divergence' together
 
 | Signal                                              | Elder-Ray Setup                                                                 | Divergence                             | Beginner interpretation                                                                                                                                                                          |
@@ -585,6 +605,89 @@ It can mean:
 They are answering different questions.
 
 ---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
+
+---
+### How to read ALL the combinations
+
+The **Bottom-line** column reproduces the approved live **Context Interpretation** wording verbatim, including its opening label. **Not displayed** means both secondary fields are explicitly evaluated as `None`; missing data is different from `None` and is not interpreted.
+
+**[Signal](#signal-who-has-directional-control-now)** (including Confirmation) refers to the primary five-state BBP classification. A Confirmation state marks a recent pressure transition plus continued movement, **not** a stronger version of an ordinary directional state. **[Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend)** measures one-session EMA and individual pressure-component changes; **[Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another)** compares confirmed swing pivots and is shown on the confirmation event date (new pivot + two sessions), not retroactively on the pivot date.
+
+**Interpretive priority:** The Bearish / None / Bullish *Counter-trend alert* receives greater **structural attention** than the Bearish / Bullish / None *Counter-trend development*; this is **not a verified ranking of reversal probability**.
+
+The combinations below are **theoretically interpretable**, not asserted to be present or equally frequent in historical data. The literal columns describe the independent underlying conditions; they do not introduce a new combined scoring rule.
+
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
+
+#### Bullish / Bullish Confirmation
+
+| [Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) | [Divergence]((#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another)) | Layman’s translation | Bottom-line (exact hover text) | Literal Summary | Rule Logic |
+| --- | --- | --- | --- | --- | --- |
+| None | None | Broader rising trend and buying pressure agree. | *Not displayed — no active secondary observations.* | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: None. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). Evaluated; neither Setup condition met. Evaluated; no confirmed divergence event today. |
+| Bullish | None | Broader rising trend and buying pressure agree. EMA rises one session; negative Bear Power is becoming less negative. | Reinforcement: Sellers still exert pressure below the EMA, but their influence is fading. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: None. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. Evaluated; no confirmed divergence event today. |
+| None | Bullish | Broader rising trend and buying pressure agree. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Supporting evidence: A confirmed lower price low showed improving Bear Power—selling pressure was less severe despite the lower low. | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: Bullish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). Evaluated; neither Setup condition met. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| None | Bearish | Broader rising trend and buying pressure agree. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Counter-trend warning: The trend is bullish, but a confirmed higher price high showed weaker Bull Power. Buying pressure may be losing force. | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: Bearish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). Evaluated; neither Setup condition met. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bearish | None | Broader rising trend and buying pressure agree. EMA falls one session; positive Bull Power is decreasing. | Tension: Broader bullish classification, but today's buyers are losing strength within a falling one-day EMA. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: None. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. Evaluated; no confirmed divergence event today. |
+| Bearish | Bearish | Broader rising trend and buying pressure agree. EMA falls one session; positive Bull Power is decreasing. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Multiple warnings: Weaker buying pressure appears in both today's Bearish Setup and the confirmed higher-price-high comparison. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: Bearish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bullish | Bearish | Broader rising trend and buying pressure agree. EMA rises one session; negative Bear Power is becoming less negative. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Mixed evidence: Sellers are weakening within the uptrend, but the confirmed higher price high showed weaker Bull Power. The Setup supports the trend; Divergence introduces caution. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: Bearish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bearish | Bullish | Broader rising trend and buying pressure agree. EMA falls one session; positive Bull Power is decreasing. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Mixed evidence: Today's buyers are losing strength, but a confirmed lower price low showed improving Bear Power. Short-term pressure and swing-level evidence disagree. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: Bullish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| Bullish | Bullish | Broader rising trend and buying pressure agree. EMA rises one session; negative Bear Power is becoming less negative. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Reinforcement: Sellers are weakening within the rising trend, and a confirmed lower price low showed improving Bear Power. Both observations indicate fading selling pressure. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: Bullish. | 5-session EMA increase >0.25 × ATR(14), BBP>0; +2 requires BBP(t−2)≤0 and BBP(t)>BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+
+#### Bearish / Bearish Confirmation
+
+| Setup | Divergence | Layman’s translation | Bottom-line (exact hover text) | Literal Summary | Rule Logic |
+| --- | --- | --- | --- | --- | --- |
+| None | None | Broader falling trend and selling pressure agree. | *Not displayed — no active secondary observations.* | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: None. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). Evaluated; neither Setup condition met. Evaluated; no confirmed divergence event today. |
+| Bearish | None | Broader falling trend and selling pressure agree. EMA falls one session; positive Bull Power is decreasing. | Reinforcement: Buyers still exert some upward influence above the EMA, but that influence is fading. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: None. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. Evaluated; no confirmed divergence event today. |
+| None | Bearish | Broader falling trend and selling pressure agree. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Supporting evidence: A confirmed higher price high showed weaker Bull Power—buying pressure weakened despite the higher high. | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: Bearish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). Evaluated; neither Setup condition met. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| None | Bullish | Broader falling trend and selling pressure agree. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Counter-trend alert: The trend is bearish, but a confirmed lower price low showed improving Bear Power. Selling pressure may be losing force. Stronger than 'Counter-trend development'. | Primary: qualified direction or fresh Confirmation; Setup: None; Divergence: Bullish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). Evaluated; neither Setup condition met. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| Bullish | None | Broader falling trend and selling pressure agree. EMA rises one session; negative Bear Power is becoming less negative. | Counter-trend development: The broader trend remains bearish, but today's sellers are losing strength within a rising one-day EMA. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: None. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. Evaluated; no confirmed divergence event today. |
+| Bullish | Bullish | Broader falling trend and selling pressure agree. EMA rises one session; negative Bear Power is becoming less negative. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Multiple counter-trend observations: Both today's Bullish Setup and the confirmed lower-price-low comparison suggest selling pressure may be weakening despite the bearish trend. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: Bullish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| Bearish | Bullish | Broader falling trend and selling pressure agree. EMA falls one session; positive Bull Power is decreasing. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Mixed evidence: Buyers are weakening within the downtrend, but a confirmed lower price low showed improving Bear Power. The Setup supports the trend; Divergence introduces caution. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: Bullish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| Bullish | Bearish | Broader falling trend and selling pressure agree. EMA rises one session; negative Bear Power is becoming less negative. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Mixed evidence: Today's sellers are losing strength, but a confirmed higher price high showed weaker Bull Power. Short-term pressure and swing-level evidence disagree. | Primary: qualified direction or fresh Confirmation; Setup: Bullish; Divergence: Bearish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bearish | Bearish | Broader falling trend and selling pressure agree. EMA falls one session; positive Bull Power is decreasing. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Reinforcement: Buyers are weakening within the falling trend, and a confirmed higher price high showed weaker Bull Power. Both observations indicate fading buying pressure. | Primary: qualified direction or fresh Confirmation; Setup: Bearish; Divergence: Bearish. | 5-session EMA decrease >0.25 × ATR(14), BBP<0; −2 requires BBP(t−2)≥0 and BBP(t)<BBP(t−1). EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+
+#### Neutral
+
+| Setup | Divergence | Layman’s translation | Bottom-line (exact hover text) | Literal Summary | Rule Logic |
+| --- | --- | --- | --- | --- | --- |
+| None | None | No fully qualified directional trend-and-pressure state. | *Not displayed — no active secondary observations.* | Primary: unqualified; Setup: None; Divergence: None. | None of the four directional rules fully qualifies. Evaluated; neither Setup condition met. Evaluated; no confirmed divergence event today. |
+| Bullish | None | No fully qualified directional trend-and-pressure state. EMA rises one session; negative Bear Power is becoming less negative. | Bullish context: Sellers are weakening within a rising EMA, even though the broader BBP conditions have not qualified. | Primary: unqualified; Setup: Bullish; Divergence: None. | None of the four directional rules fully qualifies. EMA(t)>EMA(t−1); Bear Power<0 and rising. Evaluated; no confirmed divergence event today. |
+| Bearish | None | No fully qualified directional trend-and-pressure state. EMA falls one session; positive Bull Power is decreasing. | Bearish context: Buyers are weakening within a falling EMA, even though the broader BBP conditions have not qualified. | Primary: unqualified; Setup: Bearish; Divergence: None. | None of the four directional rules fully qualifies. EMA(t)<EMA(t−1); Bull Power>0 and falling. Evaluated; no confirmed divergence event today. |
+| None | Bullish | No fully qualified directional trend-and-pressure state. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Bullish pressure evidence: Price made a lower confirmed swing low, but Bear Power improved. Selling pressure may be losing force. | Primary: unqualified; Setup: None; Divergence: Bullish. | None of the four directional rules fully qualifies. Evaluated; neither Setup condition met. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| None | Bearish | No fully qualified directional trend-and-pressure state. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Bearish pressure evidence: Price made a higher confirmed swing high, but Bull Power weakened. Buying pressure may be losing force. | Primary: unqualified; Setup: None; Divergence: Bearish. | None of the four directional rules fully qualifies. Evaluated; neither Setup condition met. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bullish | Bullish | No fully qualified directional trend-and-pressure state. EMA rises one session; negative Bear Power is becoming less negative. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Aligned bullish evidence: Sellers are weakening within a rising EMA, and a confirmed lower price low showed improving Bear Power. Both observations indicate fading selling pressure. | Primary: unqualified; Setup: Bullish; Divergence: Bullish. | None of the four directional rules fully qualifies. EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+| Bearish | Bearish | No fully qualified directional trend-and-pressure state. EMA falls one session; positive Bull Power is decreasing. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Aligned bearish evidence: Buyers are weakening within a falling EMA, and a confirmed higher price high showed weaker Bull Power. Both observations indicate fading buying pressure. | Primary: unqualified; Setup: Bearish; Divergence: Bearish. | None of the four directional rules fully qualifies. EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bullish | Bearish | No fully qualified directional trend-and-pressure state. EMA rises one session; negative Bear Power is becoming less negative. A higher confirmed price swing high had lower Bull Power at the newer pivot. | Mixed evidence: Today's sellers are weakening within a rising EMA, but a confirmed higher price high showed weaker buying pressure. The two observations point in different directions. | Primary: unqualified; Setup: Bullish; Divergence: Bearish. | None of the four directional rules fully qualifies. EMA(t)>EMA(t−1); Bear Power<0 and rising. New 5-bar price pivot high > prior pivot high; Bull Power at new pivot < at prior pivot; event on pivot+2. |
+| Bearish | Bullish | No fully qualified directional trend-and-pressure state. EMA falls one session; positive Bull Power is decreasing. A lower confirmed price swing low had higher Bear Power at the newer pivot. | Mixed evidence: Today's buyers are weakening within a falling EMA, but a confirmed lower price low showed improving Bear Power. The two observations point in different directions. | Primary: unqualified; Setup: Bearish; Divergence: Bullish. | None of the four directional rules fully qualifies. EMA(t)<EMA(t−1); Bull Power>0 and falling. New 5-bar price pivot low < prior pivot low; Bear Power at new pivot > at prior pivot; event on pivot+2. |
+
+> **Reading a row:** In *Bearish / None / Bullish*, the primary BBP regime still qualifies as bearish. There is no active Setup, but a confirmed lower price low had less negative Bear Power than the prior pivot. The hover therefore displays **Counter-trend alert**. The new swing low occurred two sessions before the divergence confirmation event; the word “confirmed” does not mean the low occurred today.
+
+**Rule-reference note:** These columns summarize the rule’s conditions, while the more detailed Signal, Setup, and Divergence sections below remain the authoritative definitions. `None` signifies an evaluated inactive secondary layer; missing/warmup information is not mapped to an inactive state.
+
+One sentence is especially useful here:
+
+> **A warning does not cancel a trend, and a trend does not cancel a warning.**
+
+For example:
+
+```text
+Signal: Bearish
+Elder-Ray Divergence: Bullish
+```
+
+is not contradictory.
+
+It can mean:
+
+> **The current EMA/BBP regime still favors sellers, but the most recent price swing suggests those sellers may be losing some underlying force.**
+
+They are answering different questions.
+
+
+---
 
 ### Signal — who has directional control now?
 
@@ -607,6 +710,9 @@ It uses three types of information:
 The simplest translation is:
 > "***Signal tells you whether current pressure agrees with a meaningful trend—and whether that alignment has just been reinforced by a fresh zero-line shift.***"
 
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
+
 #### What Signal does not mean
 
 Signal does **not** tell you:
@@ -616,7 +722,7 @@ Signal does **not** tell you:
 * that a trade should automatically be opened;
 * that a large positive BBP is “overbought”;
 * that a large negative BBP is “oversold”;
-* whether a classic Elder-Ray Setup exists;
+* whether a classic [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) exists;
 * whether price and the underlying pressure components are diverging.
 
 Those last two questions belong to the next two hover fields.
@@ -636,6 +742,9 @@ None
 ```
 
 This layer uses the individual Bull Power or Bear Power component rather than relying only on their combined BBP value. That matches the classic Elder-Ray idea of reading Bear Power inside a rising EMA environment and Bull Power inside a falling EMA environment. ([Interactive Brokers][2])
+
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
 
 #### Elder-Ray Setup logic
 
@@ -787,7 +896,7 @@ It also does not mean:
 
 It means only:
 
-> **The specific Elder-Ray Setup conditions are not present on this observation.**
+> **The specific [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) conditions are not present on this observation.**
 
 ---
 
@@ -812,6 +921,9 @@ Most importantly:
 > **Divergence is a warning, not a prediction.**
 
 The project's divergence implementation uses confirmed five-bar **price** swing points, then samples the corresponding Bear Power or Bull Power on those exact pivot dates.
+
+---
+$\small{\rightarrow}$ (:small[[Parent](#htr-understanding-the-bbp-hover)])
 
 #### Elder-Ray Divergence logic
 
@@ -865,7 +977,7 @@ The beginner translation is:
 
 > **Price looks worse, but selling pressure looks better. Sellers may be losing force even though price has reached a lower low.**
 
-That is why it is called **bullish divergence**.
+That is why it is called **[bullish divergence](#bullish-elder-ray-divergence)**.
 
 It does **not** mean price must immediately reverse higher.
 
@@ -948,13 +1060,15 @@ Before sufficient swing history exists, the field can remain unavailable rather 
 ---
 
 ## How to Read the BBP heatmap
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
 
+---
 A useful reading sequence is:
 
 1. **Read the number.** Is BBP positive or negative?
-2. **Read the color / Signal.** Does that pressure agree with a qualified EMA trend?
+2. **Read the color / [Signal](#signal-who-has-directional-control-now).** Does that pressure agree with a qualified EMA trend?
 3. **Look for Confirmation.** Has BBP recently crossed zero into that trend and continued moving in the same direction?
-4. **Open the hover.** Use Elder-Ray Setup and Elder-Ray Divergence as separate context—not as duplicates of Signal.
+4. **Open the hover.** Use [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) and [Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another) as separate context—not as duplicates of Signal.
 
 The five primary states can be simplified to:
 
@@ -1050,6 +1164,7 @@ The app is effectively saying:
 ---
 
 ## Industry-standard baseline versus this project
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
 
 ### Conventional Elder-Ray foundation
 
@@ -1070,8 +1185,8 @@ This dashboard extends that foundation by:
 * supporting 10-, 13-, and 21-period versions;
 * requiring a five-bar EMA move greater than :gray-badge[0.25 × ATR(14)] before assigning the primary Bullish/Bearish regime;
 * distinguishing recent BBP zero-cross Confirmation from the ongoing directional regime;
-* preserving Elder-Ray Setup as separate context;
-* preserving confirmed Elder-Ray Divergence as separate context.
+* preserving [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) as separate context;
+* preserving confirmed [Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another) as separate context.
 
 The project's five states:
 
@@ -1090,6 +1205,7 @@ are therefore **project-specific classifications**, not a claim that Elder-Ray h
 ---
 
 ## Strengths
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
 
 BBP is particularly useful for:
 
@@ -1132,13 +1248,13 @@ It does not guarantee continuation.
 
 ### Elder-Ray Setup is context, not the primary score
 
-Setup can disagree with Signal because the two use different information and answer different questions.
+[Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) can disagree with [Signal](#signal-who-has-directional-control-now) because the two use different information and answer different questions.
 
 ### Divergence is also context
 
-A bearish divergence can occur while the primary regime remains Bullish.
+A [bearish divergence](#bearish-elder-ray-divergence) can occur while the primary regime remains Bullish.
 
-A bullish divergence can occur while the primary regime remains Bearish.
+A [bullish divergence](#bullish-elder-ray-divergence) can occur while the primary regime remains Bearish.
 
 > **Divergence warns that the pressure underneath price is changing; it does not by itself declare that the current trend has ended.**
 
@@ -1185,6 +1301,9 @@ The second describes **potential exhaustion/rebound risk**.
 The separate 'BBP_DOWNSIDEEXHAUSTION.md' document covers that model in detail.
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
+
+---
 
 ## Beginner's checklist
 
@@ -1193,10 +1312,10 @@ When reading a BBP cell, ask these questions in order:
 | Step  | Question                                                                            |
 | ----- | ----------------------------------------------------------------------------------- |
 | **1** | Is the displayed BBP value positive or negative?                                    |
-| **2** | What does the primary Signal say?                                                   |
+| **2** | What does the primary [Signal](#signal-who-has-directional-control-now) say?                                                   |
 | **3** | Is it a Confirmation state—meaning BBP recently crossed zero into the trend?        |
-| **4** | What does Elder-Ray Setup say about the weaker side's remaining influence?          |
-| **5** | What does Elder-Ray Divergence say about price versus underlying pressure?          |
+| **4** | What does [Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend) say about the weaker side's remaining influence?          |
+| **5** | What does [Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another) say about price versus underlying pressure?          |
 | **6** | Do those layers agree, or is one warning about something the others do not measure? |
 
 The shortest useful summary remains:
@@ -1204,7 +1323,9 @@ The shortest useful summary remains:
 > **Signal = current state. Setup = favorable configuration. Divergence = warning that price and pressure are separating.**
 
 ---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
 
+---
 ## Initial audit note
 
 **Semantic type:** Directional trend/pressure regime with separate Elder-Ray context layers.
@@ -1239,9 +1360,9 @@ with configured periods:
 
 **Confirmation meaning:** Recent BBP zero-line transition into the qualified EMA trend direction plus current BBP follow-through.
 
-**Elder-Ray Setup:** Independent secondary context using EMA direction and the relevant Bull Power/Bear Power component.
+**[Elder-Ray Setup](#elder-ray-setup-is-the-weaker-side-losing-influence-inside-the-trend):** Independent secondary context using EMA direction and the relevant Bull Power/Bear Power component.
 
-**Elder-Ray Divergence:** Independent price-swing-versus-pressure context using confirmed five-bar price pivots; events are emitted after confirmation rather than back-painted.
+**[Elder-Ray Divergence](#elder-ray-divergence-is-price-telling-one-story-while-pressure-tells-another):** Independent price-swing-versus-pressure context using confirmed five-bar price pivots; events are emitted after confirmation rather than back-painted.
 
 **Display-versus-scoring distinction:** The heatmap displays raw combined BBP numerically while the heatmap color represents the five-state rule-engine classification.
 
@@ -1264,6 +1385,8 @@ with configured periods:
 * :gray[src/ui/rolling_heatmap_adapter.py] — displayed BBP value, Signal vocabulary, Elder-Ray Setup/Divergence, and Bull/Bear component hover presentation.
 
 
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])
 
 ---
 ## Notes
@@ -1344,3 +1467,6 @@ $\large{\textsf{Important Considerations}}$:
 - **Market Conditions**: The indicator works best in trending markets and can generate false signals in sideways or range-bound markets.
 
 - **EMA Period**: The accuracy of the indicator depends on the chosen period for the exponential moving average (EMA), requiring fine-tuning for optimal results.
+
+---
+$\small{\rightarrow}$ (:small[[Back to top](#summary-bull-bear-power-bbp-signals)])

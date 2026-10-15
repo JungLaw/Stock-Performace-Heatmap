@@ -2887,6 +2887,7 @@ def _build_scd_price_cell_from_context_df(
             "stoch_context_block": "",
             "dpo_context_block": "",
             "bullbear_context_block": "",
+            "bbp_context_interpretation_block": "",
             "meta": {},
         }
 
@@ -4925,6 +4926,7 @@ def _build_scd_hover_customdata(
         "stoch_context_block",
         "dpo_context_block",
         "bullbear_context_block",
+        "bbp_context_interpretation_block",
         "cci_context_block",
         "uo_context_block",
         "rule_block",
@@ -5151,6 +5153,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.bbp_context_interpretation_block}"
         "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
         "%{customdata.notes_block}"
@@ -5788,6 +5791,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.dpo_context_block}"
             "%{customdata.bullbear_context_block}"
             "%{customdata.rule_block}"
+            "%{customdata.bbp_context_interpretation_block}"
             "%{customdata.notes_block}"
             "%{customdata.definition_block}"
             "%{customdata.how_to_read_block}"

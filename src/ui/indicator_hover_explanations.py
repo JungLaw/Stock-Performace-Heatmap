@@ -303,3 +303,143 @@ def get_vwma_volume_context_interpretation(state: str, event: str) -> Optional[s
                 "The Signal itself is unchanged.")
     return (f"The VWMA Signal is {trend}, but today's {event_text} creates "
             "short-term tension with that classification. The Signal itself is unchanged.")
+
+
+# BBP heatmap classification: reviewed independent five-state rule fingerprints.
+_BBP_PERIODS = (10, 13, 21)
+
+
+@lru_cache(maxsize=None)
+def _approved_bbp_expressions(period: int) -> dict[str, str]:
+    ema = f"EMA_{period}"
+    bbp = f"BBP_{period}"
+    up = f"{ema} - lag({ema}, 5) > 0.25 * ATR_14"
+    down = f"lag({ema}, 5) - {ema} > 0.25 * ATR_14"
+    return {
+        "strong_buy": f"{up} and lag({bbp}, 2) <= 0 and {bbp} > 0 and rising_2bar({bbp}, 1)",
+        "buy": f"{up} and {bbp} > 0 and (lag({bbp}, 2) > 0 or not_rising_2bar({bbp}, 1))",
+        "neutral": "",
+        "sell": f"{down} and {bbp} < 0 and (lag({bbp}, 2) < 0 or not_falling_2bar({bbp}, 1))",
+        "strong_sell": f"{down} and lag({bbp}, 2) >= 0 and {bbp} < 0 and falling_2bar({bbp}, 1)",
+    }
+
+
+def get_bbp_rule_explanation(
+    period: int,
+    state: str,
+    active_rules: Mapping[str, str],
+    current_bbp: object = None,
+    prior_bbp: object = None,
+    two_sessions_ago_bbp: object = None,
+) -> Optional[str]:
+    """Describe the classified BBP state, never change or infer its score."""
+    if period not in _BBP_PERIODS or state not in _HMA_STATES:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_bbp_expressions(period)
+    for key in _HMA_STATES:
+        actual = str(active_rules.get(key, "") or "")
+        if key == "neutral":
+            if actual.strip():
+                return None
+        elif _fingerprint(actual) != _fingerprint(approved[key]):
+            return None
+
+    if state == "strong_buy":
+        return ("Buying pressure recently moved from the bearish to the bullish side "
+                "of zero while the broader trend was already rising. "
+                "Buying pressure is still improving.")
+    if state == "strong_sell":
+        return ("Selling pressure recently moved from the bullish to the bearish side "
+                "of zero while the broader trend was already falling. "
+                "Selling pressure is still deteriorating.")
+    if state == "neutral":
+        return ("Trend and pressure are not sufficiently aligned for a qualified "
+                "bullish or bearish BBP state.")
+
+    import math
+    observations = (current_bbp, prior_bbp, two_sessions_ago_bbp)
+    if any(isinstance(v, bool) or not isinstance(v, Real) or
+           not math.isfinite(float(v)) for v in observations):
+        return None
+    current, previous, two_back = map(float, observations)
+    if state == "buy":
+        if current <= 0:
+            return None
+        old_side = two_back > 0
+        # The approved rising_2bar(x,1) helper is current > previous.
+        stalled = current <= previous
+        intro = "Buyers have the pressure advantage, and that agrees with the broader rising trend. However, "
+        old_text = "buying pressure was already positive two sessions earlier"
+        stalled_text = "buying pressure is not strengthening today"
+    else:
+        if current >= 0:
+            return None
+        old_side = two_back < 0
+        stalled = current >= previous
+        intro = "Sellers have the pressure advantage, and that agrees with the broader falling trend. However, "
+        old_text = "selling pressure was already negative two sessions earlier"
+        stalled_text = "selling pressure is not worsening today"
+    if not (old_side or stalled):
+        return None  # Metadata contradicts upstream non-Confirmation classification.
+    if old_side and stalled:
+        return intro + old_text + " and " + stalled_text + "."
+    return intro + (old_text if old_side else stalled_text) + "."
+
+
+# Exact approved display language; values are presentation-only, not signals.
+_BBP_BULLISH_CONTEXT = {
+    ('None', 'None'): None,
+    ('Bullish', 'None'): 'Reinforcement: Sellers still exert pressure below the EMA, but their influence is fading.',
+    ('None', 'Bullish'): 'Supporting evidence: A confirmed lower price low showed improving Bear Power—selling pressure was less severe despite the lower low.',
+    ('None', 'Bearish'): 'Counter-trend warning: The trend is bullish, but a confirmed higher price high showed weaker Bull Power. Buying pressure may be losing force.',
+    ('Bearish', 'None'): "Tension: Broader bullish classification, but today's buyers are losing strength within a falling one-day EMA.",
+    ('Bearish', 'Bearish'): "Multiple warnings: Weaker buying pressure appears in both today's Bearish Setup and the confirmed higher-price-high comparison.",
+    ('Bullish', 'Bearish'): 'Mixed evidence: Sellers are weakening within the uptrend, but the confirmed higher price high showed weaker Bull Power. The Setup supports the trend; Divergence introduces caution.',
+    ('Bearish', 'Bullish'): "Mixed evidence: Today's buyers are losing strength, but a confirmed lower price low showed improving Bear Power. Short-term pressure and swing-level evidence disagree.",
+    ('Bullish', 'Bullish'): 'Reinforcement: Sellers are weakening within the rising trend, and a confirmed lower price low showed improving Bear Power. Both observations indicate fading selling pressure.',
+}
+
+_BBP_BEARISH_CONTEXT = {
+    ('None', 'None'): None,
+    ('Bearish', 'None'): 'Reinforcement: Buyers still exert some upward influence above the EMA, but that influence is fading.',
+    ('None', 'Bearish'): 'Supporting evidence: A confirmed higher price high showed weaker Bull Power—buying pressure weakened despite the higher high.',
+    ('None', 'Bullish'): "Counter-trend alert: The trend is bearish, but a confirmed lower price low showed improving Bear Power. Selling pressure may be losing force. Stronger than 'Counter-trend development'.",
+    ('Bullish', 'None'): "Counter-trend development: The broader trend remains bearish, but today's sellers are losing strength within a rising one-day EMA.",
+    ('Bullish', 'Bullish'): "Multiple counter-trend observations: Both today's Bullish Setup and the confirmed lower-price-low comparison suggest selling pressure may be weakening despite the bearish trend.",
+    ('Bearish', 'Bullish'): 'Mixed evidence: Buyers are weakening within the downtrend, but a confirmed lower price low showed improving Bear Power. The Setup supports the trend; Divergence introduces caution.',
+    ('Bullish', 'Bearish'): "Mixed evidence: Today's sellers are losing strength, but a confirmed higher price high showed weaker Bull Power. Short-term pressure and swing-level evidence disagree.",
+    ('Bearish', 'Bearish'): 'Reinforcement: Buyers are weakening within the falling trend, and a confirmed higher price high showed weaker Bull Power. Both observations indicate fading buying pressure.',
+}
+
+_BBP_NEUTRAL_CONTEXT = {
+    ('None', 'None'): None,
+    ('Bullish', 'None'): 'Bullish context: Sellers are weakening within a rising EMA, even though the broader BBP conditions have not qualified.',
+    ('Bearish', 'None'): 'Bearish context: Buyers are weakening within a falling EMA, even though the broader BBP conditions have not qualified.',
+    ('None', 'Bullish'): 'Bullish pressure evidence: Price made a lower confirmed swing low, but Bear Power improved. Selling pressure may be losing force.',
+    ('None', 'Bearish'): 'Bearish pressure evidence: Price made a higher confirmed swing high, but Bull Power weakened. Buying pressure may be losing force.',
+    ('Bullish', 'Bullish'): 'Aligned bullish evidence: Sellers are weakening within a rising EMA, and a confirmed lower price low showed improving Bear Power. Both observations indicate fading selling pressure.',
+    ('Bearish', 'Bearish'): 'Aligned bearish evidence: Buyers are weakening within a falling EMA, and a confirmed higher price high showed weaker Bull Power. Both observations indicate fading buying pressure.',
+    ('Bullish', 'Bearish'): "Mixed evidence: Today's sellers are weakening within a rising EMA, but a confirmed higher price high showed weaker buying pressure. The two observations point in different directions.",
+    ('Bearish', 'Bullish'): "Mixed evidence: Today's buyers are weakening within a falling EMA, but a confirmed lower price low showed improving Bear Power. The two observations point in different directions.",
+}
+
+def get_bbp_context_interpretation(
+    state: str,
+    setup: object,
+    divergence: object,
+) -> Optional[str]:
+    """Return approved observation-specific context; no scoring or inference."""
+    if state not in _HMA_STATES:
+        return None
+    if setup not in ("Bullish", "Bearish", "None"):
+        return None
+    if divergence not in ("Bullish", "Bearish", "None"):
+        return None
+    table = (
+        _BBP_BULLISH_CONTEXT if state in ("buy", "strong_buy") else
+        _BBP_BEARISH_CONTEXT if state in ("sell", "strong_sell") else
+        _BBP_NEUTRAL_CONTEXT
+    )
+    return table.get((setup, divergence))
