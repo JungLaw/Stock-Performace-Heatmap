@@ -443,3 +443,250 @@ def get_bbp_context_interpretation(
         _BBP_NEUTRAL_CONTEXT
     )
     return table.get((setup, divergence))
+
+
+# Downside Exhaustion is separate from primary BBP; the only executable
+# classified state is strong_buy, with neutral as a fallback.
+@lru_cache(maxsize=None)
+def _approved_bbp_exhaustion_expression(period: int) -> str:
+    ema = f"EMA_{period}"
+    bbp = f"BBP_{period}"
+    return (
+        f"lag({ema}, 5) - {ema} > 0.25 * ATR_14 "
+        f"and {bbp} < 0 and falling_2bar({bbp}, 3) "
+        f"and lag({bbp}, 3) - {bbp} > 0.50 * ATR_14"
+    )
+
+
+def get_bbp_exhaustion_hover_explanation(
+    period: int,
+    state: str,
+    active_rules: Mapping[str, str],
+    *,
+    current_bbp: object,
+    bbp_decline: object,
+    bbp_atr_ratio: object,
+    ema_decline: object,
+    ema_atr_ratio: object,
+    consecutive_decline: object,
+) -> Optional[tuple[str, str]]:
+    """Return Rule and formatted Context, never derive a new Signal.
+
+    Fail closed if active executable rules drift, measurements are absent,
+    score and measurements contradict, or continuity is unavailable.
+    """
+    import math
+    if period not in (10, 13, 21) or state not in ("strong_buy", "neutral"):
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    if _fingerprint(str(active_rules.get("strong_buy", "") or "")) != _fingerprint(
+        _approved_bbp_exhaustion_expression(period)
+    ):
+        return None
+    if any(str(active_rules.get(k, "") or "").strip() for k in
+           ("buy", "neutral", "sell", "strong_sell")):
+        return None
+    numeric = (current_bbp, bbp_decline, bbp_atr_ratio, ema_decline, ema_atr_ratio)
+    if any(isinstance(v, bool) or not isinstance(v, Real) or
+           not math.isfinite(float(v)) for v in numeric):
+        return None
+    if not isinstance(consecutive_decline, bool):
+        return None
+    bbp, bd, br, ed, er = map(float, numeric)
+    # The transmitted ratios and moves must agree in sign; no reclassification.
+    if (bd > 0) != (br > 0) and bd != 0 and br != 0:
+        return None
+    if (ed > 0) != (er > 0) and ed != 0 and er != 0:
+        return None
+    qualified = ed > 0 and er > 0.25 and bbp < 0 and consecutive_decline and bd > 0 and br > 0.50
+    if state == "strong_buy" and not qualified:
+        return None
+    if state == "neutral" and qualified:
+        return None
+
+    rule = (
+        "The stock is already in a meaningful decline, BBP is negative, "
+        "selling pressure has worsened for 3 consecutive intervals, and the "
+        "total deterioration is unusually large relative to recent volatility."
+        if state == "strong_buy" else
+        "The complete Downside Exhaustion pattern is not satisfied."
+    )
+
+    # Movement is factual. Qualification only refers to thresholds actually
+    # defined by the Downside Exhaustion rule; no bullish thresholds invented.
+    bbp_severe = bd > 0 and br > 0.50
+    ema_bearish = ed > 0 and er > 0.25
+
+    def movement(value: float, component: str) -> tuple[str, str]:
+        days = 3 if component == "BBP" else 5
+        if abs(value) < 0.005:
+            return (f"{component} showed little net change over {days} trading days.", "flat")
+        direction = "down" if value > 0 else "up"
+        verb = (
+            ("deteriorated" if value > 0 else "improved")
+            if component == "BBP" else
+            ("declined" if value > 0 else "rose")
+        )
+        observed = f"{component} {verb} by ${abs(value):.2f} over {days} trading days."
+        if component == "BBP":
+            qualification = (
+                "Deterioration meets the severity threshold."
+                if bbp_severe else
+                "Deterioration does not meet the severity threshold."
+                if value > 0 else
+                "Improvement observed; reversal remains unconfirmed."
+            )
+        else:
+            qualification = (
+                "Bearish EMA trend requirement is met."
+                if ema_bearish else
+                "EMA decline does not meet the bearish trend requirement."
+                if value > 0 else
+                "EMA improvement observed; trend reversal remains unconfirmed."
+            )
+        return f"{observed} {qualification}", direction
+
+    bbp_line, bbp_direction = movement(bd, "BBP")
+    ema_line, ema_direction = movement(ed, "EMA")
+
+    # State describes BBP pressure; Bottom-line integrates BBP with EMA.
+    # Neither field restates the Signal/Rule when an observation scores None.
+    if state == "strong_buy":
+        bbp_state = (
+            "Selling pressure intensified substantially for 3 consecutive intervals."
+        )
+        bottom = (
+            "Broader bearish EMA trend remains established as selling pressure "
+            "intensifies. This may increase rebound potential, but a reversal "
+            "is unconfirmed."
+        )
+    elif bbp_severe and ema_bearish and bbp < 0 and not consecutive_decline:
+        bbp_state = (
+            "Selling pressure deteriorated substantially over 3 trading days, "
+            "but not continuously. This may reflect a shift in selling intensity; "
+            "the development is unconfirmed."
+        )
+        bottom = (
+            "Broader bearish EMA trend remains established, but selling pressure "
+            "has been uneven. This may warrant monitoring for stabilization or easing."
+        )
+    else:
+        if bbp_direction == "up":
+            if bbp < 0:
+                bbp_state = (
+                    "Although BBP remains negative, selling pressure may be easing. "
+                    "This is unconfirmed."
+                )
+            elif bbp > 0:
+                bbp_state = (
+                    "BBP remains positive and pressure balance is improving; "
+                    "buying-pressure improvement is observed, not reversal confirmation."
+                )
+            else:
+                bbp_state = "BBP improved to zero; a sustained pressure shift remains unconfirmed."
+        elif bbp_direction == "down":
+            if bbp > 0:
+                bbp_state = (
+                    "Although BBP remains positive, buying pressure may be weakening. "
+                    "This is unconfirmed."
+                )
+            elif bbp < 0:
+                bbp_state = (
+                    "Selling pressure deteriorated substantially."
+                    if bbp_severe else
+                    "Selling pressure deteriorated, but its magnitude is below the severity threshold."
+                )
+            else:
+                bbp_state = "BBP deteriorated to zero; a sustained pressure shift remains unconfirmed."
+        else:
+            bbp_state = "BBP pressure balance showed little net change over 3 trading days."
+
+        if ema_bearish:
+            if bbp_direction == "up":
+                bottom = (
+                    "Broader bearish trend remains established, but pressure balance "
+                    "is improving. This may be an early counter-trend development."
+                )
+            elif bbp_direction == "down":
+                bottom = (
+                    "Broader bearish EMA trend remains established alongside "
+                    + ("substantial" if bbp_severe else "additional, less pronounced")
+                    + " BBP deterioration. Downside pressure may remain elevated."
+                )
+            else:
+                bottom = (
+                    "Broader bearish EMA trend remains established while BBP is "
+                    "approximately unchanged. Pressure has not yet shown a clear "
+                    "counter-trend improvement."
+                )
+        elif ema_direction == "up":
+            if bbp_direction == "down":
+                bottom = (
+                    "EMA baseline rose while BBP weakened. This may be an early "
+                    "counter-trend pressure development."
+                )
+            elif bbp_direction == "up":
+                bottom = (
+                    "EMA baseline and BBP both improved. Their alignment may "
+                    "indicate developing recovery, but a reversal is unconfirmed."
+                )
+            else:
+                bottom = (
+                    "EMA baseline rose while BBP showed little net change. "
+                    "Broader improvement is not yet supported by a pressure shift."
+                )
+        elif ema_direction == "down":
+            if bbp_direction == "up":
+                bottom = (
+                    "EMA decline is below the bearish trend threshold while BBP "
+                    "improved. This may be early stabilization, not a confirmed reversal."
+                )
+            elif bbp_direction == "down":
+                bottom = (
+                    "EMA declined without meeting the bearish trend threshold, "
+                    "while BBP deteriorated. Pressure may be weakening before a "
+                    "qualified bearish baseline develops."
+                )
+            else:
+                bottom = (
+                    "EMA declined below the bearish trend threshold, while BBP "
+                    "was approximately unchanged. Directional evidence is limited."
+                )
+        else:
+            if bbp_direction == "up":
+                bottom = (
+                    "EMA baseline is approximately unchanged while BBP improved. "
+                    "This may be an early pressure improvement worth monitoring."
+                )
+            elif bbp_direction == "down":
+                bottom = (
+                    "EMA baseline is approximately unchanged while BBP deteriorated. "
+                    "This may be an early pressure warning worth monitoring."
+                )
+            else:
+                bottom = "EMA and BBP showed little net movement; no clear directional shift is evident."
+
+    # Plotly hover labels do not auto-wrap. Retain the approved indentation
+    # on every continuation line while wrapping only plain prose (not HTML).
+    from textwrap import wrap
+    indent = "&nbsp;&nbsp;"
+
+    def indented(text: str, *, width: int = 67) -> str:
+        lines = wrap(text, width=width, break_long_words=False, break_on_hyphens=False)
+        return "<br>".join(indent + line for line in lines)
+
+    context = (
+        "<br><b>Context Interpretation</b><br>"
+        "<br><b>BBP — Selling Pressure</b><br>"
+        + indented(bbp_line) + "<br>"
+        + indented("State: " + bbp_state).replace(
+            indent + "State:", indent + "<b>State:</b>", 1
+        ) + "<br>"
+        + "<br><b>EMA — Broader Trend</b><br>"
+        + indented(ema_line) + "<br>"
+        + indented("Bottom-line: " + bottom).replace(
+            indent + "Bottom-line:", indent + "<b>Bottom-line:</b>", 1
+        ) + "<br>"
+    )
+    return rule, context

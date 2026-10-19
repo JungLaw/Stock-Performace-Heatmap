@@ -2228,10 +2228,37 @@ class DatabaseIntegratedTechnicalCalculator:
             safe_atr = atr.where(atr != 0.0)
 
             bbp_3bar_decline = bbp.shift(3) - bbp
+            # Factual path evidence; no Signal reclassification.
+            bbp_3bar_consecutive_decline = (
+                (bbp < bbp.shift(1))
+                & (bbp.shift(1) < bbp.shift(2))
+                & (bbp.shift(2) < bbp.shift(3))
+            ).where(
+                bbp.notna() & bbp.shift(1).notna()
+                & bbp.shift(2).notna() & bbp.shift(3).notna()
+            )
             ema_5bar_decline = ema.shift(5) - ema
+
+            # Display-only first reversals of the rolling 3-bar BBP MOVE.
+            # A movement change is not a BBP zero-line crossing or a Signal.
+            move = bbp - bbp.shift(3)
+            prior_move = move.shift(1)
+            turn_up = (prior_move < 0) & (move > 0)
+            turn_down = (prior_move > 0) & (move < 0)
+            turn_type = pd.Series(pd.NA, index=bbp.index, dtype="object")
+            turn_type.loc[turn_up] = "BlackUp"
+            turn_type.loc[turn_down] = "BlackDown"
+            # Bearish qualification is inherited from the executable model.
+            bear_ema_qualified = (ema_5bar_decline / safe_atr) > 0.25
+            turn_type.loc[turn_up & (bbp < 0) & bear_ema_qualified] = "BlueUp"
+            # Opposite context is observational: rising EMA, not a new
+            # rulebook-approved bullish trend qualification.
+            turn_type.loc[turn_down & (bbp > 0) & (ema_5bar_decline < 0)] = "RedDown"
 
             context[display_key] = {
                 "bbp_3bar_decline": bbp_3bar_decline,
+                "bbp_3bar_turn_marker": turn_type,
+                "bbp_3bar_consecutive_decline": bbp_3bar_consecutive_decline,
                 "bbp_3bar_decline_atr_ratio": (
                     bbp_3bar_decline / safe_atr
                 ),
@@ -4416,6 +4443,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 if isinstance(exhaustion_ctx, dict):
                     for context_key in (
                         "bbp_3bar_decline",
+                        "bbp_3bar_consecutive_decline",
                         "bbp_3bar_decline_atr_ratio",
                         "ema_5bar_decline",
                         "ema_5bar_decline_atr_ratio",
@@ -4432,11 +4460,24 @@ class DatabaseIntegratedTechnicalCalculator:
 
                             if not pd.isna(raw_context_value):
                                 try:
-                                    extras[context_key] = float(
-                                        raw_context_value
+                                    extras[context_key] = (
+                                        bool(raw_context_value)
+                                        if context_key == "bbp_3bar_consecutive_decline"
+                                        else float(raw_context_value)
                                     )
                                 except (TypeError, ValueError):
                                     pass
+
+                # BBP first-move marker: transported from full-history
+                # context, never recomputed from the visible heatmap window.
+                if isinstance(exhaustion_ctx, dict):
+                    marker_series = exhaustion_ctx.get("bbp_3bar_turn_marker")
+                    if isinstance(marker_series, pd.Series) and dt in marker_series.index:
+                        marker_value = marker_series.loc[dt]
+                        if isinstance(marker_value, str) and marker_value in {
+                            "BlueUp", "RedDown", "BlackUp", "BlackDown"
+                        }:
+                            extras["bbp_3bar_turn_marker"] = marker_value
 
                 # Bollinger Bandwidth semantic context:
                 #

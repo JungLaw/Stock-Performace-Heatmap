@@ -13,6 +13,7 @@ from src.ui.indicator_hover_explanations import (
     get_vwma_volume_context_interpretation,
     get_bbp_rule_explanation,
     get_bbp_context_interpretation,
+    get_bbp_exhaustion_hover_explanation,
 )
 
 import numpy as np
@@ -101,7 +102,7 @@ def _format_hover_block(label: str, value: Any, *, width: int = 72) -> str:
     wrapped = _wrap_hover_text(value, width=width)
     if not wrapped:
         return ""
-    return f"<br>{label}:<br>{wrapped}<br>"
+    return f"<br><b>{label}:</b><br>{wrapped}<br>"
 
 
 def _format_uo_hover_date(value: Any) -> str:
@@ -1148,16 +1149,17 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "BBP_DOWNSIDE_EXHAUSTION_13": {
         "display_name": "BBP Exh (13)",
         "definition": (
-            "Flags unusually persistent and large negative BBP pressure "
-            "inside a qualified bearish EMA(13) trend."
+            ""
+            #"Flags unusually persistent and large negative BBP pressure "
+            #"inside a qualified bearish EMA(13) trend."
         ),
         "how_to_read": (
             "Downside Exhaustion (+2): the EMA trend is bearish, BBP is negative "
             "and has fallen for 3 consecutive intervals, and its 3-bar decline "
             "exceeds 0.50 × ATR(14).<br>"
             "None (0): valid observation without the complete exhaustion condition.<br>"
-            "Current production diagnostics supported elevated rebound potential "
-            "for this MT condition. It is not itself a confirmed reversal or generic Buy signal."
+            #"Current production diagnostics supported elevated rebound potential "
+            #"for this MT condition. It is not itself a confirmed reversal or generic Buy signal."
         ),
     },
     "BBP_DOWNSIDE_EXHAUSTION_21": {
@@ -4596,16 +4598,51 @@ def build_plotly_heatmap_inputs(
             trend_line = "" if _is_crossover_key(key) else (f"Trend: {trend}<br>" if trend else "")
             if key.startswith("HMA_"):
                 signal_line = (
-                    f"Signal: {signal_display_label}<br>"
+                    f"<b>Signal:</b> {signal_display_label}<br>"
                     if signal_display_label
                     else ""
                 )
             else:
                 signal_line = (
-                    f"<br>Signal: {signal_display_label}<br>"
+                    f"<br><b>Signal:</b> {signal_display_label}<br>"
                     if signal_display_label
                     else ""
                 )
+
+            # Approved BBP Downside Exhaustion layout uses one shared hover
+            # fragment in all three consumers; normal fallback remains intact.
+            if key.startswith("BBP_DOWNSIDE_EXHAUSTION_") and not _is_missing(s):
+                try:
+                    exhaustion_period = int(key.rsplit("_", 1)[1])
+                except (ValueError, IndexError):
+                    exhaustion_period = None
+                exhaustion_explanation = (
+                    get_bbp_exhaustion_hover_explanation(
+                        exhaustion_period,
+                        score_to_rule_key(s),
+                        all_state_rules,
+                        current_bbp=v,
+                        bbp_decline=extra_map.get("bbp_3bar_decline"),
+                        bbp_atr_ratio=extra_map.get("bbp_3bar_decline_atr_ratio"),
+                        ema_decline=extra_map.get("ema_5bar_decline"),
+                        ema_atr_ratio=extra_map.get("ema_5bar_decline_atr_ratio"),
+                        consecutive_decline=extra_map.get("bbp_3bar_consecutive_decline"),
+                    ) if isinstance(extra_map, dict) else None
+                )
+                if exhaustion_explanation and bbp_exhaustion_context_block:
+                    exhaustion_rule, exhaustion_context = exhaustion_explanation
+                    # Original metrics are already formatted upstream and remain
+                    # byte-for-byte identical; only their placement changes.
+                    metrics = bbp_exhaustion_context_block[4:-4]
+                    bbp_exhaustion_context_block = (
+                        "<b>Rule:</b> " + _wrap_hover_text(exhaustion_rule, width=80) + "<br>"
+                        + "<br><b>Context Interpretation</b><br>"
+                        + metrics + "<br>"
+                        + exhaustion_context.replace(
+                            "<br><b>Context Interpretation</b><br>", "", 1
+                        )
+                    )
+                    rule_text = ""
 
             rule_block = _format_hover_block("Rule", rule_text, width=80)
             notes_block = _format_hover_block("Notes", rule_notes, width=72)
@@ -5678,6 +5715,11 @@ def build_plotly_heatmap_inputs(
                     "bbp_exhaustion_context_block": (
                         bbp_exhaustion_context_block
                     ),
+                    "bbp_3bar_turn_marker": (
+                        extra_map.get("bbp_3bar_turn_marker")
+                        if key.startswith("BBP_DOWNSIDE_EXHAUSTION_")
+                        and isinstance(extra_map, dict) else None
+                    ),
                     "meta": rolling_payload.get("meta", {}),
                 }
             )
@@ -5687,6 +5729,44 @@ def build_plotly_heatmap_inputs(
         customdata.append(cd_row)
 
     return PlotlyHeatmapInputs(z=z, text=text, customdata=customdata, x=x, y=y, row_keys=row_keys)
+
+
+def apply_bbp_exhaustion_turn_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Display first-reversal arrows for the 3-bar BBP move without changing scores."""
+    styles = {
+        "BlueUp": ("▲", "blue"),
+        "RedDown": ("▼", "red"),
+        "BlackUp": ("▲", "black"),
+        "BlackDown": ("▼", "black"),
+    }
+    if not fig.data:
+        return
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith(
+                "BBP_DOWNSIDE_EXHAUSTION_"
+            ):
+                continue
+            style = styles.get(cell.get("bbp_3bar_turn_marker"))
+            if style is None:
+                continue
+            symbol, color = style
+            fig.add_annotation(
+                x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                text=symbol, showarrow=False, xshift=28,
+                font=dict(size=12, color=color),
+                captureevents=False,
+            )
 
 
 def apply_bbp_divergence_text_overlay(
@@ -6564,6 +6644,13 @@ def make_rolling_heatmap_figure(
     apply_bbp_divergence_text_overlay(
         fig,
         text=hm.text,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_bbp_exhaustion_turn_overlay(
+        fig,
         customdata=hm.customdata,
         x=hm.x,
         y=hm.y,

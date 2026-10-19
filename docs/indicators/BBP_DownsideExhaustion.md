@@ -1,7 +1,7 @@
 ## Summary: BBP Downside Exhaustion signals
-
-**Class:** Momentum Indicators
-**Scope:** Exhaustion Signals
+[Table of Contents](#index)  
+**Class:** Momentum Indicators  
+**Scope:** Exhaustion Signals  
 **Family:** BullBearPower
 
 BBP Downside Exhaustion is a **rebound-risk / selling-pressure exhaustion indicator**.
@@ -50,8 +50,21 @@ The easiest mental model is:
 
 
 ---
+### How to Read: Context Interpretation
+Section: :small[[ Display-value arrows — fresh BBP pressure shifts](#display-value-arrows-fresh-bbp-pressure-shifts); [Context Interpretation — reading Pressure and Trend together](#context-interpretation-reading-pressure-and-trend-together)]
+
+| Marker beside value | Event on this date | Meaning |
+| --- | --- | --- |
+| $\Large{\textcolor{blue}{\textsf{▲}}}$ | 3-bar BBP move switches from deterioration to improvement; BBP remains **negative** and the bearish five-bar EMA filter qualifies (`> +0.25× ATR14`) | Potential **bullish counter-trend** pressure development |
+| $\Large{\textcolor{red}{\textsf{▼}}}$ | 3-bar BBP move switches from improvement to deterioration; BBP remains **positive** and the five-bar EMA is **rising** | Potential **bearish counter-trend** pressure development; rising EMA is observational, not a separately qualified bullish filter |
+| $\Large{\textcolor{black}{\textsf{▲}}}$ | Fresh 3-bar BBP improvement without the blue-marker conditions | Unqualified pressure improvement worth monitoring |
+| $\Large{\textcolor{black}{\textsf{▼}}}$| Fresh 3-bar BBP deterioration without the red-marker conditions | Unqualified pressure deterioration worth monitoring |
+| **No symbol** | No new three-bar directional transition | A prior improvement/deterioration may still be continuing; absence of a marker is not a Neutral score |
+
+---
 
 ## A brief overview
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 ### Why this indicator exists
 
@@ -192,20 +205,19 @@ So the BBP portion answers:
 ---
 
 ### Why ATR(14) matters
+> The ATR ratio gives the movement **context**.
+> ATR(14) = $4.50: The stock moved an average of $4.50 per day from top to bottom, regardless of whether it went up or down, over the last two weeks.
 
 A raw move such as:
-
 ```text
 BBP fell by 10 points
 ```
 
 does not mean the same thing for every stock.
+- For a quiet stock, 10 points could be enormous.
+- For a volatile stock, 10 points might be ordinary.
 
-For a quiet stock, 10 points could be enormous.
-
-For a volatile stock, 10 points might be ordinary.
-
-ATR(14) provides a volatility reference.
+ATR(14) provides a **volatility reference**.
 
 So instead of asking only:
 
@@ -227,6 +239,7 @@ They are **two views of the same movement**, not two separate events.
 
 ---
 ## BBP Downside Exhaustion Rule Translation
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 The three variants use the same structure. The examples below use **BBP Exh (13)**.
 
@@ -449,6 +462,7 @@ can simply mean:
 
 ---
 ## The 3 BBP Downside Exhaustion variants
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 | Variant          | Period | Horizon     | Evidence status                                                    |
 | ---------------- | -----: | ----------- | ------------------------------------------------------------------ |
@@ -499,6 +513,7 @@ This is the conceptual heart of the hover.
 ---
 
 ## Part 1 — Has selling pressure become unusually severe?
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 ### Why BBP is the focus here
 
@@ -645,6 +660,7 @@ The ATR ratio gives the movement **context**.
 ---
 
 ## Part 2 — Is the broader trend genuinely falling?
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 ### Why EMA is part of an exhaustion signal
 
@@ -684,7 +700,7 @@ This means:
 
 > **The EMA is 10.64 price units lower than it was five bars ago.**
 
-That is useful because it tells you the actual size of the trend movement.
+That is useful because it ==tells you the actual size of the trend movement==.
 
 Why do we want this value to point downward?
 
@@ -765,6 +781,7 @@ The ratio tells you:
 ---
 
 ## The four hover fields together
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 The first table explains each field individually.
 
@@ -785,7 +802,44 @@ This is the central coordination rule:
 
 ---
 
+## Context Interpretation — reading pressure and trend together
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
+
+The dynamic **Context Interpretation** section appears beneath `Rule:` and translates the measurements into their current market implications, including when `Signal: None`. Its two subsections answer different questions:
+
+- **BBP — Selling Pressure / State:** What happened to the pressure balance, and is it intensifying, easing, or uneven?
+- **EMA — Broader Trend / Bottom-line:** What is the five-bar EMA backdrop, and does BBP agree with or challenge it?
+
+### Four-metric reference
+
+| Hover metric | Calculation / direction | What it tells you | Rule threshold (when testing Downside Exhaustion) |
+| --- | --- | --- | --- |
+| **3-bar BBP move** | `BBP[t] − BBP[t−3]`; ↑ improvement, ↓ deterioration | Actual change in the BBP pressure balance over three trading intervals | No independent raw-unit threshold |
+| **3-bar BBP decline / ATR14** | `(BBP[t−3] − BBP[t]) / ATR(14)[t]`; positive = deterioration, negative = improvement | Size of that BBP change relative to recent volatility | **> +0.50×**, *plus* separate negative-BBP and consecutive-decline requirements |
+| **5-bar EMA move** | `EMA[t] − EMA[t−5]`; ↑ rising baseline, ↓ falling baseline | Actual direction and size of the EMA trend baseline move | No independent raw-unit threshold |
+| **5-bar EMA decline / ATR14** | `(EMA[t−5] − EMA[t]) / ATR(14)[t]`; positive = decline, negative = rise | Whether the EMA decline is large enough to qualify as the bearish backdrop | **> +0.25×** |
+
+The **move** and **decline / ATR14** fields describe the *same movement* in two ways; their signs are opposite by definition. Compare the full-precision ratios with the thresholds—rounded hover values are for display.
+
+### Typical Context Interpretation outcomes
+
+| Pressure / trend combination | `State` explains | `Bottom-line` explains |
+| --- | --- | --- |
+| BBP deteriorates sharply and continuously; bearish EMA qualifies | Selling pressure has intensified persistently | Downside Exhaustion may be active when all rule clauses hold; rebound risk deserves attention |
+| BBP deteriorates sharply but the decline is interrupted | Material deterioration without uninterrupted pressure decline | Selling pressure is uneven despite any established bearish backdrop; watch for stabilization or easing |
+| **BBP improves while bearish EMA qualifies** | Selling pressure may be easing although BBP can remain negative | An **early bullish counter-trend pressure development** may be taking shape |
+| **BBP weakens while EMA rises** | Buying pressure may be weakening although BBP can remain positive | An **early bearish counter-trend pressure development** may be taking shape |
+| Neither counter-trend relationship is present | Describes the observed BBP movement | Describes whether pressure and EMA direction agree, without asserting a qualified reversal |
+
+
+**Example — `Signal: None`** Suppose BBP rises by **$1.22** over three bars while remaining negative, and EMA falls by **$3.57** over five bars (**+0.58× ATR14** on the EMA decline ratio). Selling pressure is easing even though the bearish EMA filter qualifies. The hover can identify a potential early counter-trend development without labeling the observation Downside Exhaustion.
+
+`State` and `Bottom-line` provide additional interpretation; neither replaces the executable `Signal` or the `Rule` explanation. A counter-trend observation is not, by itself, a price-reversal confirmation.
+
+---
+
 ## A concrete hover example
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 The following is a verified production example:
 
@@ -952,9 +1006,10 @@ The Downside Exhaustion thesis is therefore absent.
 ---
 
 ## How to read the BBP Downside Exhaustion heatmap
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
+
 
 A useful sequence is:
-
 1. **Read the cell value.**
 2. **Read Signal.**
 3. **Check the BBP pair.**
@@ -1005,7 +1060,26 @@ The printed number and color answer different questions:
 
 ---
 
+### Display-value arrows — fresh BBP pressure shifts
+
+The **numeric cell value remains the underlying BBP(p)**, and its cell color still represents the separate Downside Exhaustion score. A small **▲ / ▼ beside the number** is a display-only marker for the *first date* on which the rolling **3-bar BBP move changes direction**. It is computed using full price history, not just the visible 30–40-day window.
+
+| Marker beside value | Event on this date | Meaning |
+| --- | --- | --- |
+| $\Large{\textcolor{blue}{\textsf{▲}}}$ | 3-bar BBP move switches from deterioration to improvement; BBP remains **negative** and the bearish five-bar EMA filter qualifies (`> +0.25× ATR14`) | Potential **bullish counter-trend** pressure development |
+| $\Large{\textcolor{red}{\textsf{▼}}}$ | 3-bar BBP move switches from improvement to deterioration; BBP remains **positive** and the five-bar EMA is **rising** | Potential **bearish counter-trend** pressure development; rising EMA is observational, not a separately qualified bullish filter |
+| $\Large{\textcolor{black}{\textsf{▲}}}$ | Fresh 3-bar BBP improvement without the blue-marker conditions | Unqualified pressure improvement worth monitoring |
+| $\Large{\textcolor{black}{\textsf{▼}}}$| Fresh 3-bar BBP deterioration without the red-marker conditions | Unqualified pressure deterioration worth monitoring |
+| **No symbol** | No new three-bar directional transition | A prior improvement/deterioration may still be continuing; absence of a marker is not a Neutral score |
+
+A marker is **event-only**: continuing improvement or deterioration does not generate another arrow. There is **no additional magnitude threshold** for the black arrows. When blue/red conditions hold on a fresh transition, those colors take precedence over black.
+
+**Do not confuse the two arrow displays:** the arrows in the hover's `3-bar BBP move` and `5-bar EMA move` fields simply show whether that series rose or fell over its lookback period. The colored/black arrow **beside the cell number** identifies a *new three-bar BBP direction transition* and its EMA context. Neither changes the score or confirms a price reversal.
+
+---
+
 ## Why a negative BBP is not enough
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 Suppose:
 
@@ -1032,6 +1106,7 @@ Those are different levels of information.
 ---
 
 ## Relationship to primary BBP
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 Primary BBP and Downside Exhaustion should be read together when both are available.
 
@@ -1068,6 +1143,7 @@ It means:
 ---
 
 ## Industry concept versus project-specific model
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 The underlying Bull Power, Bear Power, EMA, and ATR concepts are conventional technical-analysis building blocks.
 
@@ -1103,6 +1179,7 @@ That empirical finding is why the condition was separated from the primary BBP d
 ---
 
 ## Evidence status by period
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 The three variants should not be assumed to have equal empirical support.
 
@@ -1137,6 +1214,7 @@ That distinction is deliberate:
 ---
 
 ## Strengths
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 BBP Downside Exhaustion is useful because it combines several ideas that are weak in isolation:
 
@@ -1167,6 +1245,7 @@ It is particularly useful as:
 ---
 
 ## Limitations
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 ### Exhaustion does not mean reversal
 
@@ -1269,6 +1348,7 @@ Their inclusion should not be interpreted as proof that they have the same rebou
 ---
 
 ## Beginner's checklist
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 When reading a BBP Downside Exhaustion cell:
 
@@ -1283,14 +1363,14 @@ When reading a BBP Downside Exhaustion cell:
 | **7** | What does primary BBP say about current directional control?                               |
 
 The shortest useful summary is:
-
-> **EMA = Is the decline real?**
-> **BBP = Has selling pressure become unusually severe?**
-> **Downside Exhaustion = Both are true strongly enough to raise rebound risk.**
+- **EMA = Is the decline real?**
+-  **BBP = Has selling pressure become unusually severe?**
+- **Downside Exhaustion = Both are true strongly enough to raise rebound risk.**
 
 ---
 
 ## Initial audit note
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 **Semantic type:** Binary downside-exhaustion / rebound-risk context signal.
 
@@ -1371,6 +1451,7 @@ while the normalized decline ratios preserve their signed mathematical values.
 ---
 
 ## References
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
 
 ### Historical forward-return reference
 
@@ -1406,3 +1487,72 @@ A few useful takeaways:
 * `src/ui/rolling_heatmap_presets.py` — default Custom exposure for BBP Exh (13).
 * `streamlit_app.py` — SCD presentation and Single Indicator chart behavior.
 * `docs/indicators/BullBearPower.md` — foundational BBP, Bull Power, Bear Power, EMA, Signal, Setup, and Divergence explanation.
+
+## Index
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]
+
+- [Summary: BBP Downside Exhaustion signals](#summary-bbp-downside-exhaustion-signals)
+  - [The shortest useful explanation](#the-shortest-useful-explanation)
+  - [How to Read: Context Intpretation](#how-to-read-context-interpretation)
+- [A brief overview](#a-brief-overview)
+  - [Why this indicator exists](#why-this-indicator-exists)
+  - [What the indicator uses](#what-the-indicator-uses)
+  - [Why EMA matters](#why-ema-matters)
+  - [Why BBP matters](#why-bbp-matters)
+  - [Why ATR(14) matters](#why-atr14-matters)
+- [BBP Downside Exhaustion Rule Translation](#bbp-downside-exhaustion-rule-translation)
+  - [Downside Exhaustion (+2)](#downside-exhaustion-2)
+  - [Clause 1 — establish a meaningful bearish EMA trend](#clause-1--establish-a-meaningful-bearish-ema-trend)
+  - [Clause 2 — require current bearish pressure](#clause-2--require-current-bearish-pressure)
+  - [Clause 3 — require persistent deterioration](#clause-3--require-persistent-deterioration)
+  - [Clause 4 — require unusual severity](#clause-4--require-unusual-severity)
+  - [Literal summary](#literal-summary)
+  - [Plain-English version](#plain-english-version)
+  - [Interpretation](#interpretation)
+  - [None (0)](#none-0)
+- [The 3 BBP Downside Exhaustion variants](#the-3-bbp-downside-exhaustion-variants)
+- [(HTR) Understanding the BBP Downside Exhaustion Hover](#htr-understanding-the-bbp-downside-exhaustion-hover)
+  - [The two questions behind the four hover fields](#the-two-questions-behind-the-four-hover-fields)
+- [Part 1 — Has selling pressure become unusually severe?](#part-1--has-selling-pressure-become-unusually-severe)
+  - [Why BBP is the focus here](#why-bbp-is-the-focus-here)
+  - [3-bar BBP move](#3-bar-bbp-move)
+  - [3-bar BBP decline / ATR14](#3-bar-bbp-decline--atr14)
+  - [Raw BBP move versus ATR-adjusted BBP decline](#raw-bbp-move-versus-atr-adjusted-bbp-decline)
+- [Part 2 — Is the broader trend genuinely falling?](#part-2--is-the-broader-trend-genuinely-falling)
+  - [Why EMA is part of an exhaustion signal](#why-ema-is-part-of-an-exhaustion-signal)
+  - [5-bar EMA move](#5-bar-ema-move)
+  - [5-bar EMA decline / ATR14](#5-bar-ema-decline--atr14)
+  - [Raw EMA move versus ATR-adjusted EMA decline](#raw-ema-move-versus-atr-adjusted-ema-decline)
+- [The four hover fields together](#the-four-hover-fields-together)
+- [Context Interpretation — reading pressure and trend together](#context-interpretation--reading-pressure-and-trend-together)
+  - [Four-metric reference](#four-metric-reference)
+  - [Typical Context Interpretation outcomes](#typical-context-interpretation-outcomes)
+- [A concrete hover example](#a-concrete-hover-example)
+  - [Step 1 — read the BBP move](#step-1--read-the-bbp-move)
+  - [Step 2 — put that BBP move in volatility context](#step-2--put-that-bbp-move-in-volatility-context)
+  - [Step 3 — read the EMA move](#step-3--read-the-ema-move)
+  - [Step 4 — put the EMA move in volatility context](#step-4--put-the-ema-move-in-volatility-context)
+  - [Put everything together](#put-everything-together)
+- [What an improving hover can look like](#what-an-improving-hover-can-look-like)
+- [What if both BBP and EMA are rising?](#what-if-both-bbp-and-ema-are-rising)
+- [How to read the BBP Downside Exhaustion heatmap](#how-to-read-the-bbp-downside-exhaustion-heatmap)
+  - [What does the number in the heatmap cell mean?](#what-does-the-number-in-the-heatmap-cell-mean)
+  - [Display-value arrows — fresh BBP pressure shifts](#display-value-arrows--fresh-bbp-pressure-shifts)
+- [Why a negative BBP is not enough](#why-a-negative-bbp-is-not-enough)
+- [Relationship to primary BBP](#relationship-to-primary-bbp)
+- [Industry concept versus project-specific model](#industry-concept-versus-project-specific-model)
+- [Evidence status by period](#evidence-status-by-period)
+  - [BBP Exh (13)](#bbp-exh-13)
+  - [BBP Exh (10)](#bbp-exh-10)
+  - [BBP Exh (21)](#bbp-exh-21)
+- [Strengths](#strengths)
+- [Limitations](#limitations)
+  - [Exhaustion does not mean reversal](#exhaustion-does-not-mean-reversal)
+  - [It is not an oversold scale](#it-is-not-an-oversold-scale)
+  - [The raw BBP move is not directly comparable across all stocks](#the-raw-bbp-move-is-not-directly-comparable-across-all-stocks)
+  - [The raw EMA move is also price-scale dependent](#the-raw-ema-move-is-also-price-scale-dependent)
+  - [The four hover fields are not four independent signals](#the-four-hover-fields-are-not-four-independent-signals)
+  - [ST and LT variants remain provisional](#st-and-lt-variants-remain-provisional)
+- [Beginner's checklist](#beginners-checklist)
+
+:small[([Back to top](#summary-bbp-downside-exhaustion-signals))]

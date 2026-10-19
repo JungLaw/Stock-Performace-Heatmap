@@ -1492,19 +1492,19 @@
               "strong_buy": "lag(EMA_10, 5) - EMA_10 > 0.25 * ATR_14 and BBP_10 < 0 and falling_2bar(BBP_10, 3) and lag(BBP_10, 3) - BBP_10 > 0.50 * ATR_14",
               "neutral": "",
               "type": "downside_exhaustion",
-              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(10) trend, negative BBP(10), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This ST variant is provisional and included for observation."
+              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(10) trend, negative BBP(10), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This ST variant is provisional and included for observation.<br>Arrows mark a fresh reversal in the 3-bar BBP move (not a confirmed price reversal).<br>- <b>Blue ▲:</b> BBP improving against a qualified bearish EMA trend.<br>- <b>Red ▼:</b> BBP weakening while EMA is rising.<br>- <b>Black ▲/▼:</b> BBP improving/weakening without the corresponding counter-trend conditions."
             },
             "13": {
               "strong_buy": "lag(EMA_13, 5) - EMA_13 > 0.25 * ATR_14 and BBP_13 < 0 and falling_2bar(BBP_13, 3) and lag(BBP_13, 3) - BBP_13 > 0.50 * ATR_14",
               "neutral": "",
               "type": "downside_exhaustion",
-              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(13) trend, negative BBP(13), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This MT variant is the empirically supported candidate from the current production diagnostics."
+              "notes": "Arrows mark a fresh reversal in the 3-bar BBP move (not a confirmed price reversal).<br>- <b>Blue ▲:</b> BBP improving against a qualified bearish EMA trend.<br>- <b>Red ▼:</b> BBP weakening while EMA is rising.<br>- <b>Black ▲/▼:</b> BBP improving/weakening without the corresponding counter-trend conditions."
             },
             "21": {
               "strong_buy": "lag(EMA_21, 5) - EMA_21 > 0.25 * ATR_14 and BBP_21 < 0 and falling_2bar(BBP_21, 3) and lag(BBP_21, 3) - BBP_21 > 0.50 * ATR_14",
               "neutral": "",
               "type": "downside_exhaustion",
-              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(21) trend, negative BBP(21), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This LT variant is provisional and included for observation."
+              "notes": "Downside Exhaustion is a rebound-risk flag, not a reversal confirmation or generic Buy signal. It requires a qualified bearish EMA(21) trend, negative BBP(21), three consecutive BBP declines, and a 3-bar BBP decline greater than 0.50 × ATR(14). This LT variant is provisional and included for observation.<br>Arrows mark a fresh reversal in the 3-bar BBP move (not a confirmed price reversal).<br>- <b>Blue ▲:</b> BBP improving against a qualified bearish EMA trend.<br>- <b>Red ▼:</b> BBP weakening while EMA is rising.<br>- <b>Black ▲/▼:</b> BBP improving/weakening without the corresponding counter-trend conditions."
             }
           },
           "overlay": {},
