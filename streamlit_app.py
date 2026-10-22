@@ -66,6 +66,7 @@ from ui.rolling_heatmap_adapter import (
     apply_bbp_exhaustion_turn_overlay,
     apply_cci_divergence_text_overlay,
     apply_uo_divergence_symbol_overlay,
+    apply_macd_signal_crossover_overlay,
     apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
@@ -4924,6 +4925,7 @@ def _build_scd_hover_customdata(
         "signal_line",
         "bbp_exhaustion_context_block",
         "macd_context_block",
+        "macd_interpretation_block",
         "stoch_context_block",
         "dpo_context_block",
         "bullbear_context_block",
@@ -4960,7 +4962,90 @@ def _build_scd_hover_customdata(
     custom["row_key"] = row_key
     custom["status"] = cell.get("status")
 
-    payload_hover = cell.get("hover")
+    # MACD-only SCD presentation. The adapter owns the explanation wording;
+    # SCD owns field-label emphasis and final display ordering.
+    if row_key.startswith("MACD_"):
+        def _bold_macd_label(value: Any, label: str) -> str:
+            content = str(value or "")
+            prefix = f"{label}:"
+            if content.startswith(prefix):
+                return f"<b>{prefix}</b>" + content[len(prefix):]
+            return content
+
+        custom["scd_value_line"] = _bold_macd_label(
+            custom.get("scd_value_line"), "Value"
+        )
+        custom["delta_line"] = _bold_macd_label(
+            custom.get("delta_line"), "Δ vs prior day"
+        )
+        custom["trend_line"] = _bold_macd_label(
+            custom.get("trend_line"), "Trend"
+        )
+
+        signal_line = str(custom.get("signal_line") or "")
+        custom["signal_line"] = signal_line.replace(
+            "<br><b>Signal:</b>",
+            "<b>Signal:</b>",
+            1,
+        )
+
+        # Keep Rule wording and wrapping unchanged; remove only the
+        # extra blank-line spacing before the label and between the label
+        # and its first word.
+        rule_block = str(custom.get("rule_block") or "")
+        rule_block = rule_block.replace(
+            "<br><b>Rule:</b><br>",
+            "<b>Rule:</b> ",
+            1,
+        )
+        rule_block = rule_block.replace(
+            "<br><b>Rule:</b> ",
+            "<b>Rule:</b> ",
+            1,
+        )
+        custom["rule_block"] = rule_block
+
+        numeric_block = str(custom.get("macd_context_block") or "")
+        if numeric_block.startswith("<br>"):
+            numeric_block = numeric_block[4:]
+
+        interpretation = str(
+            custom.get("macd_interpretation_block") or ""
+        )
+        context_heading = "<br><b>Context Interpretation</b><br>"
+
+        if context_heading in interpretation:
+            # Move the unchanged numeric lines directly under the heading.
+            # All wording beginning with MACD — Trend Backdrop stays intact.
+            combined = interpretation.replace(
+                context_heading,
+                context_heading + numeric_block,
+                1,
+            )
+
+            combined = combined.replace(
+                "<br><br><b>MACD — Trend Backdrop:</b>",
+                "<br><b>MACD — Trend Backdrop:</b>",
+                1,
+            )
+            combined = combined.replace(
+                "<br><br><b>Momentum — Current Development:</b>",
+                "<br><b>Momentum — Current Development:</b>",
+                1,
+            )
+            combined = combined.replace(
+                "<br><br><b>Bottom-line:</b>",
+                "<br><b>Bottom-line:</b>",
+                1,
+            )
+
+            custom["scd_macd_context_block"] = combined
+        else:
+            # Missing interpretation must not produce invented semantics.
+            # Retain the existing numeric MACD evidence.
+            custom["scd_macd_context_block"] = numeric_block
+    else:
+        custom["scd_macd_context_block"] = ""
 
     payload_hover = cell.get("hover")
 
@@ -4983,6 +5068,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("VWMA_")
         or row_key.startswith("HMA_")
         or row_key.startswith("UO_")
+        or row_key.startswith("MACD_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5148,12 +5234,12 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
-        "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.scd_macd_context_block}"
         "%{customdata.bbp_context_interpretation_block}"
         "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
@@ -5207,6 +5293,13 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_uo_divergence_symbol_overlay(
+        fig,
+        customdata=customdata,
+        x=tickers,
+        y=y_labels,
+    )
+
+    apply_macd_signal_crossover_overlay(
         fig,
         customdata=customdata,
         x=tickers,
@@ -5628,6 +5721,24 @@ def _build_scd_single_indicator_hover_customdata(
     else:
         custom["single_combined_trend_line"] = ""
 
+    if row_key.startswith("MACD_"):
+        def _bold_macd_opening(value: Any, label: str) -> str:
+            content = str(value or "")
+            prefix = f"{label}:"
+            if content.startswith(prefix):
+                return f"<b>{prefix}</b>" + content[len(prefix):]
+            return content
+
+        custom["scd_single_value_line"] = _bold_macd_opening(
+            custom.get("scd_single_value_line"), "Value"
+        )
+        custom["single_combined_delta_line"] = _bold_macd_opening(
+            custom.get("single_combined_delta_line"), "Δ vs prior day"
+        )
+        custom["single_combined_trend_line"] = _bold_macd_opening(
+            custom.get("single_combined_trend_line"), "Trend"
+        )
+
     return custom
 
 
@@ -5774,6 +5885,24 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "<extra></extra>"
         )
 
+    elif row_key.startswith("MACD_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.signal_line}"
+            "%{customdata.rule_block}"
+            "%{customdata.scd_macd_context_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
     else:
         hovertemplate = (
             "<b>%{customdata.display_name}</b><br>"
@@ -5850,6 +5979,13 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_uo_divergence_symbol_overlay(
+        fig,
+        customdata=customdata,
+        x=tickers,
+        y=date_labels,
+    )
+
+    apply_macd_signal_crossover_overlay(
         fig,
         customdata=customdata,
         x=tickers,

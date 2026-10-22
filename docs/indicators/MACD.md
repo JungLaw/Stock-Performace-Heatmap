@@ -1,5 +1,5 @@
 ## Summary: MACD(12,26,9) Signals
-Status: A
+:small[[See: 'Rule Summary Table'](#rule-summary-table)]
 
 | Signal        | Literal trigger                                                                                | Layman’s translation                                                                                                   | Rule logic                                                                                                                             |
 | ------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -9,7 +9,21 @@ Status: A
 | `sell`        | `MACD_12_26_9_line > 0`, `MACD_12_26_9_hist < 0`, and `not_falling_2bar(MACD_12_26_9_hist, 2)` | The broader MACD trend is still bullish, but shorter-term momentum has turned bearish without sustained weakening.     | The MACD line remains above zero and the histogram is negative, but the histogram does not satisfy the strict 2-bar falling condition. |
 | `strong_sell` | `MACD_12_26_9_line > 0`, `MACD_12_26_9_hist < 0`, and `falling_2bar(MACD_12_26_9_hist, 2)`     | The broader MACD trend is still bullish, but bearish momentum has emerged and is weakening consistently.               | The MACD line remains above zero, the histogram is negative, and the histogram has fallen across the recent 2-bar check.               |
 
+### MACD/Signal Line Crossover Events
+:small[[See 'MACD/Signal Line Crossover' ](#macd-signal-line-crossover-events)]
+
+The MACD histogram equals the MACD Line minus the Signal Line. A crossover occurs when this difference moves across zero.
+
+| Display symbol | Event | Literal condition | Interpretation |
+|---|---|---|---|
+| ▲ (black) | Bullish crossover | Previous histogram ≤ 0; current histogram > 0 | MACD Line crossed above Signal Line; bullish relative momentum has emerged. |
+| ▼ (black) | Bearish crossover | Previous histogram ≥ 0; current histogram < 0 | MACD Line crossed below Signal Line; bearish relative momentum has emerged. |
+| No arrow | No new crossover | Neither crossing condition is met | The existing MACD/Signal relationship may persist without a new event. |
+
+> :small[[Related: 'Understanding the MACD Hover'](#understanding-the-macd-hover)]
+
 ## Indicator overview
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 **MACD** stands for **Moving Average Convergence Divergence**. It is a trend-momentum indicator built from two exponential moving averages:
 
@@ -37,6 +51,7 @@ The project’s MACD(12,26,9) rules use these two relationships together:
 The rules are designed to identify **early reversal states**, rather than simply classify all positive MACD readings as bullish and all negative readings as bearish.
 
 ## Value-added use
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 MACD(12,26,9) adds value by showing whether momentum is beginning to move against the existing broader trend.
 
@@ -57,6 +72,7 @@ The strong classifications add another confirmation layer by requiring the histo
 This makes the rules more selective than a simple MACD-line/signal-line crossover test.
 
 ## Use with
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 MACD is generally most useful when combined with indicators that provide information it does not independently supply.
 
@@ -94,8 +110,10 @@ MFI, CMF, OBV, or raw volume can help determine whether participation supports t
 A MACD reversal state without supporting volume may be less reliable than one accompanied by clear accumulation or distribution.
 
 ## MACD(12,26,9) Rule Translation
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 ### Strong buy
+:small[[Parent](#macd-12-26-9-rule-translation)]
 
 ```json
 "strong_buy": "MACD_12_26_9_line < 0 and MACD_12_26_9_hist > 0 and rising_2bar(MACD_12_26_9_hist, 2)"
@@ -140,6 +158,7 @@ It requires three layers of bullish reversal confirmation:
 3. the histogram has also been rising recently.
 
 ### Buy
+:small[[Parent](#macd-12-26-9-rule-translation)]
 
 ```json
 "buy": "MACD_12_26_9_line < 0 and MACD_12_26_9_hist > 0 and not_rising_2bar(MACD_12_26_9_hist, 2)"
@@ -184,6 +203,7 @@ It requires:
 3. no strict requirement that bullish momentum be strengthening consistently.
 
 ### Neutral
+:small[[Parent](#macd-12-26-9-rule-translation)]
 
 ```json
 "neutral": "(MACD_12_26_9_line >= 0 and MACD_12_26_9_hist >= 0) or (MACD_12_26_9_line <= 0 and MACD_12_26_9_hist <= 0)"
@@ -226,6 +246,7 @@ It does not necessarily mean:
 It means only that the MACD line and histogram are not pointing in opposite directional states.
 
 ### Sell
+:small[[Parent](#macd-12-26-9-rule-translation)]
 
 ```json
 "sell": "MACD_12_26_9_line > 0 and MACD_12_26_9_hist < 0 and not_falling_2bar(MACD_12_26_9_hist, 2)"
@@ -270,6 +291,7 @@ It requires:
 3. no strict requirement that bearish momentum be strengthening consistently.
 
 ### Strong sell
+:small[[Parent](#macd-12-26-9-rule-translation)]
 
 ```json
 "strong_sell": "MACD_12_26_9_line > 0 and MACD_12_26_9_hist < 0 and falling_2bar(MACD_12_26_9_hist, 2)"
@@ -314,6 +336,7 @@ It requires three layers of bearish reversal confirmation:
 3. the histogram has also been falling recently.
 
 ## Rule summary table
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 | Signal          | Exact rule conditions                                                                                               | Plain-English translation                                                                                          | Practical interpretation                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -336,6 +359,7 @@ It requires three layers of bearish reversal confirmation:
 The table above is a simplified industry-style baseline. MACD does not have one universal five-state industry standard, so the strong and neutral labels are practical approximations rather than universally fixed definitions.
 
 ## How to Read
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 For an output such as:
 
@@ -386,6 +410,7 @@ MACD line − Signal line
 * This indicates that shorter-term momentum has turned upward relative to its signal line.
 
 ### Market interpretation
+:small[[Parent: 'How to Read'](#how-to-read)]
 
 The relationship between these values suggests a **bullish momentum shift within a still-bearish broader MACD context**.
 
@@ -399,6 +424,7 @@ Under the project’s rule system:
 * if the positive histogram is rising across that check, the condition is classified as `strong_buy`.
 
 ### Interpreting the signs
+:small[[Parent: 'How to Read'](#how-to-read)]
 
 | MACD line  | Histogram | Basic implication                                                            |
 | ---------- | --------- | ---------------------------------------------------------------------------- |
@@ -414,7 +440,49 @@ The project specifically emphasizes the two mixed-sign cases:
 
 These represent potential reversal states because shorter-term momentum has moved against the existing broader MACD trend.
 
+---
+### MACD/Signal Line Crossover Events
+:small[[Parent: 'How to Read'](#how-to-read)]
+
+The MACD histogram equals the MACD Line minus the Signal Line. A crossover occurs when this difference moves across zero.
+
+| Display symbol | Event | Literal condition | Interpretation |
+|---|---|---|---|
+| ▲ (black) | Bullish crossover | Previous histogram ≤ 0; current histogram > 0 | MACD Line crossed above Signal Line; bullish relative momentum has emerged. |
+| ▼ (black) | Bearish crossover | Previous histogram ≥ 0; current histogram < 0 | MACD Line crossed below Signal Line; bearish relative momentum has emerged. |
+| No arrow | No new crossover | Neither crossing condition is met | The existing MACD/Signal relationship may persist without a new event. |
+
+**Event timing:** Arrows appear on the crossover session only. They do not persist merely because the histogram remains positive or negative.
+
+The preceding histogram is taken from the available full indicator history, including when the prior trading session falls outside the displayed heatmap window. If the necessary observations are unavailable, no crossover is asserted.
+
+**Example — Bullish crossover**
+
+- Yesterday's histogram: −0.12
+- Today's histogram: +0.08
+- Change: +0.20
+- Display: `+0.08 ▲`
+
+The MACD Line has moved from below the Signal Line to above it.
+
+**Example — Bearish crossover**
+
+- Yesterday's histogram: +0.42
+- Today's histogram: −0.15
+- Change: −0.57
+- Display: `−0.15 ▼`
+
+The MACD Line has moved from above the Signal Line to below it.
+
+**Important:** These arrows report conventional MACD/Signal crossover events. They are not independent Buy/Sell classifications and do not alter the TA Rule Engine's five-state scoring.
+
+A bullish crossover can coexist with Neutral, Buy, or Strong Buy, depending on the applicable variant's rule conditions. The corresponding distinction applies to bearish crossovers.
+
+The black arrows are reserved for crossover events. Colored text and other symbols may be used in future enhancements for separate phenomena such as confirmed price/MACD divergence.
+
+
 ### Histogram direction
+:small[[Parent: 'How to Read'](#how-to-read)]
 
 The histogram’s sign shows the relationship between the MACD line and the signal line, while its movement shows whether that relationship is strengthening or weakening.
 
@@ -432,10 +500,66 @@ A histogram moving farther away from zero generally means the momentum gap betwe
 > - A growing negative histogram indicates that MACD is moving farther below its signal line.
 > - Conversely, shrinking bars indicate convergence and possible momentum deceleration.
 
+---
+### Understanding the MACD Hover
+:small[[Parent: 'How to Read'](#how-to-read)]
+
+The MACD hover combines three kinds of information:
+
+1. **Observed values:** What the histogram, MACD Line and Signal Line are showing.
+2. **Rule:** Why the rule engine assigned the displayed classification.
+3. **Context Interpretation:** What the relationship between the broader MACD backdrop and recent momentum development means.
+
+#### Opening fields
+
+| Field | Interpretation |
+|---|---|
+| Value | Current MACD histogram |
+| Δ vs prior day | Current histogram minus the preceding trading session's histogram, plus the relative change when defined |
+| Trend | Whether the histogram rose, fell or remained unchanged since the preceding session |
+| Signal | The authoritative five-state rule-engine classification |
+| Rule | A dynamic explanation of the conditions responsible for that classification |
+
+#### Context Interpretation
+
+| Subsection | What it explains |
+|---|---|
+| MACD Line | Current MACD Line with its preceding-session change |
+| Signal Line | Current Signal Line with its preceding-session change |
+| MACD — Trend Backdrop | Whether the MACD Line is above or below zero and what that establishes about the faster and slower EMAs |
+| Momentum — Current Development | Whether the MACD Line is above or below the Signal Line and how the histogram is changing |
+| Bottom-line | How the trend backdrop and momentum development should be interpreted together |
+
+#### Worked example — Strong Sell
+
+Consider the following illustrative observation:
+
+| Component | Current | Previous |
+|---|---:|---:|
+| MACD Line | +3.09 | +3.70 |
+| Signal Line | +3.24 | +3.28 |
+| Histogram | −0.15 | +0.42 |
+
+The current histogram is `3.09 − 3.24 = −0.15`.
+
+The change from the preceding session is `−0.15 − (+0.42) = −0.57`.
+
+The MACD Line remains above zero, meaning the faster EMA remains above the slower EMA. However, the histogram is now negative, meaning the MACD Line has moved below its Signal Line.
+
+The session therefore records a **bearish MACD/Signal crossover (▼)**.
+
+This observation provides bearish counter-trend momentum evidence. It does **not**, by itself, establish Strong Sell: the Strong Sell rule also requires the applicable strict two-move histogram-decline condition.
+
+**Bottom-line:** Read the Signal and Rule for classification, the Context Interpretation for the underlying explanation, and ▲/▼ for a newly completed MACD/Signal crossover. These are related but distinct pieces of information.
+
+#### Data availability
+
+The first displayed session may use historical observations preceding the visible chart window. Where a valid preceding observation is unavailable, missing comparisons must remain missing rather than being interpreted as Flat, Neutral or no momentum change.
 
 ---
 ## Initial audit note
 (a/o 7/17/26)
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 The current MACD(12,26,9) rules are a **custom, project-calibrated five-state interpretation**. They should not be described as a universal or standard industry MACD classification model.
 
@@ -478,6 +602,7 @@ The structure now matches the requested indicator-overview pattern while preserv
 
 ---
 ## MACD (old notes)
+:small[[Back to top](#summary-macd-12-26-9-signals)]
 
 **Purpose:** Reveal changes in trend strength, direction, momentum, and duration by showing the relationship between two exponential moving averages.
 

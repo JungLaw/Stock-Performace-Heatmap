@@ -14,9 +14,12 @@ from src.ui.indicator_hover_explanations import (
     get_bbp_rule_explanation,
     get_bbp_context_interpretation,
     get_bbp_exhaustion_hover_explanation,
+    get_macd_rule_explanation,
+    get_macd_context_interpretation,
 )
 
 import numpy as np
+
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
@@ -1029,12 +1032,13 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "MACD_12_26_9": {
         "display_name": "MACD(12,26,9)",
-        "definition": "Moving Average Convergence Divergence histogram using parameters 12 (fast), 26 (slow), and 9 (EMA(9) of the 'signal line').",
-        "how_to_read": "Histogram value is calculated as the 'MACD Line' minus the 'Signal Line'.<br>" 
-        "A positive histogram value (above zero) signifies that the MACD Line has recently crossed above the Signal Line.<br>"
+        "definition": "MACD histogram using parameters 12 (fast), 26 (slow), and 9 (EMA(9) of the 'signal line').",
+        "how_to_read": "Histogram value = 'MACD Line' - 'Signal Line'.<br>"
+        "A positive histogram value (above zero) signifies that the MACD Line is above the Signal Line.<br>"
         "The MACD line is the spread of the 2 EMAs.<br>"
-        " - When the MACD line crosses above the 9-period signal line, it often generates a bullish (buy) signal.<br>"
-        " - When it crosses below, it signals a bearish (sell) movement",
+        " - When the MACD line crosses above the 9-period Signal line, it often generates a bullish (buy) signal.<br>"
+        " - When it crosses below, it signals a bearish (sell) movement.<br>"
+        " - ▲|▼: MACD/Signal Crossover event (momentum-direction change)",
     },
     "MACD_5_34_1": {
         "display_name": "MACD(5,34,1)",
@@ -2054,6 +2058,33 @@ def build_plotly_heatmap_inputs(
             ohlcv_by_date = {}
             close_history_by_date = {}
 
+    # MACD first-visible-date hover support.
+    # Find the immediately preceding full-history OHLCV observation once.
+    # This is display-only; no calculations, scoring, or acquisition.
+    first_visible_prior_ohlcv: Dict[str, Any] = {}
+
+    if (
+        raw_dates
+        and any(str(k).startswith("MACD_") for k in indicator_keys)
+        and ohlcv_df is not None
+    ):
+        try:
+            history_df = ohlcv_df.sort_index()
+            first_date = pd.Timestamp(raw_dates[0]).normalize()
+            history_dates = pd.to_datetime(history_df.index)
+            if history_dates.tz is not None:
+                history_dates = history_dates.tz_localize(None)
+
+            prior_rows = history_df.loc[
+                history_dates.normalize() < first_date
+            ]
+            if not prior_rows.empty:
+                first_visible_prior_ohlcv = (
+                    prior_rows.iloc[-1].to_dict()
+                )
+        except (TypeError, ValueError, AttributeError, KeyError):
+            first_visible_prior_ohlcv = {}
+
     # Initialize variables
     row_keys: List[str] = []
     y: List[str] = []
@@ -2993,6 +3024,18 @@ def build_plotly_heatmap_inputs(
             for idx, (d_raw, v) in enumerate(zip(raw_dates, price_vals)):
                 prev_v = price_vals[idx - 1] if idx > 0 else None
 
+                if idx == 0 and first_visible_prior_ohlcv:
+                    price_column = (
+                        "Adj Close"
+                        if "Adj Close" in first_visible_prior_ohlcv
+                        else "Close"
+                    )
+                    prior_price = first_visible_prior_ohlcv.get(
+                        price_column
+                    )
+                    if not _is_missing(prior_price):
+                        prev_v = prior_price
+
                 # ----------------------------
                 # Value + formatting
                 # ----------------------------
@@ -3096,8 +3139,10 @@ def build_plotly_heatmap_inputs(
                         "volume_vs_10d_avg_pct": vol_10d_rel,
                         "volume_vs_3m_avg_pct": vol_3m_rel,
 
+
                         # Custom indicator-specific content
                         "macd_context_block": "",
+                        "macd_interpretation_block": "",
                         "adx_context_block": "",
                         "stoch_context_block": "",
                         "cmf_context_block": "",
@@ -3181,9 +3226,22 @@ def build_plotly_heatmap_inputs(
         text_row: List[str] = []
         cd_row: List[dict] = []
 
-        for idx, (d_raw, v, s, extra_map) in enumerate(zip(raw_dates, values, scores, row_extras)):        
+        for idx, (d_raw, v, s, extra_map) in enumerate(zip(raw_dates, values, scores, row_extras)):
             prev_v = values[idx - 1] if idx > 0 else None
             prev_extra_map = row_extras[idx - 1] if idx > 0 else {}
+
+            # MACD's first displayed observation may have a valid historical
+            # predecessor outside the visible window. Use the upstream
+            # full-history histogram only for that first displayed date.
+            # Other indicators retain their existing visible-window behavior.
+            if (
+                key.startswith("MACD_")
+                and idx == 0
+                and isinstance(extra_map, dict)
+            ):
+                prior_histogram = extra_map.get("macd_prior_macd_hist")
+                if not _is_missing(prior_histogram):
+                    prev_v = prior_histogram
 
             delta_abs = None
             if not _is_missing(v) and not _is_missing(prev_v):
@@ -3194,6 +3252,24 @@ def build_plotly_heatmap_inputs(
 
             delta_pct = safe_pct_delta(v, prev_v)
             trend = infer_trend(v, prev_v)
+
+            # MACD signal-line crossover event, display-only.
+            # Histogram = MACD Line - Signal Line.
+            # Full-history predecessor is already resolved for the first
+            # visible MACD date above.
+            macd_signal_crossover = None
+            if (
+                key.startswith("MACD_")
+                and not _is_missing(v)
+                and not _is_missing(prev_v)
+            ):
+                current_hist = float(v)
+                previous_hist = float(prev_v)
+
+                if previous_hist <= 0.0 and current_hist > 0.0:
+                    macd_signal_crossover = "Bullish"
+                elif previous_hist >= 0.0 and current_hist < 0.0:
+                    macd_signal_crossover = "Bearish"
 
             # ROC-only display context. Numeric truth remains in canonical
             # fractional ROC units; these fields are derived for hover only.
@@ -3274,6 +3350,7 @@ def build_plotly_heatmap_inputs(
             how_to_read = defs.get(key, {}).get("how_to_read", "")
 
             macd_context_block = ""
+            macd_interpretation_block = ""
             stoch_context_block = ""
             cmf_context_block = ""
             bullbear_context_block = ""
@@ -3876,7 +3953,7 @@ def build_plotly_heatmap_inputs(
                 prev_extra_map = row_extras[idx - 1] if idx > 0 else {}
 
                 macd_line = extra_map.get("macd_line")
-                prev_macd_line = prev_extra_map.get("macd_line") if isinstance(prev_extra_map, dict) else None
+                prev_macd_line = extra_map.get("macd_prior_macd_line")
 
                 macd_line_delta_abs = None
                 if not _is_missing(macd_line) and not _is_missing(prev_macd_line):
@@ -3897,7 +3974,7 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"MACD Line: {format_signed_number(macd_line, decimals=2)}{macd_line_suffix}")
 
                 macd_signal = extra_map.get("macd_signal")
-                prev_macd_signal = prev_extra_map.get("macd_signal") if isinstance(prev_extra_map, dict) else None
+                prev_macd_signal = extra_map.get("macd_prior_macd_signal")
 
                 macd_signal_delta_abs = None
                 if not _is_missing(macd_signal) and not _is_missing(prev_macd_signal):
@@ -3919,6 +3996,77 @@ def build_plotly_heatmap_inputs(
 
                 if parts:
                     macd_context_block = "<br>" + "<br>".join(parts) + "<br>"
+
+                # MACD semantic explanations use the authoritative score and
+                # full-history evidence transported by technical.py.
+                # Never derive history from adjacent displayed cells.
+                macd_variant = key.split("_", 1)[1]
+                macd_state = score_to_rule_key(s)
+
+                if macd_state and not _is_missing(v):
+                    curated_rule = get_macd_rule_explanation(
+                        variant=macd_variant,
+                        state=macd_state,
+                        score=s,
+                        active_rules=all_state_rules,
+                        macd_line=extra_map.get("macd_line"),
+                        histogram=v,
+                        prior_histogram=extra_map.get(
+                            "macd_prior_macd_hist"
+                        ),
+                        two_prior_histogram=extra_map.get(
+                            "macd_prior2_macd_hist"
+                        ),
+                    )
+
+                    curated_context = get_macd_context_interpretation(
+                        variant=macd_variant,
+                        state=macd_state,
+                        score=s,
+                        active_rules=all_state_rules,
+                        macd_line=extra_map.get("macd_line"),
+                        signal_line=extra_map.get("macd_signal"),
+                        histogram=v,
+                        prior_histogram=extra_map.get(
+                            "macd_prior_macd_hist"
+                        ),
+                        two_prior_histogram=extra_map.get(
+                            "macd_prior2_macd_hist"
+                        ),
+                        prior_macd_line=extra_map.get(
+                            "macd_prior_macd_line"
+                        ),
+                        prior_signal_line=extra_map.get(
+                            "macd_prior_macd_signal"
+                        ),
+                    )
+
+                    # Keep the existing generic rulebook explanation unless
+                    # both shared helpers accept the observation.
+                    if curated_rule is not None and curated_context is not None:
+                        rule_text = curated_rule
+                        backdrop, development, bottom_line = curated_context
+
+                        indent = "&nbsp;&nbsp;"
+
+                        def _macd_indented(value: str) -> str:
+                            return "<br>".join(
+                                indent + line
+                                for line in _wrap_hover_text(
+                                    value, width=67
+                                ).split("<br>")
+                            )
+
+                        macd_interpretation_block = (
+                            "<br><b>Context Interpretation</b><br>"
+                            "<br><b>MACD — Trend Backdrop:</b><br>"
+                            + _macd_indented(backdrop)
+                            + "<br><br><b>Momentum — Current Development:</b><br>"
+                            + _macd_indented(development)
+                            + "<br><br><b>Bottom-line:</b><br>"
+                            + _macd_indented(bottom_line)
+                            + "<br>"
+                        )
 
             # STOCH: Custom hover context derived from the existing rolling
             # payload. This is display-only metadata; scoring remains owned by
@@ -4931,6 +5079,13 @@ def build_plotly_heatmap_inputs(
                     else {}
                 )
 
+                if (
+                    idx == 0
+                    and key.startswith("MACD_")
+                    and first_visible_prior_ohlcv
+                ):
+                    prev_volume_row = first_visible_prior_ohlcv
+
                 volume_value = _to_float_or_none(
                     current_volume_row.get("Volume")
                     if isinstance(
@@ -5680,6 +5835,8 @@ def build_plotly_heatmap_inputs(
                     "crossover_summary_block": crossover_summary_block,
                     "crossover_spread": crossover_spread,
                     "macd_context_block": macd_context_block,
+                    "macd_interpretation_block": macd_interpretation_block,
+                    "macd_signal_crossover": macd_signal_crossover,
                     "adx_context_block": adx_context_block,
                     "stoch_context_block": stoch_context_block,
                     "cmf_context_block": cmf_context_block,
@@ -6023,6 +6180,65 @@ def apply_cci_divergence_text_overlay(
                 showlegend=False,
             )
         )
+
+
+def apply_macd_signal_crossover_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """
+    Display black event-only MACD/Signal crossover arrows.
+
+    Bullish: black ▲
+    Bearish: black ▼
+
+    The event is supplied by adapter customdata. This function only
+    draws annotations and leaves numeric text, cell scores, background
+    colors, and hover data unchanged.
+    """
+    if not fig.data:
+        return
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x):
+                continue
+
+            if not isinstance(cell, dict):
+                continue
+
+            indicator_key = str(cell.get("indicator_key", ""))
+            if not indicator_key.startswith("MACD_"):
+                continue
+
+            event = cell.get("macd_signal_crossover")
+            if event == "Bullish":
+                symbol = "\u25B2"
+            elif event == "Bearish":
+                symbol = "\u25BC"
+            else:
+                continue
+
+            fig.add_annotation(
+                x=x[col_idx],
+                y=y[row_idx],
+                xref="x",
+                yref="y",
+                text=symbol,
+                showarrow=False,
+                xshift=22,
+                yshift=0,
+                xanchor="center",
+                yanchor="middle",
+                font=dict(size=12, color="black"),
+                captureevents=False,
+            )
 
 
 def apply_uo_divergence_symbol_overlay(
@@ -6607,12 +6823,13 @@ def make_rolling_heatmap_figure(
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
-        "%{customdata.macd_context_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.macd_context_block}"
+        "%{customdata.macd_interpretation_block}"
         "%{customdata.bbp_context_interpretation_block}"
         "%{customdata.vwma_context_interpretation_block}"
         "%{customdata.hma_context_interpretation_block}"
@@ -6665,6 +6882,13 @@ def make_rolling_heatmap_figure(
     )
 
     apply_uo_divergence_symbol_overlay(
+        fig,
+        customdata=hm.customdata,
+        x=hm.x,
+        y=hm.y,
+    )
+
+    apply_macd_signal_crossover_overlay(
         fig,
         customdata=hm.customdata,
         x=hm.x,

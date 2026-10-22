@@ -112,9 +112,283 @@ def get_hma_context_interpretation(period: int, state: str, turn: str, trend: st
         return base + f" The fresh turn supports the qualified {qualified} Signal, while remaining a separate timing observation."
     return base + f" The fresh turn opposes the qualified {qualified} Signal; established trend qualification and immediate turning information are in tension."
 
+# MACD explanations are display-only; the rule engine remains the sole classifier.
+_MACD_ACTIVE_VARIANTS = frozenset({"8_17_5", "12_26_9", "20_50_10"})
+_MACD_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_MACD_SCORES = {"strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2}
+
+
+def _approved_macd_rules(variant: str) -> dict[str, str]:
+    """Audited rule shapes, compared to live expressions rather than evaluated."""
+    line = f"MACD_{variant}_line"
+    hist = f"MACD_{variant}_hist"
+    return {
+        "strong_buy": f"{line} < 0 and {hist} > 0 and rising_2bar({hist}, 2)",
+        "buy": f"{line} < 0 and {hist} > 0 and not_rising_2bar({hist}, 2)",
+        "neutral": f"({line} >= 0 and {hist} >= 0) or ({line} <= 0 and {hist} <= 0)",
+        "sell": f"{line} > 0 and {hist} < 0 and not_falling_2bar({hist}, 2)",
+        "strong_sell": f"{line} > 0 and {hist} < 0 and falling_2bar({hist}, 2)",
+    }
+
+
+def get_macd_rule_explanation(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    macd_line: float,
+    histogram: float,
+    prior_histogram: Optional[float] = None,
+    two_prior_histogram: Optional[float] = None,
+) -> Optional[str]:
+    """Explain an externally classified MACD state, or fail closed on drift.
+
+    Historical inputs must represent actual successive observed sessions, not
+    adjacent columns in a cropped heatmap. Missing history never means Neutral.
+    """
+    import math
+
+    if variant not in _MACD_ACTIVE_VARIANTS or state not in _MACD_STATES:
+        return None
+    if isinstance(score, bool) or score != _MACD_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_macd_rules(variant)
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or "")) != _fingerprint(approved[key])
+        for key in _MACD_STATES
+    ):
+        return None
+
+    def finite(value: object) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) else None
+
+    line, hist = finite(macd_line), finite(histogram)
+    if line is None or hist is None:
+        return None
+    prev = finite(prior_histogram)
+    prev2 = finite(two_prior_histogram)
+    rising = prev is not None and prev2 is not None and hist > prev > prev2
+    falling = prev is not None and prev2 is not None and hist < prev < prev2
+
+    if state == "strong_buy":
+        if not (line < 0 and hist > 0 and rising):
+            return None
+        return ("MACD trend backdrop is negative, but histogram is positive and has "
+                "increased for 2 consecutive sessions. This qualifies as a Strong Buy reversal setup.")
+    if state == "buy":
+        if not (line < 0 and hist > 0 and not rising):
+            return None
+        if prev is None or prev2 is None:
+            return ("MACD trend backdrop is negative and histogram is positive. "
+                    "Available history cannot establish 2 consecutive increases; "
+                    "the authoritative Signal is Buy, not Strong Buy.")
+        return ("MACD trend backdrop is negative and histogram is positive, but "
+                "2 consecutive histogram increases are absent. Bullish counter-trend "
+                "momentum is present without Strong Buy qualification.")
+    if state == "neutral":
+        if not ((line >= 0 and hist >= 0) or (line <= 0 and hist <= 0)):
+            return None
+        if line == 0 or hist == 0:
+            return ("MACD line or histogram is exactly zero; neither qualifying "
+                    "counter-trend reversal condition applies. Signal remains Neutral.")
+        direction = "positive" if line > 0 else "negative"
+        return (f"MACD line and histogram are both {direction}. Broader MACD backdrop "
+                "and relative momentum agree, so no counter-trend reversal signal qualifies.")
+    if state == "sell":
+        if not (line > 0 and hist < 0 and not falling):
+            return None
+        if prev is None or prev2 is None:
+            return ("MACD trend backdrop is positive and histogram is negative. "
+                    "Available history cannot establish 2 consecutive declines; "
+                    "the authoritative Signal is Sell, not Strong Sell.")
+        return ("MACD trend backdrop is positive and histogram is negative, but "
+                "2 consecutive histogram declines are absent. Bearish counter-trend "
+                "momentum is present without Strong Sell qualification.")
+    if not (line > 0 and hist < 0 and falling):
+        return None
+    return ("MACD trend backdrop is positive, but histogram is negative and has "
+            "declined for 2 consecutive sessions. This qualifies as a Strong Sell reversal setup.")
+
+
+def get_macd_context_interpretation(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    macd_line: object,
+    signal_line: object,
+    histogram: object,
+    prior_histogram: object = None,
+    two_prior_histogram: object = None,
+    prior_macd_line: object = None,
+    prior_signal_line: object = None,
+) -> Optional[tuple[str, str, str]]:
+    """Return (backdrop, current development, bottom-line), never a Signal.
+
+    Evidence is from full chronological history. Missing history is not a flat
+    or unchanged observation. Adapter owns labels, HTML and numeric formatting.
+    """
+    import math
+
+    if get_macd_rule_explanation(
+        variant, state, score, active_rules, macd_line, histogram,
+        prior_histogram, two_prior_histogram,
+    ) is None:
+        return None
+
+    def finite(value: object) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) else None
+
+    line = finite(macd_line)
+    signal = finite(signal_line)
+    hist = finite(histogram)
+    prior_h = finite(prior_histogram)
+    prior2_h = finite(two_prior_histogram)
+    prior_l = finite(prior_macd_line)
+    prior_s = finite(prior_signal_line)
+
+    if line is None or signal is None or hist is None:
+        return None
+
+    # Compare full precision, allowing only floating-point subtraction noise.
+    if not math.isclose(
+        hist, line - signal, rel_tol=1e-9, abs_tol=1e-10
+    ):
+        return None
+
+    if prior_h is not None and prior_l is not None and prior_s is not None:
+        if not math.isclose(
+            prior_h, prior_l - prior_s, rel_tol=1e-9, abs_tol=1e-10
+        ):
+            return None
+
+    if line > 0:
+        backdrop = (
+            "MACD line is above zero: faster EMA remains above slower EMA. "
+            "Broader MACD backdrop is positive, not proof price rose today."
+        )
+    elif line < 0:
+        backdrop = (
+            "MACD line is below zero: faster EMA remains below slower EMA. "
+            "Broader MACD backdrop is negative, not proof price fell today."
+        )
+    else:
+        backdrop = (
+            "MACD line is exactly zero: faster and slower EMA are equal. "
+            "Broader MACD direction is not established by this reading."
+        )
+
+    if hist > 0:
+        position = "MACD line remains above Signal Line"
+    elif hist < 0:
+        position = "MACD line remains below Signal Line"
+    else:
+        position = "MACD line and Signal Line are equal"
+
+    if prior_h is None:
+        development = (
+            position + "; prior-session momentum change is unavailable."
+        )
+        change = None
+    else:
+        change = hist - prior_h
+
+        if change > 0:
+            movement = "histogram rose"
+        elif change < 0:
+            movement = "histogram fell"
+        else:
+            movement = "histogram was unchanged"
+
+        development = (
+            position + "; " + movement + " since prior session."
+        )
+
+        if prior_l is not None and prior_s is not None:
+            delta_line = line - prior_l
+            delta_signal = signal - prior_s
+
+            if not math.isclose(
+                change, delta_line - delta_signal,
+                rel_tol=1e-9, abs_tol=1e-10
+            ):
+                return None
+
+    if change is None:
+        bottom = (
+            "Current MACD positioning is visible, but its latest improvement "
+            "or deterioration cannot be assessed without prior-session evidence."
+        )
+    elif hist == 0:
+        bottom = (
+            "Momentum gap is zero; MACD and Signal Line are level. "
+            "No counter-trend reversal state qualifies from this reading."
+        )
+    elif line == 0:
+        bottom = (
+            "Broader MACD backdrop is at zero. Histogram positioning shows "
+            "relative momentum, but does not establish a broader EMA trend direction."
+        )
+    elif change == 0:
+        bottom = (
+            "Relative momentum advantage is unchanged today. "
+            "Current position alone does not establish a fresh reversal."
+        )
+    elif line < 0 and hist > 0:
+        bottom = (
+            "Bullish counter-trend reversal momentum is strengthening even though "
+            "broader MACD trend has not turned positive."
+            if change > 0 else
+            "Bullish counter-trend advantage is still present, but weakened today. "
+            "Positive histogram does not mean momentum improved today."
+        )
+    elif line > 0 and hist < 0:
+        bottom = (
+            "Bearish counter-trend momentum is intensifying even while "
+            "broader MACD backdrop remains positive."
+            if change < 0 else
+            "Bearish counter-trend pressure persists, but is easing. "
+            "Broader MACD backdrop remains positive."
+        )
+    elif hist > 0:
+        bottom = (
+            "Bullish relative momentum is strengthening within a positive MACD "
+            "backdrop. Neutral means no counter-trend setup, not weak momentum."
+            if change > 0 else
+            "Bullish relative momentum remains present, but its advantage is "
+            "shrinking. Neutral does not mean momentum has disappeared."
+        )
+    else:
+        bottom = (
+            "Bearish relative momentum is worsening within a negative MACD "
+            "backdrop. Neutral means no counter-trend setup, not weak momentum."
+            if change < 0 else
+            "Negative momentum gap is narrowing while MACD backdrop remains "
+            "bearish. Selling pressure may be easing without a qualifying "
+            "bullish reversal."
+        )
+
+    return backdrop, development, bottom
+
+
 # UO's seven-state explanation is display-only. The executable rulebook has
 # five score-level flags; Watch and Divergence are distinct upstream states.
 _UO_APPROVED_RULES = {
+
     "strong_buy": "UO_BULLISH_CONFIRMED",
     "buy": "UO_BULLISH_SETUP",
     "neutral": "UO_NO_ACTIVE_SETUP",

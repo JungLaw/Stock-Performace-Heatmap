@@ -4972,6 +4972,7 @@ class DatabaseIntegratedTechnicalCalculator:
                 if eng_name == "MACD" and dt in df_ind.index:
                     line_col = f"{display_key}_line"
                     signal_col = f"{display_key}_signal"
+                    hist_col = f"{display_key}_hist"
 
                     if line_col in df_ind.columns:
                         raw_line = df_ind.loc[dt, line_col]
@@ -4988,11 +4989,54 @@ class DatabaseIntegratedTechnicalCalculator:
                                 extras["macd_signal"] = float(raw_signal)
                             except (TypeError, ValueError):
                                 pass
-                            
+
+                    # Preserve full-history predecessor observations before
+                    # reducing evidence to the visible heatmap dates.
+                    # These are display-only facts, not classification inputs.
+                    history_pos = df_ind.index.get_loc(dt)
+
+                    if isinstance(history_pos, (int, np.integer)):
+                        history_fields = {
+                            "macd_line": line_col,
+                            "macd_signal": signal_col,
+                            "macd_hist": hist_col,
+                        }
+
+                        for lag, prefix in (
+                            (1, "macd_prior"),
+                            (2, "macd_prior2"),
+                        ):
+                            prior_pos = history_pos - lag
+                            if prior_pos < 0:
+                                continue
+
+                            prior_date = df_ind.index[prior_pos]
+                            extras[f"{prefix}_date"] = (
+                                prior_date.strftime("%Y-%m-%d")
+                                if hasattr(prior_date, "strftime")
+                                else str(prior_date)
+                            )
+
+                            for suffix, col_name in history_fields.items():
+                                if col_name not in df_ind.columns:
+                                    continue
+
+                                prior_raw = df_ind.iloc[prior_pos][col_name]
+                                if not pd.isna(prior_raw):
+                                    try:
+                                        prior_numeric = float(prior_raw)
+                                        if np.isfinite(prior_numeric):
+                                            extras[f"{prefix}_{suffix}"] = (
+                                                prior_numeric
+                                            )
+                                    except (TypeError, ValueError):
+                                        pass
+
                 if value is not None:
                     hover = f"{display_key} = {value:.2f}, score={score_int} ({label})"
                 else:
                     hover = f"{display_key}, score={score_int} ({label})"
+
 
                 # If extras exist, append them (still readable, no UI changes required)
                 if extras:
