@@ -16,6 +16,8 @@ from src.ui.indicator_hover_explanations import (
     get_bbp_exhaustion_hover_explanation,
     get_macd_rule_explanation,
     get_macd_context_interpretation,
+    get_stoch_rule_explanation,
+    get_stoch_context_interpretation,
 )
 
 import numpy as np
@@ -106,6 +108,75 @@ def _format_hover_block(label: str, value: Any, *, width: int = 72) -> str:
     if not wrapped:
         return ""
     return f"<br><b>{label}:</b><br>{wrapped}<br>"
+
+
+def _bold_hover_prefix(value: Any, label: str) -> str:
+    """Bold one leading hover field label without changing the payload."""
+    content = str(value or "")
+    prefix = f"{label}:"
+    if content.startswith(prefix):
+        return f"<b>{prefix}</b>" + content[len(prefix):]
+    return content
+
+
+def _compact_hover_rule(value: Any) -> str:
+    """Retain Rule text/wrapping; put the label and first word together."""
+    content = str(value or "")
+    return content.replace(
+        "<br><b>Rule:</b><br>", "<b>Rule:</b> ", 1
+    ).replace(
+        "<br><b>Rule:</b> ", "<b>Rule:</b> ", 1
+    )
+
+
+def format_stoch_hover_presentation(customdata: Dict[str, Any]) -> Dict[str, Any]:
+    """Present STOCH openings consistently in RH, SCD Single and Multiple."""
+    custom = dict(customdata)
+    for field, label in (
+        ("scd_value_line", "Value"),
+        ("delta_line", "Δ vs prior day"),
+        ("trend_line", "Trend"),
+    ):
+        custom[field] = _bold_hover_prefix(custom.get(field), label)
+    custom["signal_line"] = str(custom.get("signal_line") or "").replace(
+        "<br><b>Signal:</b>", "<b>Signal:</b>", 1
+    )
+    custom["rule_block"] = _compact_hover_rule(custom.get("rule_block"))
+    return custom
+
+
+def format_macd_hover_presentation(customdata: Dict[str, Any]) -> Dict[str, Any]:
+    """Match the established SCD MACD layout without changing explanations."""
+    custom = format_stoch_hover_presentation(customdata)
+    numeric = str(custom.get("macd_context_block") or "")
+    if numeric.startswith("<br>"):
+        numeric = numeric[4:]
+    # Preserve the MACD Line / Signal Line values and deltas verbatim.
+    for label in ("MACD Line", "Signal Line"):
+        numeric = numeric.replace(f"{label}:", f"<b>{label}:</b>")
+
+    interpretation = str(custom.get("macd_interpretation_block") or "")
+    heading = "<br><b>Context Interpretation</b><br>"
+    if heading in interpretation:
+        combined = interpretation.replace(heading, heading + numeric, 1)
+        for label in (
+            "MACD — Trend Backdrop",
+            "Momentum — Current Development",
+            "Bottom-line",
+        ):
+            combined = combined.replace(
+                f"<br><br><b>{label}:</b>",
+                f"<br><b>{label}:</b>", 1
+            )
+        # Rule already ends in <br>; do not create an empty row before
+        # Context Interpretation in any consumer.
+        custom["scd_macd_context_block"] = (
+            combined[4:] if combined.startswith("<br>") else combined
+        )
+    else:
+        # No fabricated interpretation when a semantic guard fails.
+        custom["scd_macd_context_block"] = numeric
+    return custom
 
 
 def _format_uo_hover_date(value: Any) -> str:
@@ -1074,8 +1145,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
         "display_name": "Stoch(5,3,3)",
         "definition": (
             "Stochastic Oscillator compares the current close with its recent "
-            "high-low range. The displayed value is %K; %D is its smoothed "
-            "signal line."
+            "high-low range. Displayed value is %K; %D is its smoothed "
+            "signal line"
         ),
         "how_to_read": (
             "This shorter variant reacts quickly. %K below 20 is oversold and "
@@ -3271,6 +3342,20 @@ def build_plotly_heatmap_inputs(
                 elif previous_hist >= 0.0 and current_hist < 0.0:
                     macd_signal_crossover = "Bearish"
 
+            # STOCH K/D event truth is supplied upstream from full history.
+            # A predecessor outside the displayed window is still eligible.
+            stoch_kd_crossover_value = None
+            if key.startswith("STOCH_") and isinstance(extra_map, dict):
+                upstream_cross = extra_map.get("stoch_kd_crossover")
+                if upstream_cross in ("Bullish", "Bearish"):
+                    stoch_kd_crossover_value = upstream_cross
+                if idx == 0 and not _is_missing(extra_map.get("stoch_prior_k")):
+                    prev_v = extra_map["stoch_prior_k"]
+                    # Preserve the pre-existing opening fields' correct delta.
+                    delta_abs = float(v) - float(prev_v) if not _is_missing(v) else None
+                    delta_pct = safe_pct_delta(v, prev_v)
+                    trend = infer_trend(v, prev_v)
+
             # ROC-only display context. Numeric truth remains in canonical
             # fractional ROC units; these fields are derived for hover only.
             alignment_line = ""
@@ -3352,6 +3437,8 @@ def build_plotly_heatmap_inputs(
             macd_context_block = ""
             macd_interpretation_block = ""
             stoch_context_block = ""
+            stoch_divergence_value = None
+            stoch_divergence_evidence = {}
             cmf_context_block = ""
             bullbear_context_block = ""
             bbp_context_interpretation_block = ""
@@ -4068,6 +4155,26 @@ def build_plotly_heatmap_inputs(
                             + "<br>"
                         )
 
+            # STOCH emerging divergence is an upstream, event-date-only fact.
+            # Keep numeric reference evidence available for the subsequent
+            # independent text-overlay and explanatory hover updates.
+            if key.startswith("STOCH_") and isinstance(extra_map, dict):
+                event = extra_map.get("stoch_divergence")
+                if event in {"Bullish", "Bearish"}:
+                    evidence_keys = (
+                        "stoch_divergence_reference_date",
+                        "stoch_divergence_reference_known_date",
+                        "stoch_divergence_reference_price",
+                        "stoch_divergence_current_price",
+                        "stoch_divergence_reference_k",
+                        "stoch_divergence_current_k",
+                    )
+                    if all(extra_map.get(item) is not None for item in evidence_keys):
+                        stoch_divergence_value = event
+                        stoch_divergence_evidence = {
+                            item: extra_map[item] for item in evidence_keys
+                        }
+
             # STOCH: Custom hover context derived from the existing rolling
             # payload. This is display-only metadata; scoring remains owned by
             # the rulebook and signal-classifier path.
@@ -4078,9 +4185,13 @@ def build_plotly_heatmap_inputs(
                 prev_stoch_k = prev_v
                 stoch_d = extra_map.get("stoch_d")
                 prev_stoch_d = (
-                    prev_extra_map.get("stoch_d")
-                    if isinstance(prev_extra_map, dict)
-                    else None
+                    extra_map.get("stoch_prior_d")
+                    if not _is_missing(extra_map.get("stoch_prior_d"))
+                    else (
+                        prev_extra_map.get("stoch_d")
+                        if isinstance(prev_extra_map, dict)
+                        else None
+                    )
                 )
 
                 stoch_d_delta_abs = None
@@ -4187,7 +4298,11 @@ def build_plotly_heatmap_inputs(
                     parts.append(f"Position: {position}")
 
                 cross = "None"
-                if spread is not None and prev_spread is not None:
+                if stoch_kd_crossover_value == "Bullish":
+                    cross = "Bullish crossover today"
+                elif stoch_kd_crossover_value == "Bearish":
+                    cross = "Bearish crossover today"
+                elif spread is not None and prev_spread is not None:
                     if prev_spread <= 0.0 and spread > 0.0:
                         cross = "Bullish crossover today"
                     elif prev_spread >= 0.0 and spread < 0.0:
@@ -4196,9 +4311,86 @@ def build_plotly_heatmap_inputs(
                 parts.append(f"Cross: {cross}")
 
                 if parts:
+                    # Same six existing fields, reordered for the approved
+                    # STOCH hover design; do not alter the numeric evidence.
+                    factual = {
+                        line.split(":", 1)[0]: line
+                        for line in parts if line
+                    }
+                    number_fields = [
+                        _bold_hover_prefix(factual[label], label)
+                        for label in ("%D", "Spread")
+                        if label in factual
+                    ]
+                    ordered = []
+                    if "Position" in factual:
+                        ordered.append(_bold_hover_prefix(
+                            factual["Position"], "Position"
+                        ))
+                    if number_fields:
+                        ordered.append(" | ".join(number_fields))
+                    for label in ("Trend", "Zone", "Cross"):
+                        if label in factual:
+                            ordered.append(_bold_hover_prefix(
+                                factual[label], label
+                            ))
                     stoch_context_block = (
-                        "<br>" + "<br>".join(parts) + "<br>"
+                        "<b>Context & Interpretation:</b><br>"
+                        + "<br>".join(ordered) + "<br>"
                     )
+                    if stoch_divergence_value in ("Bullish", "Bearish"):
+                        ev = stoch_divergence_evidence
+                        price_label = "Low" if stoch_divergence_value == "Bullish" else "High"
+
+                        # Display-only date formatting; preserve full source metadata.
+                        reference_date = ev["stoch_divergence_reference_date"]
+                        try:
+                            reference_ts = pd.Timestamp(reference_date)
+                            reference_display = (
+                                f"{reference_ts.month}/{reference_ts.day}"
+                                if not pd.isna(reference_ts)
+                                else str(reference_date)
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            reference_display = str(reference_date)
+
+                        stoch_context_block = stoch_context_block + (
+                            f"<b>Divergence:</b> Emerging {stoch_divergence_value} "
+                            f"(reference {reference_display}) — "
+                            f"Price {price_label}: {ev['stoch_divergence_reference_price']:.2f}"
+                            f" → {ev['stoch_divergence_current_price']:.2f}; "
+                            f"%K: {ev['stoch_divergence_reference_k']:.2f}"
+                            f" → {ev['stoch_divergence_current_k']:.2f}. "
+                            "Reversal unconfirmed.<br>"
+                        )
+
+                # Single shared semantic owner; leave existing Rule untouched if
+                # live rulebook or historical evidence fails the guard.
+                stoch_variant = key.split("_", 1)[1]
+                stoch_state = score_to_rule_key(s)
+                if stoch_state:
+                    curated_rule = get_stoch_rule_explanation(
+                        stoch_variant, stoch_state, s, all_state_rules,
+                        stoch_k, stoch_d, prev_stoch_k,
+                    )
+                    curated_context = get_stoch_context_interpretation(
+                        stoch_variant, stoch_state, s, all_state_rules,
+                        stoch_k, stoch_d, prev_stoch_k, prev_stoch_d,
+                    )
+                    if curated_rule is not None and curated_context is not None:
+                        rule_text = curated_rule
+                        range_text, momentum_text, bottom_text = curated_context
+                        # Explanations follow, rather than repeat, the six
+                        # existing factual fields. Missing/guarded evidence
+                        # still leaves the factual context intact.
+                        stoch_context_block += (
+                            "<br><b>Stochastic — Range Position:</b><br>"
+                            + _wrap_hover_text(range_text, width=72)
+                            + "<br><b>Momentum — Current Development:</b><br>"
+                            + _wrap_hover_text(momentum_text, width=72)
+                            + "<br><b>Bottom-line:</b><br>"
+                            + _wrap_hover_text(bottom_text, width=72) + "<br>"
+                        )
 
             # ROC: Compare the day-over-day price direction with the
             # day-over-day ROC direction. This is a one-bar alignment
@@ -5839,6 +6031,9 @@ def build_plotly_heatmap_inputs(
                     "macd_signal_crossover": macd_signal_crossover,
                     "adx_context_block": adx_context_block,
                     "stoch_context_block": stoch_context_block,
+                    "stoch_divergence": stoch_divergence_value,
+                    "stoch_divergence_evidence": stoch_divergence_evidence,
+                    "stoch_kd_crossover": stoch_kd_crossover_value,
                     "cmf_context_block": cmf_context_block,
                     "dpo_context_block": dpo_context_block,
 
@@ -6180,6 +6375,101 @@ def apply_cci_divergence_text_overlay(
                 showlegend=False,
             )
         )
+
+
+def apply_stoch_divergence_text_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Color ONLY the STOCH number at an upstream emerging-divergence event.
+
+    Keep the score-colored heatmap, hover and independent crossover arrow.
+    Empty/invalid metadata does not produce a colored event.
+    """
+    if not fig.data:
+        return
+    base_text = [list(row) for row in fig.data[0].text]
+    groups = {"Bullish": ([], [], []), "Bearish": ([], [], [])}
+    required = (
+        "stoch_divergence_reference_date", "stoch_divergence_reference_known_date",
+        "stoch_divergence_reference_price", "stoch_divergence_current_price",
+        "stoch_divergence_reference_k", "stoch_divergence_current_k",
+    )
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y) or row_idx >= len(base_text):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or col_idx >= len(base_text[row_idx]):
+                continue
+            if not isinstance(cell, dict) or not str(cell.get("indicator_key", "")).startswith("STOCH_"):
+                continue
+            direction = cell.get("stoch_divergence")
+            evidence = cell.get("stoch_divergence_evidence")
+            if direction not in groups or not isinstance(evidence, dict):
+                continue
+            if not all(evidence.get(field) is not None for field in required):
+                continue
+            value = base_text[row_idx][col_idx]
+            if not value:
+                continue
+            base_text[row_idx][col_idx] = ""
+            xs, ys, values = groups[direction]
+            xs.append(x[col_idx]); ys.append(y[row_idx]); values.append(str(value))
+    fig.data[0].text = base_text
+    for direction, color in (("Bullish", "blue"), ("Bearish", "red")):
+        xs, ys, values = groups[direction]
+        if values:
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys, mode="text", text=values,
+                textfont=dict(size=12, color=color),
+                hoverinfo="skip", showlegend=False,
+            ))
+
+
+def apply_stoch_kd_crossover_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Draw independently colored, event-only K/D arrows, never change scores.
+
+    Yellow means counter to the zone's usual contrarian direction:
+    bullish while overbought or bearish while oversold. Numeric divergence
+    coloring remains independently blue/red, including same-cell events.
+    """
+    if not fig.data:
+        return
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("STOCH_"):
+                continue
+            event = cell.get("stoch_kd_crossover")
+            if event not in ("Bullish", "Bearish"):
+                continue
+            try:
+                k = float(cell.get("raw_value"))
+            except (ValueError, TypeError, OverflowError):
+                continue
+            if not np.isfinite(k):
+                continue
+            conflict = (event == "Bullish" and k > 80) or (event == "Bearish" and k < 20)
+            fig.add_annotation(
+                x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                text="▲" if event == "Bullish" else "▼",
+                showarrow=False, xshift=27, yshift=0,
+                xanchor="center", yanchor="middle",
+                font=dict(size=12, color="#FFD700" if conflict else "black"),
+                captureevents=False,
+            )
 
 
 def apply_macd_signal_crossover_overlay(
@@ -6804,11 +7094,43 @@ def make_rolling_heatmap_figure(
                 )
             )
 
+    # Presentation-only overrides on a copy; the upstream SCD payload and
+    # classification metadata remain unchanged.
+    for row_idx, row_key in enumerate(hm.row_keys):
+        if row_idx >= len(hover_customdata):
+            continue
+        if not str(row_key).startswith(("STOCH_", "MACD_")):
+            continue
+        for cell in hover_customdata[row_idx]:
+            if not isinstance(cell, dict):
+                continue
+            cell["scd_value_line"] = (
+                f"Value: {cell.get('formatted_value', '')}<br>"
+            )
+            if str(row_key).startswith("MACD_"):
+                presented = format_macd_hover_presentation(cell)
+                cell.update(presented)
+                cell["macd_context_block"] = ""
+                cell["macd_interpretation_block"] = (
+                    cell.get("scd_macd_context_block", "")
+                )
+            else:
+                cell.update(format_stoch_hover_presentation(cell))
+            cell["rolling_value_line"] = cell["scd_value_line"]
+
+    for row in hover_customdata:
+        for cell in row:
+            if isinstance(cell, dict):
+                cell.setdefault(
+                    "rolling_value_line",
+                    f"Value: {cell.get('formatted_value', '')}<br>",
+                )
+
     hovertemplate = (
         "<b>%{customdata.display_name}</b><br>"
         "Date: %{customdata.date}<br>"
         "<br>"
-        "Value: %{customdata.formatted_value}<br>"
+        "%{customdata.rolling_value_line}"
         "%{customdata.crossover_summary_block}"
         "%{customdata.crossover_context_block}"
         "%{customdata.delta_line}"
@@ -6823,11 +7145,11 @@ def make_rolling_heatmap_figure(
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
         "%{customdata.bbp_exhaustion_context_block}"
-        "%{customdata.stoch_context_block}"
         "%{customdata.cmf_context_block}"
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.stoch_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.macd_interpretation_block}"
         "%{customdata.bbp_context_interpretation_block}"
@@ -6893,6 +7215,13 @@ def make_rolling_heatmap_figure(
         customdata=hm.customdata,
         x=hm.x,
         y=hm.y,
+    )
+
+    apply_stoch_divergence_text_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+    apply_stoch_kd_crossover_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 
     apply_hma_turn_text_overlay(

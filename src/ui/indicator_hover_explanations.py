@@ -112,6 +112,173 @@ def get_hma_context_interpretation(period: int, state: str, turn: str, trend: st
         return base + f" The fresh turn supports the qualified {qualified} Signal, while remaining a separate timing observation."
     return base + f" The fresh turn opposes the qualified {qualified} Signal; established trend qualification and immediate turning information are in tension."
 
+# STOCH explanations are display-only; scoring remains the classifier's responsibility.
+_STOCH_VARIANTS = frozenset({"5_3_3", "14_3_3", "21_5_5"})
+_STOCH_SCORES = {"strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2}
+
+
+def _approved_stoch_rules(variant: str) -> dict[str, str]:
+    k, d = f"STOCHK_{variant}", f"STOCHD_{variant}"
+    return {
+        "strong_buy": f"{k} < 20 and {k} > {d} and rising_2bar({k}, 1)",
+        "buy": f"{k} < 20 and ({k} <= {d} or not_rising_2bar({k}, 1))",
+        "neutral": f"20 <= {k} <= 80",
+        "sell": f"{k} > 80 and ({k} >= {d} or not_falling_2bar({k}, 1))",
+        "strong_sell": f"{k} > 80 and {k} < {d} and falling_2bar({k}, 1)",
+    }
+
+
+def get_stoch_rule_explanation(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    k_value: object,
+    d_value: object,
+    previous_k: object = None,
+) -> Optional[str]:
+    """Explain the authoritative STOCH state; never infer or change classification.
+
+    Missing prior K is not flat/falling. For non-strong states it leaves
+    the reason unproven rather than asserting a particular failed condition.
+    """
+    import math
+
+    if variant not in _STOCH_VARIANTS or state not in _STOCH_SCORES:
+        return None
+    if isinstance(score, bool) or score != _STOCH_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_stoch_rules(variant)
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or "")) != _fingerprint(expr)
+        for key, expr in approved.items()
+    ):
+        return None
+
+    def finite(value: object) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return result if math.isfinite(result) else None
+
+    k, d, prior = finite(k_value), finite(d_value), finite(previous_k)
+    if k is None or d is None:
+        return None
+    if state == "neutral":
+        return "Trading in the middle portion of its recent range." if 20 <= k <= 80 else None
+
+    if state in ("buy", "strong_buy"):
+        if not k < 20:
+            return None
+        if state == "strong_buy":
+            if prior is None or not (k > d and k > prior):
+                return None
+            return ("Near the bottom of its recent range ('oversold'), with %K above %D and rising. "
+                    "This indicates improving bullish momentum and an early potential upward reversal.")
+        base = "Trading in 'oversold' territory absent complete bullish momentum support."
+        reasons = []
+        if k <= d:
+            reasons.append("%K is below %D" if k < d else "%K equals %D")
+        if prior is not None and k <= prior:
+            reasons.append("%K declined from the previous session" if k < prior else "%K was unchanged from the previous session")
+        if not reasons:
+            # An apparent Strong Buy cannot legitimately be explained as Buy.
+            return None if prior is not None else base + " Prior-session %K is unavailable; the missing Strong qualification cannot be reconstructed."
+        return base + " " + "; ".join(reasons) + "."
+
+    if not k > 80:
+        return None
+    if state == "strong_sell":
+        if prior is None or not (k < d and k < prior):
+            return None
+        return ("Near the top of its recent range ('overbought'), with %K below %D and falling. "
+                "This indicates deteriorating momentum and an early potential downward reversal.")
+    base = "Trading in 'overbought' territory absent complete bearish momentum validation."
+    reasons = []
+    if k >= d:
+        reasons.append("%K is above %D" if k > d else "%K equals %D")
+    if prior is not None and k >= prior:
+        reasons.append("%K rose from the previous session" if k > prior else "%K was unchanged from the previous session")
+    if not reasons:
+        return None if prior is not None else base + " Prior-session %K is unavailable; the missing Strong qualification cannot be reconstructed."
+    return base + " " + "; ".join(reasons) + "."
+
+
+def get_stoch_context_interpretation(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    k_value: object,
+    d_value: object,
+    previous_k: object = None,
+    previous_d: object = None,
+) -> Optional[tuple[str, str, str]]:
+    """Read-only STOCH synthesis; never manufacture prior history or reclassify."""
+    import math
+
+    if get_stoch_rule_explanation(
+        variant, state, score, active_rules, k_value, d_value, previous_k
+    ) is None:
+        return None
+
+    def finite(value: object) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return result if math.isfinite(result) else None
+
+    k, d, pk, pd = map(finite, (k_value, d_value, previous_k, previous_d))
+    if k is None or d is None:
+        return None
+    if k < 20:
+        range_text = "Smoothed %K is in 'oversold' territory below 20, near the lower end of its recent trading range."
+    elif k > 80:
+        range_text = "Smoothed %K is in 'overbought' territory above 80, near the upper end of its recent trading range."
+    else:
+        range_text = "Smoothed %K is in the middle zone (20–80), not at either Stochastic extreme."
+
+    spread = k - d
+    position = "%K is above %D" if spread > 0 else ("%K is below %D" if spread < 0 else "%K equals %D")
+    if pk is None or pd is None:
+        development = position + ". Prior-session K/D evidence is unavailable; movement and fresh crossover cannot be established."
+        bottom = "The current Stochastic relationship is known, but its latest momentum development is unverified."
+        return range_text, development, bottom
+
+    previous_spread = pk - pd
+    k_move = "rose" if k > pk else ("fell" if k < pk else "was unchanged")
+    d_move = "rose" if d > pd else ("fell" if d < pd else "was unchanged")
+    spread_move = "widened upward" if spread > previous_spread else ("shifted downward" if spread < previous_spread else "was unchanged")
+    crossover = "A fresh bullish K/D crossover occurred today" if previous_spread <= 0 < spread else (
+        "A fresh bearish K/D crossover occurred today" if previous_spread >= 0 > spread else "No fresh K/D crossover occurred today"
+    )
+    development = f"{position}; %K {k_move}, %D {d_move}, and the K−D spread {spread_move}. {crossover}."
+
+    # Compare direction of the change in the K-D spread with the contrarian signal,
+    # without adding or changing any upstream classifier state.
+    change = spread - previous_spread
+    if change == 0:
+        relation = "Relative K/D momentum is unchanged today"
+    elif state in ("buy", "strong_buy"):
+        relation = "Relative K/D momentum supports the bullish setup" if change > 0 else "Relative K/D momentum is in tension with the bullish setup"
+    elif state in ("sell", "strong_sell"):
+        relation = "Relative K/D momentum supports the bearish setup" if change < 0 else "Relative K/D momentum is in tension with the bearish setup"
+    else:
+        relation = "Bullish relative momentum is developing despite a Neutral classification" if change > 0 else "Bearish relative momentum is developing despite a Neutral classification"
+    if (k > pk and spread < previous_spread) or (k < pk and spread > previous_spread):
+        relation += "; K direction and relative spread development are mixed"
+    bottom = relation + "."
+    return range_text, development, bottom
+
+
 # MACD explanations are display-only; the rule engine remains the sole classifier.
 _MACD_ACTIVE_VARIANTS = frozenset({"8_17_5", "12_26_9", "20_50_10"})
 _MACD_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")

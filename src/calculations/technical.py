@@ -1059,6 +1059,101 @@ class DatabaseIntegratedTechnicalCalculator:
             & (s > s.shift(-2))
         )
 
+    def _build_stoch_emerging_divergence_context(
+        self,
+        df_ind: pd.DataFrame,
+    ) -> Dict[str, pd.Series]:
+        """First-observable price/%K divergence, based on complete history.
+
+        The reference is the latest five-bar PRICE pivot that was *already*
+        knowable by this observation (pivot position + 2). Today's price is
+        not required to be a confirmed pivot. Only a fresh extreme since the
+        reference qualifies, and only the first event per direction/reference
+        episode is emitted. This is awareness-only, never score truth.
+
+        Matches the approved read-only diagnostic's strict comparisons and
+        episode semantics. Event dictionaries contain factual evidence for
+        downstream display; there is no forward-looking event reassignment.
+        """
+        output: Dict[str, pd.Series] = {}
+        if not {"Low", "High"}.issubset(df_ind.columns):
+            return output
+
+        lows = pd.to_numeric(df_ind["Low"], errors="coerce").to_numpy(dtype=float)
+        highs = pd.to_numeric(df_ind["High"], errors="coerce").to_numpy(dtype=float)
+        low_pivots = self._confirmed_swing_low_5bar(df_ind["Low"]).to_numpy()
+        high_pivots = self._confirmed_swing_high_5bar(df_ind["High"]).to_numpy()
+        dates = df_ind.index
+        n = len(df_ind)
+
+        for variant in ("5_3_3", "14_3_3", "21_5_5"):
+            k_col = f"STOCHK_{variant}"
+            d_col = f"STOCHD_{variant}"
+            if k_col not in df_ind.columns or d_col not in df_ind.columns:
+                continue
+            k = pd.to_numeric(df_ind[k_col], errors="coerce").to_numpy(dtype=float)
+            d = pd.to_numeric(df_ind[d_col], errors="coerce").to_numpy(dtype=float)
+            events = pd.Series([None] * n, index=dates, dtype="object")
+            references = {"Bullish": None, "Bearish": None}
+            alerted = {"Bullish": None, "Bearish": None}
+
+            for i in range(n):
+                j = i - 2
+                if j >= 2:
+                    if low_pivots[j]:
+                        references["Bullish"] = j if np.isfinite(k[j]) else None
+                        alerted["Bullish"] = None
+                    if high_pivots[j]:
+                        references["Bearish"] = j if np.isfinite(k[j]) else None
+                        alerted["Bearish"] = None
+
+                # Exactly as in the diagnostic: both production oscillator
+                # values must be present before evaluating either direction.
+                if not np.isfinite([k[i], d[i]]).all():
+                    continue
+
+                matches = []
+                for direction, price in (("Bullish", lows), ("Bearish", highs)):
+                    p = references[direction]
+                    if p is None or p >= i:
+                        continue
+                    if not np.isfinite([price[i], price[p], k[p]]).all():
+                        continue
+                    history = price[p:i]
+                    if not np.isfinite(history).all():
+                        continue
+
+                    if direction == "Bullish":
+                        is_new_extreme = price[i] < np.min(history)
+                        oscillator_disagrees = k[i] > k[p]
+                    else:
+                        is_new_extreme = price[i] > np.max(history)
+                        oscillator_disagrees = k[i] < k[p]
+
+                    if not (is_new_extreme and oscillator_disagrees):
+                        continue
+                    if alerted[direction] == p:
+                        continue
+                    matches.append((direction, p, price))
+
+                # No implicit precedence if both directions ever qualify.
+                if len(matches) != 1:
+                    continue
+                direction, p, price = matches[0]
+                alerted[direction] = p
+                events.at[dates[i]] = {
+                    "stoch_divergence": direction,
+                    "stoch_divergence_reference_date": pd.Timestamp(dates[p]).strftime("%Y-%m-%d"),
+                    "stoch_divergence_reference_known_date": pd.Timestamp(dates[p + 2]).strftime("%Y-%m-%d"),
+                    "stoch_divergence_reference_price": float(price[p]),
+                    "stoch_divergence_current_price": float(price[i]),
+                    "stoch_divergence_reference_k": float(k[p]),
+                    "stoch_divergence_current_k": float(k[i]),
+                }
+
+            output[f"STOCH_{variant}"] = events
+        return output
+
     def _build_uo_semantic_context(
         self,
         df_ind: pd.DataFrame,
@@ -3281,6 +3376,34 @@ class DatabaseIntegratedTechnicalCalculator:
                     "bbp_two_sessions_ago": bbp_series.shift(2),
                 }
 
+        # STOCH emerging divergence: detect on full chronological history,
+        # before visible-window reduction, using the approved awareness-first
+        # reference pivot / first-alert episode algorithm.
+        stoch_divergence_by_display_key = (
+            self._build_stoch_emerging_divergence_context(df_ind)
+        )
+
+        # Fresh K/D crossovers and true predecessor values come from the full
+        # chronological series, never the cropped visible heatmap window.
+        # These are display facts only; scores and rule states are untouched.
+        stoch_kd_context_by_display_key: Dict[str, Dict[str, pd.Series]] = {}
+        for variant in ("5_3_3", "14_3_3", "21_5_5"):
+            k_col, d_col = f"STOCHK_{variant}", f"STOCHD_{variant}"
+            if k_col not in df_ind.columns or d_col not in df_ind.columns:
+                continue
+            k = pd.to_numeric(df_ind[k_col], errors="coerce")
+            d = pd.to_numeric(df_ind[d_col], errors="coerce")
+            spread = k - d
+            previous = spread.shift(1)
+            cross = pd.Series(None, index=df_ind.index, dtype="object")
+            cross.loc[previous.notna() & (previous <= 0) & (spread > 0)] = "Bullish"
+            cross.loc[previous.notna() & (previous >= 0) & (spread < 0)] = "Bearish"
+            stoch_kd_context_by_display_key[f"STOCH_{variant}"] = {
+                "cross": cross,
+                "prior_k": k.shift(1),
+                "prior_d": d.shift(1),
+            }
+
         # CCI context-only event truth.
         #
         # These series are derived from full df_ind history before the
@@ -4613,6 +4736,33 @@ class DatabaseIntegratedTechnicalCalculator:
                             extras["elder_ray_divergence"] = str(
                                 raw_divergence
                             )
+
+                # STOCH awareness-only divergence metadata. No score, pivot,
+                # or event recomputation occurs in the adapter/UI layer.
+                if eng_name == "Stochastic":
+                    kd_context = stoch_kd_context_by_display_key.get(display_key, {})
+                    if kd_context:
+                        cross = kd_context["cross"].get(dt)
+                        if cross in ("Bullish", "Bearish"):
+                            extras["stoch_kd_crossover"] = cross
+                        for field, source in (
+                            ("stoch_prior_k", "prior_k"),
+                            ("stoch_prior_d", "prior_d"),
+                        ):
+                            prior = kd_context[source].get(dt)
+                            if prior is not None and pd.notna(prior):
+                                extras[field] = float(prior)
+
+                    event_series = stoch_divergence_by_display_key.get(
+                        display_key
+                    )
+                    if (
+                        isinstance(event_series, pd.Series)
+                        and dt in event_series.index
+                    ):
+                        event = event_series.loc[dt]
+                        if isinstance(event, dict):
+                            extras.update(event)
 
                 # CCI context-only transport.
                 #
