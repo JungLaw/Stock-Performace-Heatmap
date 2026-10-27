@@ -65,6 +65,7 @@ from ui.rolling_heatmap_adapter import (
     apply_bbp_divergence_text_overlay,
     apply_bbp_exhaustion_turn_overlay,
     apply_cci_divergence_text_overlay,
+    apply_cci_zero_line_arrow_overlay,
     apply_uo_divergence_symbol_overlay,
     apply_macd_signal_crossover_overlay,
     apply_stoch_divergence_text_overlay,
@@ -4939,6 +4940,7 @@ def _build_scd_hover_customdata(
         "bullbear_context_block",
         "bbp_context_interpretation_block",
         "cci_context_block",
+        "cci_interpretation_block",
         "uo_context_block",
         "rule_block",
         "hma_context_interpretation_block",
@@ -4974,7 +4976,7 @@ def _build_scd_hover_customdata(
     # SCD alone chooses which view-specific opening fields to render.
     if row_key.startswith("MACD_"):
         custom.update(format_macd_hover_presentation(custom))
-    elif row_key.startswith("STOCH_"):
+    elif row_key.startswith(("STOCH_", "CCI_")):
         custom.update(format_stoch_hover_presentation(custom))
         # This is a dedicated STOCH layout: Rule precedes its evidence and
         # interpretation. The adapter has already preserved all six fields.
@@ -5001,6 +5003,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("HMA_")
         or row_key.startswith("UO_")
         or row_key.startswith("MACD_")
+        or row_key.startswith("CCI_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5170,6 +5173,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.scd_macd_context_block}"
         "%{customdata.bbp_context_interpretation_block}"
@@ -5222,6 +5226,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         customdata=customdata,
         x=tickers,
         y=y_labels,
+    )
+
+    apply_cci_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
     )
 
     apply_uo_divergence_symbol_overlay(
@@ -5660,7 +5668,7 @@ def _build_scd_single_indicator_hover_customdata(
     else:
         custom["single_combined_trend_line"] = ""
 
-    if row_key.startswith(("MACD_", "STOCH_")):
+    if row_key.startswith(("MACD_", "STOCH_", "CCI_")):
         def _bold_macd_opening(value: Any, label: str) -> str:
             content = str(value or "")
             prefix = f"{label}:"
@@ -5885,6 +5893,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.dpo_context_block}"
             "%{customdata.bullbear_context_block}"
             "%{customdata.rule_block}"
+            "%{customdata.cci_interpretation_block}"
             "%{customdata.bbp_context_interpretation_block}"
             "%{customdata.notes_block}"
             "%{customdata.definition_block}"
@@ -5933,6 +5942,10 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         customdata=customdata,
         x=tickers,
         y=date_labels,
+    )
+
+    apply_cci_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
     )
 
     apply_uo_divergence_symbol_overlay(

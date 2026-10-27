@@ -18,6 +18,8 @@ from src.ui.indicator_hover_explanations import (
     get_macd_context_interpretation,
     get_stoch_rule_explanation,
     get_stoch_context_interpretation,
+    get_cci_rule_explanation,
+    get_cci_context_interpretation,
 )
 
 import numpy as np
@@ -177,6 +179,30 @@ def format_macd_hover_presentation(customdata: Dict[str, Any]) -> Dict[str, Any]
         # No fabricated interpretation when a semantic guard fails.
         custom["scd_macd_context_block"] = numeric
     return custom
+
+
+def _format_cci_divergence_evidence(direction: str, evidence: dict) -> str:
+    """Render transported five-bar pivot evidence without recomputing events."""
+    if direction not in ("Bullish", "Bearish"):
+        return str(direction)
+    try:
+        prior = pd.Timestamp(evidence["cci_divergence_prior_pivot_date"])
+        current = pd.Timestamp(evidence["cci_divergence_current_pivot_date"])
+        dates = f"{prior.month}/{prior.day}→{current.month}/{current.day}"
+        p0 = float(evidence["cci_divergence_prior_price"])
+        p1 = float(evidence["cci_divergence_current_price"])
+        c0 = float(evidence["cci_divergence_prior_cci"])
+        c1 = float(evidence["cci_divergence_current_cci"])
+        import math
+        if not all(math.isfinite(x) for x in (p0, p1, c0, c1)):
+            return direction
+        label = "lows" if direction == "Bullish" else "highs"
+        return (
+            f"{direction} ({dates}): Price {label}: "
+            f"${p0:.2f}→${p1:.2f}|CCI: {c0:.2f} → {c1:.2f}"
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return direction
 
 
 def _format_uo_hover_date(value: Any) -> str:
@@ -3228,6 +3254,7 @@ def build_plotly_heatmap_inputs(
                         "hma_post_signal_block": "",
                         "hma_context_interpretation_block": "",
                         "cci_context_block": "",
+                        "cci_interpretation_block": "",
                         "uo_context_block": "",
                         "uo_semantic_state": None,
                         "uo_divergence_direction": None,
@@ -3447,6 +3474,7 @@ def build_plotly_heatmap_inputs(
             elder_ray_divergence_value = None
 
             cci_context_block = ""
+            cci_interpretation_block = ""
             cci_divergence_value = None
             cci_zero_line_crossover_value = None
 
@@ -4984,7 +5012,71 @@ def build_plotly_heatmap_inputs(
                     )
                     rule_text = ""
 
+            # CCI approved display semantics: do not change score, raw value,
+            # existing delta/percentage fields, or upstream event detection.
+            if key.startswith("CCI_") and isinstance(extra_map, dict):
+                try:
+                    cci_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    cci_period = -1
+                cci_state = score_to_rule_key(s)
+                cci_evidence_keys = (
+                    "cci_divergence_prior_pivot_date",
+                    "cci_divergence_current_pivot_date",
+                    "cci_divergence_prior_price",
+                    "cci_divergence_current_price",
+                    "cci_divergence_prior_cci",
+                    "cci_divergence_current_cci",
+                    "cci_divergence_price_basis",
+                )
+                cci_pivots = {
+                    field: extra_map[field] for field in cci_evidence_keys
+                    if field in extra_map
+                }
+                cci_rule = get_cci_rule_explanation(
+                    cci_period, cci_state, s, all_state_rules, v
+                )
+                cci_context = get_cci_context_interpretation(
+                    cci_period, cci_state, s, all_state_rules, v,
+                    extra_map.get("cci_prior_value"),
+                    cci_divergence_value, cci_zero_line_crossover_value,
+                    cci_pivots,
+                )
+                if cci_rule:
+                    rule_text = cci_rule
+                if cci_context is not None and cci_rule:
+                    level, development, bottom_line = cci_context
+                    divergence_display = (
+                        _format_cci_divergence_evidence(
+                            cci_divergence_value, cci_pivots
+                        ) if cci_divergence_value is not None else "Unavailable"
+                    )
+                    crossover_display = (
+                        cci_zero_line_crossover_value
+                        if cci_zero_line_crossover_value is not None
+                        else "Unavailable"
+                    )
+                    cci_interpretation_block = (
+                        "<b>Context Interpretation:</b><br>"
+                        f"<b>Divergence:</b> {divergence_display}<br>"
+                        f"<b>Zero-line Crossover:</b> {crossover_display}<br>"
+                        "<br><b>CCI Level — Relative Position</b><br>"
+                        + _wrap_hover_text(level, width=80)
+                        + "<br><b>Momentum — Current Development</b><br>"
+                        + _wrap_hover_text(development, width=80)
+                        + "<br><b>Bottom-line</b><br>"
+                        + _wrap_hover_text(bottom_line, width=80)
+                        + "<br>"
+                    )
+                    cci_context_block = ""  # Replaced by approved ordering.
+                    # Keep generic fields unchanged for every other indicator.
+                    signal_line = str(signal_line).removeprefix("<br>")
+                    delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
+                    trend_line = _bold_hover_prefix(trend_line, "Trend")
             rule_block = _format_hover_block("Rule", rule_text, width=80)
+            if cci_interpretation_block:
+                rule_block = _compact_hover_rule(rule_block)
+                rule_block = rule_block.removeprefix("<br>")
             notes_block = _format_hover_block("Notes", rule_notes, width=72)
             definition_block = _format_hover_block("Definition", definition, width=72)
             how_to_read_block = _format_hover_block("How to Read", how_to_read, width=72)
@@ -5912,15 +6004,6 @@ def build_plotly_heatmap_inputs(
                 else format_cell_value(key, v)
             )
 
-            if key.startswith("CCI_") and cell_text:
-                if cci_zero_line_crossover_value == "Uptrend Bias":
-                    cell_text = f"{cell_text} ▲"
-                elif (
-                    cci_zero_line_crossover_value
-                    == "Downtrend Bias"
-                ):
-                    cell_text = f"{cell_text} ▼"
-
             if key.startswith("BullBearPower_") and cell_text:
                 if elder_ray_setup_value == "Bullish":
                     cell_text = f"{cell_text} ▲"
@@ -6038,6 +6121,7 @@ def build_plotly_heatmap_inputs(
                     "dpo_context_block": dpo_context_block,
 
                     "cci_context_block": cci_context_block,
+                    "cci_interpretation_block": cci_interpretation_block,
                     "cci_divergence": cci_divergence_value,
                     "cci_zero_line_crossover": (
                         cci_zero_line_crossover_value
@@ -6375,6 +6459,45 @@ def apply_cci_divergence_text_overlay(
                 showlegend=False,
             )
         )
+
+def apply_cci_zero_line_arrow_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Render black event-only CCI zero-line arrows independently of the number.
+
+    The divergence text overlay colors only the numeric value. This annotation
+    does not modify heatmap scores, text, customdata or hover behavior.
+    """
+    if not fig.data:
+        return
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("CCI_"):
+                continue
+            event = cell.get("cci_zero_line_crossover")
+            if event == "Uptrend Bias":
+                symbol = "▲"
+            elif event == "Downtrend Bias":
+                symbol = "▼"
+            else:
+                continue
+
+            fig.add_annotation(
+                x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                text=symbol, showarrow=False, xshift=29, yshift=0,
+                xanchor="center", yanchor="middle",
+                font=dict(size=12, color="black"),
+                captureevents=False,
+            )
 
 
 def apply_stoch_divergence_text_overlay(
@@ -7099,7 +7222,7 @@ def make_rolling_heatmap_figure(
     for row_idx, row_key in enumerate(hm.row_keys):
         if row_idx >= len(hover_customdata):
             continue
-        if not str(row_key).startswith(("STOCH_", "MACD_")):
+        if not str(row_key).startswith(("STOCH_", "MACD_", "CCI_")):
             continue
         for cell in hover_customdata[row_idx]:
             if not isinstance(cell, dict):
@@ -7107,7 +7230,9 @@ def make_rolling_heatmap_figure(
             cell["scd_value_line"] = (
                 f"Value: {cell.get('formatted_value', '')}<br>"
             )
-            if str(row_key).startswith("MACD_"):
+            if str(row_key).startswith("CCI_"):
+                cell.update(format_stoch_hover_presentation(cell))
+            elif str(row_key).startswith("MACD_"):
                 presented = format_macd_hover_presentation(cell)
                 cell.update(presented)
                 cell["macd_context_block"] = ""
@@ -7149,6 +7274,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.macd_context_block}"
         "%{customdata.macd_interpretation_block}"
@@ -7201,6 +7327,10 @@ def make_rolling_heatmap_figure(
         customdata=hm.customdata,
         x=hm.x,
         y=hm.y,
+    )
+
+    apply_cci_zero_line_arrow_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 
     apply_uo_divergence_symbol_overlay(

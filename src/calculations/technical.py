@@ -3416,6 +3416,11 @@ class DatabaseIntegratedTechnicalCalculator:
         # Neither context changes CCI rule-engine scores.
         cci_divergence_by_display_key: Dict[str, pd.Series] = {}
         cci_zero_line_crossover_by_display_key: Dict[str, pd.Series] = {}
+        # Event evidence is stored at the confirmation date, never the pivot date.
+        cci_divergence_evidence_by_display_key: Dict[
+            str, Dict[Any, Dict[str, Any]]
+        ] = {}
+        cci_prior_value_by_display_key: Dict[str, pd.Series] = {}
 
         # Reuse the class-level five-bar pivot implementation so BBP, CCI,
         # and UO share one structural definition. Existing BBP/CCI code below
@@ -3654,6 +3659,7 @@ class DatabaseIntegratedTechnicalCalculator:
             # CCI zero-line crossover
             # ----------------------------------------------------------
             prior_cci = cci.shift(1)
+            cci_prior_value_by_display_key[display_key] = prior_cci
             zero_cross_valid = (
                 cci.notna()
                 & prior_cci.notna()
@@ -3722,6 +3728,8 @@ class DatabaseIntegratedTechnicalCalculator:
 
             bullish_confirmation_positions: set[int] = set()
             bearish_confirmation_positions: set[int] = set()
+            # Each record reuses the exact pivot pair that qualified the event.
+            event_evidence: Dict[int, Dict[str, Any]] = {}
 
             first_bullish_evaluable_position: int | None = None
             first_bearish_evaluable_position: int | None = None
@@ -3767,6 +3775,22 @@ class DatabaseIntegratedTechnicalCalculator:
                     bullish_confirmation_positions.add(
                         confirmation_pos
                     )
+                    if all(np.isfinite(float(value)) for value in (
+                        previous_price, current_price, previous_cci, current_cci
+                    )):
+                        event_evidence[confirmation_pos] = {
+                            "cci_divergence_prior_pivot_date": pd.Timestamp(
+                                df_ind.index[previous_pos]
+                            ).date().isoformat(),
+                            "cci_divergence_current_pivot_date": pd.Timestamp(
+                                df_ind.index[current_pos]
+                            ).date().isoformat(),
+                            "cci_divergence_prior_price": float(previous_price),
+                            "cci_divergence_current_price": float(current_price),
+                            "cci_divergence_prior_cci": float(previous_cci),
+                            "cci_divergence_current_cci": float(current_cci),
+                            "cci_divergence_price_basis": "lows",
+                        }
 
             for previous_pos, current_pos in zip(
                 high_positions[:-1],
@@ -3809,6 +3833,22 @@ class DatabaseIntegratedTechnicalCalculator:
                     bearish_confirmation_positions.add(
                         confirmation_pos
                     )
+                    if all(np.isfinite(float(value)) for value in (
+                        previous_price, current_price, previous_cci, current_cci
+                    )):
+                        event_evidence[confirmation_pos] = {
+                            "cci_divergence_prior_pivot_date": pd.Timestamp(
+                                df_ind.index[previous_pos]
+                            ).date().isoformat(),
+                            "cci_divergence_current_pivot_date": pd.Timestamp(
+                                df_ind.index[current_pos]
+                            ).date().isoformat(),
+                            "cci_divergence_prior_price": float(previous_price),
+                            "cci_divergence_current_price": float(current_price),
+                            "cci_divergence_prior_cci": float(previous_cci),
+                            "cci_divergence_current_cci": float(current_cci),
+                            "cci_divergence_price_basis": "highs",
+                        }
 
             cci_divergence = pd.Series(
                 pd.NA,
@@ -3859,10 +3899,15 @@ class DatabaseIntegratedTechnicalCalculator:
                 cci_divergence.iloc[
                     confirmation_pos
                 ] = pd.NA
+                event_evidence.pop(confirmation_pos, None)
 
             cci_divergence_by_display_key[
                 display_key
             ] = cci_divergence
+            cci_divergence_evidence_by_display_key[display_key] = {
+                df_ind.index[position]: evidence
+                for position, evidence in event_evidence.items()
+            }
 
         # VWMA context-only hover truth.
         #
@@ -4766,11 +4811,16 @@ class DatabaseIntegratedTechnicalCalculator:
 
                 # CCI context-only transport.
                 #
-                # Divergence and zero-line crossover truth are derived above
-                # from full chronological history. The payload carries only
-                # the already-resolved labels; downstream adapter/UI layers
-                # must not recalculate either event.
+                # Divergence, supporting pivot evidence, previous-session CCI,
+                # and zero-line truth are derived above from full history.
+                # Downstream adapter/UI layers must not recalculate events.
                 if eng_name == "CCI":
+                    prior_series = cci_prior_value_by_display_key.get(display_key)
+                    if isinstance(prior_series, pd.Series) and dt in prior_series.index:
+                        prior_value = prior_series.loc[dt]
+                        if pd.notna(prior_value) and np.isfinite(prior_value):
+                            extras["cci_prior_value"] = float(prior_value)
+
                     divergence_series = (
                         cci_divergence_by_display_key.get(
                             display_key
@@ -4787,6 +4837,12 @@ class DatabaseIntegratedTechnicalCalculator:
                             extras["cci_divergence"] = str(
                                 raw_divergence
                             )
+                            if raw_divergence in ("Bullish", "Bearish"):
+                                evidence = cci_divergence_evidence_by_display_key.get(
+                                    display_key, {}
+                                ).get(dt)
+                                if isinstance(evidence, dict):
+                                    extras.update(evidence)
 
                     zero_cross_series = (
                         cci_zero_line_crossover_by_display_key.get(

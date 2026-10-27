@@ -54,7 +54,19 @@ The Signal is therefore a **persistent current-state classification**, not a one
 
 ---
 
-### Signal, Divergence, Zero-Line Crossover - the 3  layers
+## Signal, Divergence, Zero-Line Crossover - the 3  layers
+
+$\large{\textsf{Legend:}}$
+
+| Element         | Meaning                    |
+| --------------- | -------------------------- |
+| Cell background | Existing five-state Signal |
+| ${\textcolor{blue}{\textsf{Blue number}}}$    | Bullish divergence         |
+| ${\textcolor{Red}{\textsf{Red number}}}$      | Bearish divergence         |
+| ▲         | CCI crossed above zero     |
+| ▼         | CCI crossed below zero     |
+
+---
 
 CCI now exposes three different pieces of information.
 
@@ -75,18 +87,52 @@ CCI Divergence and CCI Zero-Line Crossover are **independent context**.
 They do not change the primary CCI score.
 
 ---
-#### Interpreting 'Signal', 'Divergence', 'Zero-Line Crossover' together
+### Understanding each of the 3 Information Layers
+(:small[[Parent](#signal-divergence-zero-line-crossover-the-3-layers)])
 
-| Signal          | CCI Divergence | Zero-Line Crossover  | Beginner interpretation                                                                                                                                                                                      |
+| Evidence           | What we may conclude                                                            | What we must not conclude            |
+| ------------------ | ------------------------------------------------------------------------------- | ------------------------------------ |
+| [Strong Buy](#strong-buy-2) / [Buy](#buy-1)   | CCI is unusually low; possible rebound opportunity under the contrarian model   | A rebound has started                |
+| [Strong Sell](#strong-sell-2) / [Sell](#sell-1) | CCI is unusually high; possible pullback under the contrarian model             | A decline has started                |
+| [Neutral](#neutral-0)            | CCI has not reached either extreme threshold                                    | Nothing noteworthy is happening      |
+| [Bullish divergence](#bullish-divergence) | Price made a lower confirmed swing low while CCI was higher at that newer low   | CCI necessarily rose today           |
+| [Bearish divergence](#bearish-divergence) | Price made a higher confirmed swing high while CCI was lower at that newer high | CCI necessarily fell today           |
+| [Uptrend bias](#uptrend-bias) ▲     | CCI crossed from zero or below to above zero today                              | A sustained uptrend is established   |
+| [Downtrend bias](#downtrend-bias) ▼   | CCI crossed from zero or above to below zero today                              | A sustained downtrend is established |
+
+---
+
+### Interpreting the 'Divergence' & 'Crossover'
+(:small[[Parent](#signal-divergence-zero-line-crossover-the-3-layers)])
+
+| Divergence | Zero-line event | Interpretation                                                                  |
+| ---------- | --------------- | ------------------------------------------------------------------------------- |
+| $\large{\textcolor{blue}{\textsf{Bullish}}}$    | Uptrend ▲       | Two different observations provide bullish evidence                             |
+| $\large{\textcolor{blue}{\textsf{Bullish}}}$    | Downtrend ▼     | Mixed: bullish price/CCI divergence, but CCI just crossed downward              |
+| $\large{\textcolor{Red}{\textsf{Bearish}}}$    | Uptrend ▲       | Mixed: bearish price/CCI divergence, but CCI just crossed upward                |
+| $\large{\textcolor{Red}{\textsf{Bearish}}}$    | Downtrend ▼     | Two different observations provide bearish evidence                             |
+| $\large{\textcolor{blue}{\textsf{Bullish}}}$    | None            | A bullish divergence was confirmed; no fresh zero-line crossover                |
+| $\large{\textcolor{Red}{\textsf{Bearish}}}$    | None            | A bearish divergence was confirmed; no fresh zero-line crossover                |
+| None       | Uptrend ▲       | CCI crossed upward; no new confirmed divergence                                 |
+| None       | Downtrend ▼     | CCI crossed downward; no new confirmed divergence                               |
+| None       | None            | Neither event occurred; current CCI level and daily movement remain informative |
+
+---
+### Interpreting 'Signal', 'Divergence', 'Zero-Line Crossover' together
+(:small[[Parent](#signal-divergence-zero-line-crossover-the-3-layers)])
+
+| Signal          | [Divergence](#cci-divergence) | [Zero-line Crossover](#cci-zero-line-crossover)  | Beginner interpretation                                                                                                                                                                                      |
 | --------------- | -------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Strong Buy**  | **Bullish**    | None                 | CCI is severely downside-stretched, and a confirmed lower price low occurred with a higher CCI reading. **The extreme and divergence both point toward possible downside exhaustion.**                       |
-| **Strong Buy**  | None           | **Uptrend Bias ▲**   | CCI remains severely stretched, but it has just crossed above zero. **The primary extreme and the newest momentum transition both favor a rebound interpretation.**                                          |
-| **Strong Buy**  | **Bearish**    | **Downtrend Bias ▼** | CCI is severely downside-stretched, but the newest secondary context remains bearish. **The market is stretched enough to raise rebound potential, while recent momentum context still argues for caution.** |
-| **Buy**         | **Bullish**    | None                 | CCI is materially depressed and price/CCI swing behavior also suggests downside momentum is weakening. **Two independent forms of evidence point toward rebound risk.**                                      |
-| **Neutral**     | **Bullish**    | **Uptrend Bias ▲**   | CCI itself is no longer extreme, but a confirmed bullish divergence and fresh move through zero provide positive momentum context. **The score is Neutral even though secondary context is constructive.**   |
-| **Neutral**     | **Bearish**    | **Downtrend Bias ▼** | CCI is not statistically extreme, but both secondary layers are warning about weakening momentum.                                                                                                            |
-| **Sell**        | **Bearish**    | None                 | CCI is materially upside-stretched while the latest confirmed price high was reached with weaker CCI. **The extreme and divergence both raise pullback risk.**                                               |
-| **Strong Sell** | **Bullish**    | **Uptrend Bias ▲**   | CCI is severely upside-stretched, but recent secondary context remains positive. **The primary contrarian warning and current momentum evidence disagree; neither should erase the other.**                  |
+| **Strong Buy**  | **[Bullish](#bullish-divergence)**    | None                 | CCI is severely downside-stretched, and a confirmed lower price low occurred with a higher CCI reading. **The extreme and divergence both point toward possible downside exhaustion.**                       |
+| **Strong Buy**  | None           | None                 | CCI is severely downside-stretched, with no new confirmed divergence or zero-line crossover. **The primary Signal describes an extreme, not evidence that a rebound has started.**                                 |
+| **Strong Buy**  | **[Bearish](#bearish-divergence)**    | **[Downtrend bias](#downtrend-bias)** | CCI is severely downside-stretched, but the newest secondary context remains bearish. **The market is stretched enough to raise rebound potential, while recent momentum context still argues for caution.** |
+| **Buy**         | ${\textcolor{blue}{\textsf{Bullish}}}$    | None                 | CCI is materially depressed and price/CCI swing behavior also suggests downside momentum is weakening. **Two independent forms of evidence point toward rebound risk.**                                      |
+| **Neutral**     | ${\textcolor{blue}{\textsf{Bullish}}}$    | **[Uptrend bias](#uptrend-bias)** ▲   | CCI itself is no longer extreme, but a confirmed bullish divergence and fresh move through zero provide positive momentum context. **The score is Neutral even though secondary context is constructive.**   |
+| **Neutral**     | ${\textcolor{Red}{\textsf{Bearish}}}$    | **Downtrend Bias ▼** | CCI is not statistically extreme, but both secondary layers are warning about weakening momentum.                                                                                                            |
+| **Sell**        | ${\textcolor{Red}{\textsf{Bearish}}}$    | None                 | CCI is materially upside-stretched while the latest confirmed price high was reached with weaker CCI. **The extreme and divergence both raise pullback risk.**                                               |
+| **Strong Sell** | ${\textcolor{blue}{\textsf{Bullish}}}$    | **Uptrend Bias ▲**   | CCI is severely upside-stretched, but recent secondary context remains positive. **The primary contrarian warning and current momentum evidence disagree; neither should erase the other.**                  |
+
+These are representative combinations, not an exhaustive list. A fresh Uptrend Bias requires CCI above zero and therefore cannot occur with a negative-valued Strong Buy or Buy state. Likewise, a fresh Downtrend Bias cannot occur with a positive-valued Sell or Strong Sell state.
 
 This independence is intentional.
 
@@ -111,11 +157,69 @@ The primary Signal answers:
 The context fields answer different questions.
 
 ---
+#### Buy-side Signal Combinations
+(:small[[Parent](#interpreting-signal-divergence-zero-line-crossover-together)])
+
+| Signal     | Divergence | Zero-line   | Plain-English interpretation                                                                                                                                                 |
+| ---------- | ---------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Strong Buy](#strong-buy-2) | [Bullish](#bullish-divergence)    | None        | CCI is unusually low, while the confirmed price/CCI divergence suggests selling pressure may be weakening. Possible rebound evidence, but no fresh upward zero-line crossing |
+| Strong Buy | None       | None        | CCI remains unusually low, but neither a divergence nor a zero-line crossing was newly confirmed. The extreme alone does not establish a reversal                            |
+| Strong Buy | None       | [Downtrend](#downtrend-bias) ▼ | CCI is extremely low and has just crossed below zero. The latest movement remains downward despite the contrarian rebound potential                                          |
+| Strong Buy | [Bearish](#bearish-divergence)    | Downtrend ▼ | CCI is extremely low, but both secondary events are bearish. Rebound potential exists without supporting reversal evidence                                                   |
+| Strong Buy | ${\textcolor{blue}{\textsf{Bullish}}}$    | Downtrend ▼ | Bullish divergence and a downward zero-line crossover disagree. One historical comparison suggests weakening downside pressure, while today's crossover is negative          |
+| [Buy](#buy-1)        | ${\textcolor{blue}{\textsf{Bullish}}}$    | None        | CCI is unusually low and bullish divergence adds possible rebound evidence, although no fresh zero-line crossing occurred                                                    |
+| Buy        | ${\textcolor{blue}{\textsf{Bullish}}}$    | Downtrend ▼ | CCI is unusually low, but bearish secondary evidence suggests the downward movement may not yet be finished                                                                  |
+
+**How to Read a representative row**:
+
+Consider:
+
+$${\textsf{Strong Buy + Bearish Divergence + Downtrend ▼}}$$
+
+This is the combination documented for `AAPL CCI(14), July 31, 2026`.
+
+**It means three things**:
+1. The CCI reading of −208.21 qualifies as Strong Buy because it is extremely low.
+2. Separately, a bearish price/CCI divergence was confirmed using earlier price swings.
+3. On the current observation, CCI also crossed from nonnegative to negative territory.
+
+**Bottom-line**: The primary model flags a possible rebound opportunity because CCI is so low, but the two newest events remain bearish. There is no basis for claiming a bullish reversal has begun.
+
+#### Neutral Signal Combinations
+(:small[[Parent](#interpreting-signal-divergence-zero-line-crossover-together)])
+
+
+| Signal  | Divergence | Zero-line   | Plain-English interpretation                                                                             |
+| ------- | ---------- | ----------- | -------------------------------------------------------------------------------------------------------- |
+| [Neutral](#neutral-0) | ${\textcolor{blue}{\textsf{Bullish}}}$    | Uptrend ▲   | Both secondary events offer positive evidence, even though CCI hasn't reached a Buy or Sell threshold    |
+| Neutral | ${\textcolor{Red}{\textsf{Bearish}}}$    | Downtrend ▼ | Both secondary events are negative, despite the primary Signal remaining Neutral                         |
+| Neutral | ${\textcolor{blue}{\textsf{Bullish}}}$    | Downtrend ▼ | Conflicting evidence: the confirmed divergence is bullish, but today's zero-line crossing is downward    |
+| Neutral | ${\textcolor{Red}{\textsf{Bearish}}}$    | Uptrend ▲   | Conflicting evidence: bearish divergence accompanies an upward zero-line crossing                        |
+| Neutral | None       | Uptrend ▲   | CCI has moved above zero. Upward momentum is improving without an extreme reading or fresh divergence    |
+| Neutral | None       | Downtrend ▼ | CCI has moved below zero. Downward momentum is developing without an extreme reading or fresh divergence |
+
+#### Sell-side Signal Combinations
+(:small[[Parent](#interpreting-signal-divergence-zero-line-crossover-together)])
+
+| Signal      | Divergence | Zero-line | Plain-English interpretation                                                                                                                |
+| ----------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Sell](#sell-1)        | [Bearish](#bearish-divergence)   | None      | CCI is unusually high, and bearish divergence raises the possibility of weakening upward momentum                                           |
+| Sell        | ${\textcolor{Red}{\textsf{Bearish}}}$    | [Uptrend](#uptrend-bias) ▲ | Mixed evidence: bearish divergence suggests upward momentum may be weakening, but today's CCI crossed upward                                |
+| Sell        | [Bullish](#bullish-divergence)    | Uptrend ▲ | Positive secondary evidence conflicts with the Sell classification. The unusually high reading does not establish that a pullback has begun |
+| [Strong Sell](#strong-sell-2) | ${\textcolor{Red}{\textsf{Bearish}}}$    | None      | CCI is extremely high, and bearish divergence provides supporting evidence for possible pullback risk                                       |
+| Strong Sell | ${\textcolor{blue}{\textsf{Bullish}}}$    | Uptrend ▲ | CCI is extremely high, but both secondary events are bullish. The contrarian warning and recent momentum evidence disagree                  |
+| Strong Sell | ${\textcolor{blue}{\textsf{Bullish}}}$    | Uptrend ▲ | Mixed evidence: confirmed bearish divergence accompanies a fresh upward crossover while CCI remains extremely high                          |
+
+
+
+---
 ${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
 
 ## CCI — brief overview
+(:small[[Back to top](#summary-cci-signals)])
+
 The Commodity Channel Index (CCI) measures how far the market's current **typical price** has moved away from its recent statistical average.
 
 Despite its name, CCI is not limited to commodities. It is widely used with stocks, ETFs, futures, currencies, and other traded instruments.
@@ -292,6 +396,7 @@ ${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 ---
 
 ## CCI Rule Translation
+(:small[[Back to top](#summary-cci-signals)])
 
 CCI(10), CCI(14), and CCI(20) use the same rule structure.
 
@@ -572,6 +677,7 @@ ${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 ---
 
 ## CCI Divergence
+(:small[[Back to top](#summary-cci-signals)])
 
 CCI Divergence compares **confirmed price swings** with the CCI values observed at those same price pivots.
 
@@ -619,7 +725,8 @@ CCI at new swing high < CCI at prior swing high
 
 ---
 
-### Bullish CCI Divergence
+### Bullish Divergence
+(:small[[Back to top](#summary-cci-signals)])
 
 Suppose price forms:
 
@@ -673,7 +780,7 @@ It is a **bullish warning / rebound context**, not proof that price must rise ne
 
 ---
 
-### Bearish CCI Divergence
+### Bearish Divergence
 
 Suppose price forms:
 
@@ -765,6 +872,49 @@ to:
 Those are different concepts.
 
 The project keeps them separate.
+
+---
+
+### Understanding pivot dates and divergence confirmation dates
+
+The two dates in the compact hover's `Divergence` field identify **the price pivots being compared**, not the date on which the event first becomes visible. Each ticker has its own history of confirmed price swings, so two tickers can have different earlier pivots and still confirm divergence on the same day.
+
+| Term | Meaning in this app |
+| --- | --- |
+| **Previous (prior) pivot date** | Date of the earlier confirmed price swing high (bearish) or swing low (bullish) used for comparison. |
+| **New/current pivot date** | Date of the newer price swing high or low being tested against the previous pivot. The CCI reading is sampled **on this pivot date**, not on the later event date. |
+| **Pivot confirmation date** | Two trading sessions after the newer pivot, when the complete five-bar window allows that swing to be confirmed. |
+| **Divergence event date** | The session on which the app reports the confirmed divergence in the heatmap. For this five-bar implementation, it is the newer pivot's confirmation date (`t + 2 trading sessions`). |
+
+#### Actual comparison: MU and MRVL — CCI(20), September 29, 2026
+
+Both tickers displayed **Bearish** divergence on September 29, but each was compared against its **own** previous confirmed price high:
+
+| Evidence | MU | MRVL |
+| --- | --- | --- |
+| Previous pivot high date | September 9, 2026 | September 22, 2026 |
+| New pivot high date | September 25, 2026 | September 25, 2026 |
+| Price at previous → new pivot | $1,042.40 → $1,108.72 | $266.00 → $267.48 |
+| CCI at previous → new pivot | 167.18 → 135.72 | 160.79 → 126.82 |
+| Confirmation / heatmap event date | **September 29, 2026** | **September 29, 2026** |
+
+**Read MU literally:** Its price made a higher swing high ($1,042.40 → $1,108.72), but its CCI at those two highs moved lower (167.18 → 135.72). That is bearish price/CCI disagreement. MRVL showed the same kind of disagreement, but its earlier pivot was September 22 rather than September 9.
+
+The `9/9→9/25` or `9/22→9/25` in the hover thus means **previous pivot → newer pivot**. The heatmap's `9/29` column means **when the event was confirmed**. These dates serve different purposes.
+
+The five-bar window around the shared newer high was:
+
+| Session | Role |
+| --- | --- |
+| Wed, September 23 | Two sessions before the candidate pivot |
+| Thu, September 24 | One session before the candidate pivot |
+| **Fri, September 25** | **Candidate pivot high (`t`)** |
+| Mon, September 28 | First subsequent confirmation session (`t+1`) |
+| **Tue, September 29** | **Second subsequent confirmation session (`t+2`): pivot and qualifying divergence become confirmable** |
+
+September 29 is not substituted for the September 25 price pivot: its price and CCI reading would answer a different comparison question. The confirmation delay avoids using later data to mark an earlier session as if the event had already been known then (**no backpainting / look-ahead bias**).
+
+For **Bullish** divergence the same timing applies to a pair of price pivot **lows**: a lower newer price low and a higher CCI reading at that low are evaluated when the newer low is confirmed two trading sessions later. Neither direction guarantees an immediate price reversal.
 
 ---
 
@@ -899,6 +1049,7 @@ ${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
 ## CCI Zero-Line Crossover
+(:small[[Back to top](#summary-cci-signals)])
 
 The zero line is CCI's central reference:
 
@@ -1116,15 +1267,16 @@ ${\rightarrow}$ (:small[[Back to top](#summary-cci-signals)])
 
 ---
 ## How to Read the CCI heatmap
+(:small[[Back to top](#summary-cci-signals)])
 
 A useful reading sequence is:
 
 1. **Read the number.** How positive or negative is CCI?
 2. **Read the color / Signal.** Is the current CCI reading materially or severely stretched?
-3. **Check the font color.** Is there a newly confirmed Bullish or Bearish divergence?
-4. **Look for ▲ or ▼.** Did CCI just cross its zero line?
-5. **Open the hover.** Read Signal, CCI Divergence, and CCI Zero-Line Crossover together.
-6. **Ask whether those layers agree or disagree.**
+3. **Check the font color.** Is there a newly confirmed [Bullish](#bullish-divergence) or [Bearish divergence](#bearish-divergence)?
+4. **Look for a black ▲ or ▼.** Did CCI just [cross its zero line](#cci-zero-line-crossover)? The arrow's black color is independent of the number's divergence color.
+5. **Open the hover.** Read the primary Signal and Rule, the compact Divergence and Zero-line Crossover evidence, and Context Interpretation.
+6. **Use the Bottom-line** to distinguish statistical stretch from the latest momentum evidence, especially if the layers disagree.
 
 ---
 
@@ -1162,8 +1314,8 @@ CCI <= -200
 | ---------------------------- | ------------------------------------ | ------------------------------------------------------------------------ |
 | **Printed CCI value**        | Raw CCI reading                      | **How far is CCI from its statistical center?**                          |
 | **Cell background / Signal** | Five-state contrarian classification | **Is that reading normal, materially stretched, or severely stretched?** |
-| **Blue / red number**        | Confirmed CCI divergence             | **Did price make a new swing extreme without CCI confirming it?**        |
-| **▲ / ▼ glyph**              | Zero-line crossover event            | **Did CCI just cross through zero, and in which direction?**             |
+| **Blue / red number**        | Newly confirmed bullish / bearish divergence; color applies to the numeric value only | **Did price make a new swing extreme without CCI confirming it?** |
+| **Black ▲ / ▼ glyph**        | Fresh zero-line crossover event; rendered independently in black | **Did CCI just cross through zero, and in which direction?** |
 
 That distinction is fundamental.
 
@@ -1178,11 +1330,45 @@ with:
 ```text
 green Strong Buy background
 red number
+separate black ▼ arrow
 ```
 
 without contradiction.
 
 Each visual channel is describing something different.
+
+---
+
+### Understanding the CCI hover
+
+The CCI hover separates **observed facts**, the primary **five-state Rule**, and the combined **Context Interpretation**. It keeps the existing day-over-day value and percentage information. The order is:
+
+| Hover field / heading | How to read it |
+| --- | --- |
+| **Value** | Current CCI reading, with existing applicable price/volume context. |
+| **Δ vs prior day** | The existing CCI change and percentage display; this is day-over-day movement, not a pivot comparison. |
+| **Trend** | Current CCI direction and the existing applicable price/volume trends. |
+| **Signal** | Primary persistent five-state classification from the approved CCI thresholds. |
+| **Rule** | Approved plain-English explanation of why this primary Signal applies. |
+| **Context Interpretation** | Heading introducing independent observations and their combined interpretation. |
+| **Divergence** | Newly confirmed Bullish, Bearish, or None. On an event, `previous pivot→new pivot` dates, price highs/lows and CCI values appear on one line. These are **pivot dates** (see the date explanation in `CCI Divergence`). |
+| **Zero-line Crossover** | Fresh Uptrend Bias, Downtrend Bias, or None; not a persistent above/below-zero state. |
+| **CCI Level — Relative Position** | Interprets the actual CCI level against the project's approved boundaries (−200, −150, +150, +200). |
+| **Momentum — Current Development** | Explains the latest CCI movement and any verified divergence/crossover evidence; distinguishes missing evidence from an evaluated `None`. |
+| **Bottom-line** | Integrates the primary contrarian state and secondary momentum context without treating either as a guarantee of reversal. |
+| **Notes, Definition, How to Read** | Existing educational information remains available after the interpretation. |
+
+#### Validated counter-context example: AAPL CCI(14), July 31, 2026
+
+The actual production observation had CCI **−208.21**, prior-session CCI approximately **+43.12**, **Strong Buy**, a confirmed **Bearish** divergence, and a fresh **Downtrend Bias**. Its event evidence was:
+
+`Divergence: Bearish (7/17→7/29): Price highs: $334.99→$344.57|CCI: 132.47 → 127.81`
+
+The two pivot dates (July 17 and July 29) are distinct from the **July 31 event date**, when the newer high had two subsequent trading sessions for confirmation. The value was red because of the bearish divergence; the separate ▼ was black because of the zero-line crossover. Its background still represented **Strong Buy**.
+
+**CCI Level — Relative Position:** −208.21 is at or below −200, so the primary contrarian state is Strong Buy. **Momentum — Current Development:** CCI fell from approximately +43.12 to −208.21, crossing below zero; the newly confirmed divergence is also bearish. **Bottom-line:** severe downside stretch can raise rebound potential, but the latest momentum evidence is bearish rather than a confirmed rebound.
+
+The interpretation therefore explains **why a Strong Buy cell can coexist with bearish secondary evidence**. It does not rewrite the Signal or alter its score.
 
 ---
 
@@ -1242,7 +1428,7 @@ CCI also registered:
 Downtrend Bias
 ```
 
-so the cell receives:
+so the cell receives a separately rendered **black** arrow:
 
 ```text
 ▼
@@ -1298,7 +1484,7 @@ makes the number blue, while:
 CCI Zero-Line Crossover: Uptrend Bias
 ```
 
-adds:
+adds a separately rendered **black** arrow:
 
 ```text
 ▲
@@ -1635,6 +1821,7 @@ When reading a CCI heatmap cell, ask these questions in order:
 | **5** | Is there an `▲` or `▼`, indicating a zero-line crossover event?                                 |
 | **6** | Do Signal, Divergence, and Zero-Line Crossover agree, or is one providing counter-context?      |
 | **7** | Which CCI period am I looking at—10, 14, or 20—and therefore which horizon is being emphasized? |
+| **8** | What does **Context Interpretation**, especially **Bottom-line**, conclude when the primary Signal and the latest CCI momentum/divergence/crossover evidence are read together? |
 
 The shortest useful summary is:
 
@@ -1733,8 +1920,8 @@ background color
 blue/red number
 → Bullish/Bearish confirmed divergence
 
-▲ / ▼
-→ zero-line crossover event
+black ▲ / ▼ (independent of numeric font color)
+→ fresh zero-line crossover event
 ```
 
 **Verification status:** The adopted CCI implementation completed rule-contract verification, warmup verification, production-path context verification, adapter/UI structural verification, and manual acceptance across the Rolling Heatmap, SCD Multiple Indicators, and SCD Single Indicator views. Date-specific AAPL checks also confirmed combined Signal / Divergence / Zero-Line presentation.

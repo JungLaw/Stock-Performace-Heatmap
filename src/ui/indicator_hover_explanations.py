@@ -1131,3 +1131,300 @@ def get_bbp_exhaustion_hover_explanation(
         ) + "<br>"
     )
     return rule, context
+
+
+# CCI semantic explanations are display-only. Classification, divergence and
+# zero-line events remain owned by the rule engine and technical.py.
+_CCI_PERIODS = frozenset({10, 14, 20})
+_CCI_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_CCI_SCORES = {"strong_buy": 2, "buy": 1, "neutral": 0,
+               "sell": -1, "strong_sell": -2}
+_CCI_RULE_TEXT = {
+    "strong_buy": "CCI is severely depressed relative to its recent norm.",
+    "buy": "CCI is materially depressed, but not at the most extreme project threshold.",
+    "neutral": "CCI is not far enough from its recent norm to trigger the project's contrarian extreme states.",
+    "sell": "CCI is materially overextended relative to its recent norm.",
+    "strong_sell": "CCI is severely overextended relative to its recent norm.",
+}
+_CCI_PIVOT_FIELDS = (
+    "cci_divergence_prior_pivot_date", "cci_divergence_current_pivot_date",
+    "cci_divergence_prior_price", "cci_divergence_current_price",
+    "cci_divergence_prior_cci", "cci_divergence_current_cci",
+    "cci_divergence_price_basis",
+)
+
+
+def _approved_cci_rules(period: int) -> dict[str, str]:
+    col = f"CCI_{period}"
+    return {
+        "strong_buy": f"{col} <= -200",
+        "buy": f"{col} <= -150 and {col} > -200",
+        "neutral": "",
+        "sell": f"{col} > 150 and {col} < 200",
+        "strong_sell": f"{col} >= 200",
+    }
+
+
+def _cci_numeric(value: object) -> Optional[float]:
+    import math
+    if isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _cci_qualifies(state: str, value: float) -> bool:
+    if state == "strong_buy":
+        return value <= -200
+    if state == "buy":
+        return -200 < value <= -150
+    if state == "neutral":
+        return -150 < value <= 150
+    if state == "sell":
+        return 150 < value < 200
+    if state == "strong_sell":
+        return value >= 200
+    return False
+
+
+def get_cci_rule_explanation(
+    period: int,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    cci_value: object,
+) -> Optional[str]:
+    """Describe the supplied CCI classification only when its evidence agrees.
+
+    Fingerprint all five live expressions, including empty Neutral fallback;
+    never infer a state, mutate a score, or interpret an unapproved rulebook.
+    """
+    if period not in _CCI_PERIODS or state not in _CCI_SCORES:
+        return None
+    if isinstance(score, bool) or score != _CCI_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_cci_rules(period)
+    for key in _CCI_STATES:
+        actual = str(active_rules.get(key, "") or "")
+        if key == "neutral":
+            if actual.strip():
+                return None
+        elif _fingerprint(actual) != _fingerprint(approved[key]):
+            return None
+    current = _cci_numeric(cci_value)
+    if current is None or not _cci_qualifies(state, current):
+        return None
+    return _CCI_RULE_TEXT[state]
+
+
+def _cci_event_evidence_valid(direction: str, evidence: Mapping[str, object]) -> bool:
+    """Check transported pivot evidence; do not detect/recompute divergence."""
+    from datetime import date
+    if not isinstance(evidence, Mapping):
+        return False
+    if any(field not in evidence for field in _CCI_PIVOT_FIELDS):
+        return False
+    try:
+        dates = [date.fromisoformat(str(evidence[field])) for field in
+                 _CCI_PIVOT_FIELDS[:2]]
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if dates[0] >= dates[1]:
+        return False
+    numbers = [_cci_numeric(evidence[field]) for field in _CCI_PIVOT_FIELDS[2:6]]
+    if any(value is None for value in numbers):
+        return False
+    p0, p1, c0, c1 = numbers
+    basis = evidence.get("cci_divergence_price_basis")
+    if direction == "Bullish":
+        return basis == "lows" and p1 < p0 and c1 > c0
+    return basis == "highs" and p1 > p0 and c1 < c0
+
+
+def get_cci_context_interpretation(
+    period: int,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    cci_value: object,
+    previous_cci: object,
+    divergence: object,
+    zero_line: object,
+    divergence_evidence: Mapping[str, object] | None = None,
+) -> Optional[tuple[str, str, str]]:
+    """Return (Relative Position, Current Development, Bottom-line).
+
+    The caller supplies upstream-classified state and events. Missing history
+    is not Flat, Neutral or a verified absence of an event. A failed guard
+    returns None so the adapter can retain its existing factual hover.
+    """
+    if get_cci_rule_explanation(period, state, score, active_rules, cci_value) is None:
+        return None
+    if divergence not in (None, "None", "Bullish", "Bearish"):
+        return None
+    if zero_line not in (None, "None", "Uptrend Bias", "Downtrend Bias"):
+        return None
+    current, prior = _cci_numeric(cci_value), _cci_numeric(previous_cci)
+    if zero_line in ("Uptrend Bias", "Downtrend Bias"):
+        if prior is None:
+            return None
+        if zero_line == "Uptrend Bias" and not (prior <= 0 < current):
+            return None
+        if zero_line == "Downtrend Bias" and not (prior >= 0 > current):
+            return None
+    elif prior is not None and zero_line == "None":
+        if prior <= 0 < current or prior >= 0 > current:
+            return None
+    elif prior is None and zero_line == "None":
+        # A reported evaluated absence requires previous-session CCI.
+        return None
+    if divergence in ("Bullish", "Bearish"):
+        if not _cci_event_evidence_valid(divergence, divergence_evidence):
+            return None
+    elif isinstance(divergence_evidence, Mapping) and any(
+        field in divergence_evidence for field in _CCI_PIVOT_FIELDS
+    ):
+        return None
+
+    if state == "strong_buy":
+        level = "CCI is far below zero, in the project's most extreme downside range (CCI <= -200)."
+    elif state == "buy":
+        level = "CCI is unusually low, but has not reached the Strong Buy range (-200 < CCI <= -150)."
+    elif state == "neutral":
+        side = "above" if current > 0 else "below" if current < 0 else "at"
+        level = f"CCI is {side} zero but remains within the project's Neutral range (-150 < CCI <= +150)."
+    elif state == "sell":
+        level = "CCI is unusually high, but has not reached the Strong Sell range (+150 < CCI < +200)."
+    else:
+        level = "CCI is far above zero, in the project's most extreme upside range (CCI >= +200)."
+
+    if prior is None:
+        movement = "Previous-session CCI is unavailable; today's CCI movement cannot be verified."
+        move_sign = 0
+    elif current > prior:
+        move_sign = 1
+        movement = (
+            "CCI rose toward zero today; the negative reading is easing."
+            if current < 0 else
+            "CCI rose above zero today."
+            if prior <= 0 else
+            "CCI rose farther above zero today; upward movement is strengthening."
+        )
+    elif current < prior:
+        move_sign = -1
+        movement = (
+            "CCI fell toward zero today; the positive reading is easing."
+            if current > 0 else
+            "CCI fell below zero today."
+            if prior >= 0 else
+            "CCI fell farther below zero today; the negative reading is deepening."
+        )
+    else:
+        move_sign = 0
+        movement = "CCI was unchanged from the preceding trading session."
+
+    event_text = {
+        ("Bullish", "Uptrend Bias"):
+            "A bullish divergence was confirmed using earlier price lows, and CCI crossed above zero today. Both events provide bullish evidence.",
+        ("Bullish", "Downtrend Bias"):
+            "A bullish divergence was confirmed using earlier price lows, but CCI crossed below zero today. The events point in opposite directions.",
+        ("Bearish", "Uptrend Bias"):
+            "A bearish divergence was confirmed using earlier price highs, but CCI crossed above zero today. The events point in opposite directions.",
+        ("Bearish", "Downtrend Bias"):
+            "A bearish divergence was confirmed using earlier price highs, and CCI crossed below zero today. Both events provide bearish evidence.",
+        ("Bullish", "None"):
+            "A bullish price/CCI divergence was confirmed from earlier price lows; no fresh zero-line crossover occurred.",
+        ("Bearish", "None"):
+            "A bearish price/CCI divergence was confirmed from earlier price highs; no fresh zero-line crossover occurred.",
+        ("None", "Uptrend Bias"):
+            "CCI crossed above zero today; no new confirmed divergence occurred.",
+        ("None", "Downtrend Bias"):
+            "CCI crossed below zero today; no new confirmed divergence occurred.",
+        ("None", "None"):
+            "No new confirmed divergence or zero-line crossover occurred today.",
+    }
+    detail = event_text.get((divergence, zero_line))
+    if detail is None:
+        # Do not turn missing/unevaluable event context into an asserted None.
+        detail_parts = []
+        if divergence in ("Bullish", "Bearish"):
+            detail_parts.append(f"A {divergence.lower()} divergence was confirmed from earlier price pivots.")
+        elif divergence == "None":
+            detail_parts.append("No new divergence was confirmed today.")
+        if zero_line == "Uptrend Bias":
+            detail_parts.append("CCI crossed above zero today.")
+        elif zero_line == "Downtrend Bias":
+            detail_parts.append("CCI crossed below zero today.")
+        elif zero_line == "None":
+            detail_parts.append("No fresh zero-line crossover occurred.")
+        detail = " ".join(detail_parts)
+    development = " ".join(part for part in (movement, detail) if part)
+
+    # Preserve divergent readings. A two-event agreement does not override the
+    # contrarian classifier, and an event confirmed today refers to past pivots.
+    if state in ("strong_buy", "buy"):
+        premise = "CCI is unusually low, suggesting possible rebound potential."
+        if divergence == "Bearish" and zero_line == "Downtrend Bias":
+            conclusion = "However, the newly confirmed divergence and zero-line crossover are bearish. An upward reversal is not established."
+        elif divergence == "Bullish" and zero_line == "Downtrend Bias":
+            conclusion = "Bullish divergence and today's downward zero-line crossing conflict; a rebound has not been confirmed."
+        elif divergence == "Bullish":
+            conclusion = "Bullish divergence provides possible rebound evidence, but an upward reversal has not been confirmed."
+        elif divergence == "Bearish":
+            conclusion = "Bearish divergence conflicts with the rebound setup; a reversal has not been confirmed."
+        elif zero_line == "Downtrend Bias":
+            conclusion = "The fresh downward zero-line crossing points against a rebound; an upward reversal has not been confirmed."
+        elif move_sign > 0:
+            conclusion = "CCI is rising toward recovery, but this alone does not confirm a reversal."
+        elif move_sign < 0:
+            conclusion = "CCI is still falling, so the downside move may not yet be finished."
+        else:
+            conclusion = "No verified fresh momentum improvement establishes a rebound."
+    elif state in ("strong_sell", "sell"):
+        premise = "CCI is unusually high, raising possible pullback risk."
+        if divergence == "Bullish" and zero_line == "Uptrend Bias":
+            conclusion = "Both secondary events are bullish, conflicting with the contrarian Sell warning; a pullback has not been confirmed."
+        elif divergence == "Bearish" and zero_line == "Uptrend Bias":
+            conclusion = "Bearish divergence and today's upward zero-line crossing conflict; a pullback has not been confirmed."
+        elif divergence == "Bearish":
+            conclusion = "Bearish divergence provides possible pullback evidence, but a decline has not been confirmed."
+        elif divergence == "Bullish":
+            conclusion = "Bullish divergence conflicts with the pullback warning; a decline has not been confirmed."
+        elif zero_line == "Uptrend Bias":
+            conclusion = "The fresh upward zero-line crossing points against a pullback; a decline has not been confirmed."
+        elif move_sign < 0:
+            conclusion = "CCI is easing from its high reading, but this alone does not confirm a decline."
+        elif move_sign > 0:
+            conclusion = "CCI is still rising, so the upward move may not yet be finished."
+        else:
+            conclusion = "No verified fresh momentum change establishes a decline."
+    else:
+        premise = "The primary CCI Signal remains Neutral."
+        if divergence == "Bullish" and zero_line == "Uptrend Bias":
+            conclusion = "Bullish divergence and the upward zero-line crossover provide positive secondary evidence worth monitoring."
+        elif divergence == "Bearish" and zero_line == "Downtrend Bias":
+            conclusion = "Bearish divergence and the downward zero-line crossover provide negative secondary evidence worth monitoring."
+        elif (divergence == "Bullish" and zero_line == "Downtrend Bias") or (
+            divergence == "Bearish" and zero_line == "Uptrend Bias"
+        ):
+            conclusion = "The divergence and zero-line crossover conflict; no consistent new direction is established."
+        elif divergence == "Bullish":
+            conclusion = "Bullish divergence provides positive secondary evidence without changing the Neutral classification."
+        elif divergence == "Bearish":
+            conclusion = "Bearish divergence provides negative secondary evidence without changing the Neutral classification."
+        elif zero_line == "Uptrend Bias":
+            conclusion = "The upward zero-line crossing is positive secondary evidence despite the Neutral classification."
+        elif zero_line == "Downtrend Bias":
+            conclusion = "The downward zero-line crossing is negative secondary evidence despite the Neutral classification."
+        elif move_sign > 0:
+            conclusion = "CCI is rising, but no fresh divergence or crossover establishes a qualified directional Signal."
+        elif move_sign < 0:
+            conclusion = "CCI is falling, but no fresh divergence or crossover establishes a qualified directional Signal."
+        else:
+            conclusion = "No fresh directional event is verified from the available evidence."
+    return level, development, premise + " " + conclusion
