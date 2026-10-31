@@ -20,6 +20,9 @@ from src.ui.indicator_hover_explanations import (
     get_stoch_context_interpretation,
     get_cci_rule_explanation,
     get_cci_context_interpretation,
+    get_cmf_rule_explanation,
+    get_cmf_context_interpretation,
+    get_cmf_easing_marker,
 )
 
 import numpy as np
@@ -1346,11 +1349,10 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
             "the canonical CMF value x 100."
         ),
         "how_to_read": (
-            "'+' values -> accumulation pressure; '-' values "
-            "-> distribution pressure.<br>"
+            "'+'=accumulation pressure; '-'=distribution pressure<br>"
             "-10 to +10: Neutral | Above +10: Buy | Below -10: Sell.<br>"
-            "Beyond ±20 becomes Strong only when CMF also strengthens in that "
-            "direction across 2 consecutive moves."
+            "Strong states require CMF beyond ±0.20 "
+            "and continued strengthening across two consecutive moves."
         ),
     },
     "CMF_50": {
@@ -3243,6 +3245,7 @@ def build_plotly_heatmap_inputs(
                         "adx_context_block": "",
                         "stoch_context_block": "",
                         "cmf_context_block": "",
+                        "cmf_interpretation_block": "",
                         "bullbear_context_block": "",
                         "dpo_context_block": "",
                         "band_context_block": "",
@@ -3327,6 +3330,16 @@ def build_plotly_heatmap_inputs(
         for idx, (d_raw, v, s, extra_map) in enumerate(zip(raw_dates, values, scores, row_extras)):
             prev_v = values[idx - 1] if idx > 0 else None
             prev_extra_map = row_extras[idx - 1] if idx > 0 else {}
+
+            # CMF predecessors come from full history, not the visible window.
+            if key.startswith("CMF_") and isinstance(extra_map, dict):
+                true_prior = extra_map.get("cmf_prior_value")
+                if not _is_missing(true_prior):
+                    try:
+                        if np.isfinite(float(true_prior)):
+                            prev_v = float(true_prior)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
 
             # MACD's first displayed observation may have a valid historical
             # predecessor outside the visible window. Use the upstream
@@ -3467,6 +3480,8 @@ def build_plotly_heatmap_inputs(
             stoch_divergence_value = None
             stoch_divergence_evidence = {}
             cmf_context_block = ""
+            cmf_interpretation_block = ""
+            cmf_easing_marker = ""
             bullbear_context_block = ""
             bbp_context_interpretation_block = ""
             bbp_exhaustion_context_block = ""
@@ -4482,53 +4497,36 @@ def build_plotly_heatmap_inputs(
                         f"{alignment_text}<br>"
                     )
 
-            # CMF: Display-scale deltas and directional context.
-            #
-            # Numeric and rule truth remain in canonical raw CMF units
-            # (-1 to +1). This block converts existing values to the
-            # -100 to +100 presentation scale only.
+            # CMF: only historical confirmation belongs before the Rule.
+            # Pressure and static Strong threshold are now explained by the
+            # source-guarded Rule and Context Interpretation respectively.
             if key.startswith("CMF_"):
-                cmf_thresholds = {
-                    "CMF_10": 0.25,
-                    "CMF_21": 0.20,
-                    "CMF_30": 0.175,
-                    "CMF_50": 0.15,
-                }
+                def _finite_cmf_hover(raw: Any) -> Optional[float]:
+                    try:
+                        value = float(raw)
+                        return value if np.isfinite(value) else None
+                    except (TypeError, ValueError, OverflowError):
+                        return None
 
-                cmf_threshold = cmf_thresholds.get(key)
-                cmf_value = None
-                prev_cmf_value = None
+                cmf_value = _finite_cmf_hover(v)
+                prev_cmf_value = _finite_cmf_hover(prev_v)
                 prior_2_cmf_value = None
-
-                try:
-                    if not _is_missing(v):
-                        cmf_value = float(v)
-                    if not _is_missing(prev_v):
-                        prev_cmf_value = float(prev_v)
-                    if idx > 1 and not _is_missing(values[idx - 2]):
-                        prior_2_cmf_value = float(values[idx - 2])
-                except Exception:
-                    cmf_value = None
-                    prev_cmf_value = None
-                    prior_2_cmf_value = None
-
-                parts = []
-
-                if cmf_value is not None:
-                    if cmf_value > 0.10:
-                        pressure_state = "Accumulation"
-                    elif cmf_value < -0.10:
-                        pressure_state = "Distribution"
-                    else:
-                        pressure_state = "Balanced / Neutral"
-
-                    parts.append(f"Pressure: {pressure_state}")
-
-                if cmf_threshold is not None:
-                    parts.append(
-                        "Strong threshold: "
-                        f"±{cmf_threshold * 100.0:g}"
+                prior_3_cmf_value = None
+                prior_4_cmf_value = None
+                if isinstance(extra_map, dict):
+                    prior_2_cmf_value = _finite_cmf_hover(
+                        extra_map.get("cmf_prior2_value")
                     )
+                    # The 4-move Neutral overlay requires real full-history
+                    # predecessors; do not infer these from visible cells.
+                    prior_3_cmf_value = _finite_cmf_hover(
+                        extra_map.get("cmf_prior3_value")
+                    )
+                    prior_4_cmf_value = _finite_cmf_hover(
+                        extra_map.get("cmf_prior4_value")
+                    )
+                if prior_2_cmf_value is None and idx > 1:
+                    prior_2_cmf_value = _finite_cmf_hover(values[idx - 2])
 
                 confirmation = "Not available"
                 if (
@@ -4536,29 +4534,52 @@ def build_plotly_heatmap_inputs(
                     and prev_cmf_value is not None
                     and prior_2_cmf_value is not None
                 ):
-                    if (
-                        cmf_value
-                        > prev_cmf_value
-                        > prior_2_cmf_value
-                    ):
+                    if cmf_value > prev_cmf_value > prior_2_cmf_value:
                         confirmation = "Rising across 2 moves"
-                    elif (
-                        cmf_value
-                        < prev_cmf_value
-                        < prior_2_cmf_value
-                    ):
+                    elif cmf_value < prev_cmf_value < prior_2_cmf_value:
                         confirmation = "Falling across 2 moves"
                     else:
                         confirmation = "Not met"
-
-                parts.append(
-                    f"2-move confirmation: {confirmation}"
+                cmf_context_block = (
+                    f"<b>2-move confirmation:</b> {confirmation}<br>"
                 )
 
-                if parts:
-                    cmf_context_block = (
-                        "<br>" + "<br>".join(parts) + "<br>"
+                # Rules in the shared module must agree with the authoritative
+                # score, all five rulebook expressions and actual predecessor
+                # values before overriding the existing Rule text.
+                try:
+                    cmf_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    cmf_period = -1
+                cmf_state = score_to_rule_key(s)
+                cmf_rule = get_cmf_rule_explanation(
+                    cmf_period, cmf_state, s, all_state_rules,
+                    cmf_value, prev_cmf_value, prior_2_cmf_value,
+                )
+                if cmf_rule:
+                    rule_text = cmf_rule
+                    cmf_easing_marker = get_cmf_easing_marker(
+                        cmf_period, cmf_state, s, all_state_rules,
+                        cmf_value, prev_cmf_value, prior_2_cmf_value,
+                        prior_3_cmf_value, prior_4_cmf_value,
                     )
+                    cmf_context = get_cmf_context_interpretation(
+                        cmf_period, cmf_state, s, all_state_rules,
+                        cmf_value, prev_cmf_value, prior_2_cmf_value,
+                        extra_map.get("cmf_price_current") if isinstance(extra_map, dict) else None,
+                        extra_map.get("cmf_price_prior") if isinstance(extra_map, dict) else None,
+                        extra_map.get("cmf_price_basis") if isinstance(extra_map, dict) else None,
+                    )
+                    if cmf_context is not None:
+                        pressure_text, bottom_text = cmf_context
+                        cmf_interpretation_block = (
+                            "<br><b>Context Interpretation</b><br>"
+                            "<b>CMF Interpretation:</b> "
+                            + _wrap_hover_text(pressure_text, width=80)
+                            + "<br><b>Bottom-line:</b> "
+                            + _wrap_hover_text(bottom_text, width=80)
+                            + "<br>"
+                        )
 
             # DPO: Custom hover content (raw value + deltas)
             if key.startswith("DPO_") and isinstance(extra_map, dict) and extra_map:
@@ -5074,12 +5095,17 @@ def build_plotly_heatmap_inputs(
                     delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
                     trend_line = _bold_hover_prefix(trend_line, "Trend")
             rule_block = _format_hover_block("Rule", rule_text, width=80)
+            if key.startswith("CMF_"):
+                # Compact CMF layout keeps all approved labels on one line.
+                rule_block = _compact_hover_rule(rule_block).removeprefix("<br>")
+                delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
+                trend_line = _bold_hover_prefix(trend_line, "Trend")
             if cci_interpretation_block:
                 rule_block = _compact_hover_rule(rule_block)
                 rule_block = rule_block.removeprefix("<br>")
-            notes_block = _format_hover_block("Notes", rule_notes, width=72)
-            definition_block = _format_hover_block("Definition", definition, width=72)
-            how_to_read_block = _format_hover_block("How to Read", how_to_read, width=72)
+            notes_block = _format_hover_block("Notes", rule_notes, width=80)
+            definition_block = _format_hover_block("Definition", definition, width=78)
+            how_to_read_block = _format_hover_block("How to Read", how_to_read, width=80)
 
             # indicator rows do not use volume hover fields
             volume_block = ""
@@ -6118,6 +6144,8 @@ def build_plotly_heatmap_inputs(
                     "stoch_divergence_evidence": stoch_divergence_evidence,
                     "stoch_kd_crossover": stoch_kd_crossover_value,
                     "cmf_context_block": cmf_context_block,
+                    "cmf_interpretation_block": cmf_interpretation_block,
+                    "cmf_easing_marker": cmf_easing_marker,
                     "dpo_context_block": dpo_context_block,
 
                     "cci_context_block": cci_context_block,
@@ -6165,6 +6193,31 @@ def build_plotly_heatmap_inputs(
         customdata.append(cd_row)
 
     return PlotlyHeatmapInputs(z=z, text=text, customdata=customdata, x=x, y=y, row_keys=row_keys)
+
+
+def build_cmf_easing_heatmap_text(
+    text: List[List[str]],
+    customdata: List[List[dict]],
+) -> List[List[str]]:
+    """Add sparse CMF glyphs to Plotly text only; never mutate source text.
+
+    The adapter has already qualified each marker against live rulebook,
+    authoritative Signal and full-precision history. SCD tables, exports,
+    numeric payloads, and hover Value continue to use unmodified text.
+    """
+    displayed = [list(row) for row in text]
+    for row_idx, row in enumerate(displayed):
+        metadata_row = customdata[row_idx] if row_idx < len(customdata) else []
+        for col_idx, value in enumerate(row):
+            cell = metadata_row[col_idx] if col_idx < len(metadata_row) else None
+            if not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("CMF_"):
+                continue
+            suffix = cell.get("cmf_easing_marker")
+            if suffix in ("↗", "↘") and isinstance(value, str) and value:
+                row[col_idx] = value + suffix
+    return displayed
 
 
 def apply_bbp_exhaustion_turn_overlay(
@@ -7250,6 +7303,10 @@ def make_rolling_heatmap_figure(
                     "rolling_value_line",
                     f"Value: {cell.get('formatted_value', '')}<br>",
                 )
+                if str(cell.get("indicator_key", "")).startswith("CMF_"):
+                    cell["rolling_value_line"] = _bold_hover_prefix(
+                        cell["rolling_value_line"], "Value"
+                    )
 
     hovertemplate = (
         "<b>%{customdata.display_name}</b><br>"
@@ -7274,6 +7331,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.macd_context_block}"
@@ -7368,6 +7426,11 @@ def make_rolling_heatmap_figure(
         customdata=hm.customdata,
         x=hm.x,
         y=hm.y,
+    )
+
+    # Append CMF suffix after all other indicator overlays have finished.
+    fig.data[0].text = build_cmf_easing_heatmap_text(
+        fig.data[0].text, hm.customdata,
     )
 
     # Display all row labels on ''rolling signals heatmap'

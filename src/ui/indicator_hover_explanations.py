@@ -1428,3 +1428,309 @@ def get_cci_context_interpretation(
         else:
             conclusion = "No fresh directional event is verified from the available evidence."
     return level, development, premise + " " + conclusion
+
+# CMF Dynamic Rules: display-only, score-checked, guarded by all five live
+# rulebook expressions. The classifier remains the sole owner of scores.
+_CMF_STRONG_CUTOFFS = {10: 0.25, 21: 0.20, 30: 0.175, 50: 0.15}
+_CMF_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_CMF_SCORES = {
+    "strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2,
+}
+
+
+@lru_cache(maxsize=None)
+def _approved_cmf_rules(period: int) -> dict[str, str]:
+    """Audited expressions used only as semantic fingerprints, not for scoring."""
+    c = f"CMF_{period}"
+    cutoff = str(_CMF_STRONG_CUTOFFS[period])
+    return {
+        "strong_buy": f"{c} > {cutoff} and rising_2bar({c})",
+        "buy": f"{c} > 0.10 and ({c} <= {cutoff} or not_rising_2bar({c}))",
+        "neutral": f"-0.10 <= {c} <= 0.10",
+        "sell": f"{c} < -0.10 and ({c} >= -{cutoff} or not_falling_2bar({c}))",
+        "strong_sell": f"{c} < -{cutoff} and falling_2bar({c})",
+    }
+
+
+def _cmf_finite(value: object) -> Optional[float]:
+    """Accept finite raw observations; missing and booleans cannot prove CMF."""
+    from math import isfinite
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _cmf_display(raw_value: float) -> str:
+    """CMF is stored fractionally and displayed in signed points (x100)."""
+    displayed = raw_value * 100.0
+    return (f"{displayed:+.1f}").replace("-", "−")
+
+
+def get_cmf_rule_explanation(
+    period: int,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    current_cmf: object,
+    prior_cmf: object = None,
+    prior2_cmf: object = None,
+) -> Optional[str]:
+    """Explain only a valid, source-qualified CMF classification.
+
+    An absent predecessor is NOT proof that a rise/fall failed. Strong states
+    require both finite predecessors; current-only Buy/Sell may still qualify.
+    All comparisons use raw numbers, never the rounded hover values.
+    """
+    if period not in _CMF_STRONG_CUTOFFS or state not in _CMF_SCORES:
+        return None
+    if isinstance(score, bool) or score != _CMF_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    expected = _approved_cmf_rules(period)
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or "")) != _fingerprint(expected[key])
+        for key in _CMF_STATES
+    ):
+        return None
+
+    c = _cmf_finite(current_cmf)
+    if c is None:
+        return None  # Missing is never a verified Neutral classification.
+    p = _cmf_finite(prior_cmf)
+    q = _cmf_finite(prior2_cmf)
+    history_ok = p is not None and q is not None
+    rising_twice = history_ok and c > p > q
+    falling_twice = history_ok and c < p < q
+    strong = _CMF_STRONG_CUTOFFS[period]
+
+    # Only use the active classifier's state; reject contradictory supplied
+    # score/evidence rather than silently reclassifying or inventing history.
+    qualified = (
+        "strong_buy" if c > strong and rising_twice else
+        "buy" if c > 0.10 else
+        "strong_sell" if c < -strong and falling_twice else
+        "sell" if c < -0.10 else
+        "neutral"
+    )
+    if qualified != state:
+        return None
+
+    cutoff = f"{strong * 100:g}"
+    current = _cmf_display(c)
+    if state == "strong_buy":
+        return (
+            f"CMF is above the +{cutoff} Strong Buy cutoff, and rose from "
+            f"{_cmf_display(q)} to {_cmf_display(p)} to {current} across 2 consecutive days. "
+            "Both Strong Buy conditions are met, indicating substantial and strengthening accumulation pressure."
+        )
+    if state == "strong_sell":
+        return (
+            f"CMF is below the −{cutoff} Strong Sell cutoff, and fell from "
+            f"{_cmf_display(q)} to {_cmf_display(p)} to {current} across 2 consecutive days, "
+            "indicating substantial and strengthening distribution pressure."
+        )
+    if state == "neutral":
+        if c > 0:
+            return ("CMF is within the Neutral range. The reading is positive but does not "
+                    "establish enough accumulation pressure to qualify for Buy.")
+        if c < 0:
+            return ("CMF is within the Neutral range. The reading is negative but does not "
+                    "establish enough distribution pressure to qualify for Sell.")
+        return "CMF is within the Neutral range. Neither accumulation nor distribution pressure qualifies."
+    if state == "buy":
+        if c > strong and history_ok:
+            return (
+                f"CMF is above the +10 accumulation cutoff. Although it exceeds +{cutoff}, "
+                "it did not rise across both recent moves "
+                f"({_cmf_display(q)} → {_cmf_display(p)} → {current})."
+            )
+        if c > strong:
+            return (f"CMF is above +10 and exceeds +{cutoff}, but 2-move history "
+                    "is unavailable.")
+        return (f"CMF is above the +10 accumulation cutoff but not above the "
+                f"+{cutoff} Strong Buy cutoff.")
+    # Sell: preserve the user's exact short sentence for the agreed easing
+    # fixture; never describe easing when history shows otherwise.
+    if c >= -strong:
+        if history_ok and c > p > q:
+            return "CMF is below the −10.0 distribution cutoff but pressure has eased over the last 2 days."
+        return (f"CMF is below the −10.0 distribution cutoff but not below "
+                f"the −{cutoff} Strong Sell cutoff.")
+    if history_ok:
+        return (
+            f"CMF is below the −10.0 distribution cutoff. Although it is below −{cutoff}, "
+            "it did not fall across both recent moves "
+            f"({_cmf_display(q)} → {_cmf_display(p)} → {current})."
+        )
+    return (f"CMF is below −10 and below −{cutoff}, but 2-move history "
+            "is unavailable.")
+
+
+def get_cmf_easing_marker(
+    period: int,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    current_cmf: object,
+    prior_cmf: object,
+    prior2_cmf: object,
+    prior3_cmf: object = None,
+    prior4_cmf: object = None,
+) -> str:
+    """Display-only CMF suffix; empty on missing or inconsistent evidence.
+
+    Buy/Sell: 2 strict moves against qualified pressure (easing).
+    Neutral: 4 strict CMF moves (directional development, not a signal).
+    Only the current bar must be Neutral; the prior sequence may cross a
+    threshold. All comparisons use unrounded, full-history observations.
+    """
+    if state not in ("buy", "sell", "neutral"):
+        return ""
+    if get_cmf_rule_explanation(
+        period, state, score, active_rules,
+        current_cmf, prior_cmf, prior2_cmf,
+    ) is None:
+        return ""
+    c = _cmf_finite(current_cmf)
+    p = _cmf_finite(prior_cmf)
+    q = _cmf_finite(prior2_cmf)
+    if c is None or p is None or q is None:
+        return ""
+    if state == "neutral":
+        r = _cmf_finite(prior3_cmf)
+        t = _cmf_finite(prior4_cmf)
+        if r is None or t is None:
+            return ""
+        if c > p > q > r > t:
+            return "↗"
+        if c < p < q < r < t:
+            return "↘"
+        return ""
+    if state == "sell" and c > p > q:
+        return "↗"
+    if state == "buy" and c < p < q:
+        return "↘"
+    return ""
+
+
+# CMF Context Interpretation: display-only interpretation of the current
+# qualified pressure and verified one-session canonical price direction.
+_CMF_DISTRIBUTION_TEXT = (
+    "Over the measurement period, trading volume associated with closes near daily lows "
+    "had a greater influence on CMF than volume associated with closes near daily highs, "
+    "indicating distribution pressure."
+)
+_CMF_ACCUMULATION_TEXT = (
+    "Over the measurement period, trading volume associated with closes near daily highs "
+    "had a greater positive influence on CMF than volume associated with closes near daily lows, "
+    "indicating accumulation pressure."
+)
+_CMF_NEUTRAL_TEXT = (
+    "CMF remains within the project's Neutral range (−10.0 to +10.0), so neither "
+    "accumulation nor distribution pressure qualifies under the current rules."
+)
+
+
+def get_cmf_context_interpretation(
+    period: int,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    current_cmf: object,
+    prior_cmf: object = None,
+    prior2_cmf: object = None,
+    price_current: object = None,
+    price_prior: object = None,
+    price_basis: object = None,
+) -> Optional[tuple[str, str]]:
+    """Return (CMF Interpretation, Bottom-line) only for verified CMF.
+
+    This deliberately does NOT claim a common price/CMF time horizon or
+    infer same-day buy/sell volume. No price comparison without aligned,
+    positive canonical-price evidence transported by the calculator.
+    """
+    if get_cmf_rule_explanation(
+        period, state, score, active_rules,
+        current_cmf, prior_cmf, prior2_cmf,
+    ) is None:
+        return None
+    c = _cmf_finite(current_cmf)
+    if c is None:
+        return None
+
+    if c > 0.10:
+        cmf_interpretation = _CMF_ACCUMULATION_TEXT
+        pressure = "accumulation"
+    elif c < -0.10:
+        cmf_interpretation = _CMF_DISTRIBUTION_TEXT
+        pressure = "distribution"
+    else:
+        cmf_interpretation = _CMF_NEUTRAL_TEXT
+        pressure = "neutral"
+
+    pc = _cmf_finite(price_current)
+    pp = _cmf_finite(price_prior)
+    if (
+        price_basis not in ("Adj Close", "Close")
+        or pc is None or pp is None or pc <= 0 or pp <= 0
+    ):
+        return (
+            cmf_interpretation,
+            "No verified same-date price comparison is available; the CMF reading alone "
+            "does not establish whether today's price movement agreed or disagreed.",
+        )
+
+    # Combine today's price direction with verified CMF development.
+    # The CMF Interpretation already explains *why* the sign is negative or
+    # positive; don't repeat that explanation or append generic disclaimers.
+    p = _cmf_finite(prior_cmf)
+    q = _cmf_finite(prior2_cmf)
+    rising_twice = p is not None and q is not None and c > p > q
+    falling_twice = p is not None and q is not None and c < p < q
+
+    if pc == pp:
+        bottom = "Price was unchanged today; CMF reflects the broader measurement period."
+    else:
+        price_move = "Price rose today" if pc > pp else "Price fell today"
+        if pressure == "distribution":
+            if rising_twice:
+                bottom = (
+                    f"{price_move} while CMF became less negative over the last 2 days"
+                    "—distribution pressure is easing."
+                )
+            elif falling_twice:
+                bottom = (
+                    f"{price_move} while CMF became more negative over the last 2 days"
+                    "—distribution pressure is intensifying."
+                )
+            else:
+                bottom = (
+                    f"{price_move}, but CMF still indicates distribution pressure."
+                    if pc > pp else
+                    f"{price_move} alongside distribution pressure."
+                )
+        elif pressure == "accumulation":
+            if rising_twice:
+                bottom = (
+                    f"{price_move} while CMF increased over the last 2 days"
+                    "—accumulation pressure is strengthening."
+                )
+            elif falling_twice:
+                bottom = (
+                    f"{price_move} while CMF declined over the last 2 days"
+                    "—accumulation pressure is easing."
+                )
+            else:
+                bottom = (
+                    f"{price_move} alongside accumulation pressure."
+                    if pc > pp else
+                    f"{price_move} despite accumulation pressure."
+                )
+        else:
+            bottom = f"{price_move} while CMF remains Neutral."
+    return cmf_interpretation, bottom

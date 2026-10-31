@@ -73,6 +73,7 @@ from ui.rolling_heatmap_adapter import (
     apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
     build_plotly_heatmap_inputs,
+    build_cmf_easing_heatmap_text,
     build_vwma_hover_opening,
     format_macd_hover_presentation,
     format_stoch_hover_presentation,
@@ -4941,6 +4942,7 @@ def _build_scd_hover_customdata(
         "bbp_context_interpretation_block",
         "cci_context_block",
         "cci_interpretation_block",
+        "cmf_interpretation_block",
         "uo_context_block",
         "rule_block",
         "hma_context_interpretation_block",
@@ -4966,6 +4968,12 @@ def _build_scd_hover_customdata(
             f"{custom.get('value_label', 'Value')}: "
             f"{custom.get('formatted_value', '')}<br>"
         )
+
+    if row_key.startswith("CMF_"):
+        # Keep SCD's original value and diagnostic suffix; bold label only.
+        value_line = str(custom["scd_value_line"])
+        if value_line.startswith("Value:"):
+            custom["scd_value_line"] = "<b>Value:</b>" + value_line[6:]
 
     custom.setdefault("scd_single_value_line", custom["scd_value_line"])
     custom["ticker"] = ticker
@@ -5173,6 +5181,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
         "%{customdata.scd_macd_context_block}"
@@ -5267,6 +5276,11 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         customdata=customdata,
         x=tickers,
         y=y_labels,
+    )
+
+    # Suffix is Plotly-only and must run after text-rewriting overlays.
+    fig.data[0].text = build_cmf_easing_heatmap_text(
+        fig.data[0].text, customdata,
     )
 
     row_count = max(len(y_labels), 1)
@@ -5668,7 +5682,7 @@ def _build_scd_single_indicator_hover_customdata(
     else:
         custom["single_combined_trend_line"] = ""
 
-    if row_key.startswith(("MACD_", "STOCH_", "CCI_")):
+    if row_key.startswith(("MACD_", "STOCH_", "CCI_", "CMF_")):
         def _bold_macd_opening(value: Any, label: str) -> str:
             content = str(value or "")
             prefix = f"{label}:"
@@ -5893,6 +5907,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.dpo_context_block}"
             "%{customdata.bullbear_context_block}"
             "%{customdata.rule_block}"
+            "%{customdata.cmf_interpretation_block}"
             "%{customdata.cci_interpretation_block}"
             "%{customdata.bbp_context_interpretation_block}"
             "%{customdata.notes_block}"
@@ -5983,6 +5998,11 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         customdata=customdata,
         x=tickers,
         y=date_labels,
+    )
+
+    # Suffix is Plotly-only and must run after text-rewriting overlays.
+    fig.data[0].text = build_cmf_easing_heatmap_text(
+        fig.data[0].text, customdata,
     )
 
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)

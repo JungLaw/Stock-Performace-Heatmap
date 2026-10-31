@@ -4581,6 +4581,54 @@ class DatabaseIntegratedTechnicalCalculator:
                 # upstream semantic state/direction strings.
                 extras: Dict[str, Any] = {}
 
+                # CMF: transport true full-history predecessors and the
+                # same-index canonical price comparison before display slicing.
+                # These facts are hover-only and do not affect scores.
+                if eng_name == "CMF" and dt in df_ind.index:
+                    history_pos = df_ind.index.get_loc(dt)
+                    if isinstance(history_pos, (int, np.integer)):
+                        for lag, field in (
+                            (1, "cmf_prior_value"),
+                            (2, "cmf_prior2_value"),
+                            (3, "cmf_prior3_value"),
+                            (4, "cmf_prior4_value"),
+                        ):
+                            prior_pos = history_pos - lag
+                            if prior_pos < 0 or value_col not in df_ind.columns:
+                                continue
+                            prior_raw = df_ind.iloc[prior_pos][value_col]
+                            if pd.notna(prior_raw):
+                                try:
+                                    prior_numeric = float(prior_raw)
+                                    if np.isfinite(prior_numeric):
+                                        extras[field] = prior_numeric
+                                except (TypeError, ValueError):
+                                    pass
+
+                        if (
+                            isinstance(price_series, pd.Series)
+                            and price_series.index.equals(df_ind.index)
+                        ):
+                            for lag, field in (
+                                (0, "cmf_price_current"),
+                                (1, "cmf_price_prior"),
+                            ):
+                                price_pos = history_pos - lag
+                                if price_pos < 0:
+                                    continue
+                                price_raw = price_series.iloc[price_pos]
+                                if pd.notna(price_raw):
+                                    try:
+                                        price_numeric = float(price_raw)
+                                        if np.isfinite(price_numeric):
+                                            extras[field] = price_numeric
+                                    except (TypeError, ValueError):
+                                        pass
+                            extras["cmf_price_basis"] = (
+                                "Adj Close" if "Adj Close" in df_ind.columns
+                                else "Close"
+                            )
+
                 extra_value_cols = (
                     meta.get("extra_value_cols")
                     if isinstance(meta, dict)
@@ -5249,6 +5297,10 @@ class DatabaseIntegratedTechnicalCalculator:
                     extras_parts = []
 
                     for k, v in extras.items():
+                        # CMF history is internal interpretation evidence, not
+                        # an extra line in SCD's already-long raw hover summary.
+                        if k.startswith("cmf_"):
+                            continue
                         if isinstance(v, (int, float, np.number)):
                             extras_parts.append(
                                 f"{k}={float(v):.2f}"
@@ -5258,8 +5310,9 @@ class DatabaseIntegratedTechnicalCalculator:
                                 f"{k}={v}"
                             )
 
-                    extras_str = ", ".join(extras_parts)
-                    hover = f"{hover} | {extras_str}"
+                    if extras_parts:
+                        extras_str = ", ".join(extras_parts)
+                        hover = f"{hover} | {extras_str}"
 
                 cell = {
                     "score": score_int,

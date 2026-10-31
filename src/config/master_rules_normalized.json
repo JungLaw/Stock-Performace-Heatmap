@@ -1366,7 +1366,7 @@
               "neutral": "-0.10 <= CMF_21 <= 0.10",
               "sell": "CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))",
               "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)",
-              "notes": "Standard CMF window. Strong states require CMF beyond ±0.20 and continued strengthening across two consecutive moves."
+              "notes": "<b>↗|↘:</b>: CMF increasing/decreasing—not stock price direction.<br><b>Sell ↗:</b> CMF rose 2 consecutive moves (Distribution pressure easing)<br><b>Buy ↘:</b> CMF fell 2 consecutive moves (Accumulation pressure easing)<br><b>Neutral ↗|↘:</b> CMF rose/fell for 4 consecutive moves (directional pressure may be building or easing)"
             },
             "50": {
               "strong_buy": "CMF_50 > 0.15 and rising_2bar(CMF_50)",

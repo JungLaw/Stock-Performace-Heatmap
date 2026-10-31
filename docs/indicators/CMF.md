@@ -1,24 +1,55 @@
-
-
 ## Summary: CMF(21) signals
+**See**: [Table of Contents](#table-of-contents)
 
 | Signal | Literal trigger | Layman’s translation | Rule logic | Bottom-line |
 |---|---|---|---|---|
-| `strong_buy` | `CMF_21 > 0.20` and CMF rose across both recent moves | CMF shows substantial accumulation pressure, and that pressure has strengthened twice in succession. | The raw CMF value is above the CMF(21) Strong threshold, and `current > prior > two periods ago`. | **Buying pressure is high and still strengthening.** |
-| `buy` | `CMF_21 > 0.10`, without the complete Strong Buy combination | CMF shows meaningful accumulation pressure, but the reading is either not above the Strong threshold or has not risen across both recent moves. | The value has left Neutral on the positive side, but it is not both above `+0.20` and strictly rising across two moves. | **Buying pressure exists**, but it is not both high and steadily strengthening. |
-| `neutral` | `-0.10 <= CMF_21 <= 0.10` | CMF is inside the project’s middle zone, where neither accumulation nor distribution has a clear enough advantage. | The raw CMF value has not crossed either the `+0.10` Buy cutoff or the `-0.10` Sell cutoff. | **Neither side has a clear volume-backed pressure advantage.** |
-| `sell` | `CMF_21 < -0.10`, without the complete Strong Sell combination | CMF shows meaningful distribution pressure, but the reading is either not below the Strong Sell threshold or has not fallen across both recent moves. | The value has left Neutral on the negative side, but it is not both below `-0.20` and strictly falling across two moves. | **Selling pressure exists**, but it is not both high and steadily strengthening. |
-| `strong_sell` | `CMF_21 < -0.20` and CMF fell across both recent moves | CMF shows substantial distribution pressure, and that pressure has strengthened twice in succession. | The raw CMF value is below the CMF(21) Strong Sell threshold, and `current < prior < two periods ago`. | **Selling pressure is high and still strengthening.** |
+| :blue-background[strong_buy] | :gray-background[CMF_21 > 0.20] and CMF rose across both recent moves | CMF shows substantial accumulation pressure, and that pressure has strengthened twice in succession. | The raw CMF value is above the CMF(21) Strong threshold, and :gray-background[current > prior > two periods ago]. | **Buying pressure is high and still strengthening.** |
+| :blue-background[buy] | :gray-background[CMF_21 > 0.10], without the complete Strong Buy combination | CMF shows meaningful accumulation pressure, but the reading is either not above the Strong threshold or has not risen across both recent moves. | The value has left Neutral on the positive side, but it is not both above :gray-background[+0.20] and strictly rising across two moves. | **Buying pressure exists**, but it is not both high and steadily strengthening. |
+| :blue-background[neutral] | :gray-background[-0.10 <= CMF_21 <= 0.10] | CMF is inside the project’s middle zone, where neither accumulation nor distribution has a clear enough advantage. | The raw CMF value has not crossed either the :gray-background[+0.10] Buy cutoff or the :gray-background[-0.10] Sell cutoff. | **Neither side has a clear volume-backed pressure advantage.** |
+| :blue-background[sell] | :gray-background[CMF_21 < -0.10], without the complete Strong Sell combination | CMF shows meaningful distribution pressure, but the reading is either not below the Strong Sell threshold or has not fallen across both recent moves. | The value has left Neutral on the negative side, but it is not both below :gray-background[-0.20] and strictly falling across two moves. | **Selling pressure exists**, but it is not both high and steadily strengthening. |
+| :blue-background[strong_sell] | :gray-background[CMF_21 < -0.20] and CMF fell across both recent moves | CMF shows substantial distribution pressure, and that pressure has strengthened twice in succession. | The raw CMF value is below the CMF(21) Strong Sell threshold, and :gray-background[current < prior < two periods ago]. | **Selling pressure is high and still strengthening.** |
+
+---
+### How to Read: '↗|↘' Display-value Customizations
+(:small[[Back to top](#summary-cmf-21-signals)])
+
+- **↗ / ↘:** CMF increasing / decreasing — not stock price direction.
+- **Sell ↗:** Distribution pressure easing; CMF rose for 2 consecutive moves.
+- **Buy ↘:** Accumulation pressure easing; CMF fell for 2 consecutive moves.
+- **Neutral ↗ / ↘:** CMF rose/fell for 4 consecutive moves; directional pressure may be building or easing, but the current Signal remains :blue-background[Neutral].
+- **No arrow:** Conditions not met, insufficient history, or Strong Buy/Sell.
+
+**NOTE**: :blue-background[Neutral ↗] doesn't necessarily mean accumulation is building, and :blue-background[Neutral ↘] doesn't necessarily mean distribution is building.
+- The sign of the displayed CMF value determines whether the **movement represents '*strengthening*' or '*easing*' pressure**.
+
+
+### Most Important Patterns
+(:small[[Back to top](#summary-cmf-21-signals)])
+**See:** [The CMF patterns you should not overlook](#the-cmf-patterns-you-should-not-overlook)
+
+There are 2 ways to interpret importance here:
+1. **Strongest evidence of an established pressure state**: :green-background[Strong Buy] and :red-background[Strong Sell] rank highest. Their underlying CMF magnitude and direction meet our strictest rule conditions.
+2. **Most valuable new information beyond the existing heatmap colors**: :red-background[Sell ↗] and :green-background[Buy ↘] rank highest. The color already communicates Sell or Buy; the arrow reveals that qualified pressure has begun weakening.
+
+
+| Priority                                 | Patterns                                   | Why they deserve attention                                                                                                                                           |
+| ---------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tier 1 — **Qualified pressure weakening**    | **:red-background[Sell]** :red[−29.1]**↗** and **:green-background[Buy]** :blue[+18.4]**↘**             | Reveals changes that the existing Buy/Sell cell color cannot communicate. Potential early warning that established pressure is losing strength.                      |
+| Tier 2 — **Strong directional confirmation** | **:green-background[Strong Buy]** :blue[+22.0] and **:red-background[Strong Sell]** :red[−23.0] | Strongest current pressure evidence under our rules: material CMF magnitude plus two-move confirmation. Especially useful when aligned with the broader price trend. |
+| Tier 3 — **Price/CMF disagreement**          | **Price up + :red-background[Sell]** and **Price down + :green-background[Buy]**       | Raises questions about participation supporting price movement. More important when disagreement persists or occurs around support, resistance, or a breakout.       |
+| Tier 4 — **Emerging directional bias**       | **:gray-background[Neutral]** :blue[+7.0]**↗** and **:gray-background[Neutral]** :red[−7.0]**↘**        | Four consecutive moves are developing pressure in one direction, but it hasn't reached the Buy/Sell threshold.                                                       |
+| Tier 5 — **Fading unqualified pressure**     | **:gray-background[Neutral]** :red[−3.0]**↗** and **:gray-background[Neutral]** :blue[+3.0]**↘**        | Shows early improvement or deterioration within Neutral, but remains less decisive than the other patterns.                                                          |
 
 ---
 ### CMF period rule comparison
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 | Setting   | Strong Buy                                 | Buy                                                | Neutral                 | Sell                                               | Strong Sell                                 |
 | --------- | ------------------------------------------ | -------------------------------------------------- | ----------------------- | -------------------------------------------------- | ------------------------------------------- |
-| `CMF(10)` | Above `+0.25` and rising across two moves  | Above `+0.10` without complete Strong confirmation | `-0.10` through `+0.10` | Below `-0.10` without complete Strong confirmation | Below `-0.25` and falling across two moves  |
-| `CMF(21)` | Above `+0.20` and rising across two moves  | Above `+0.10` without complete Strong confirmation | `-0.10` through `+0.10` | Below `-0.10` without complete Strong confirmation | Below `-0.20` and falling across two moves  |
-| `CMF(30)` | Above `+0.175` and rising across two moves | Above `+0.10` without complete Strong confirmation | `-0.10` through `+0.10` | Below `-0.10` without complete Strong confirmation | Below `-0.175` and falling across two moves |
-| `CMF(50)` | Above `+0.15` and rising across two moves  | Above `+0.10` without complete Strong confirmation | `-0.10` through `+0.10` | Below `-0.10` without complete Strong confirmation | Below `-0.15` and falling across two moves  |
+| :gray-background[CMF(10)] | Above :gray-background[+0.25] and rising across two moves  | Above :gray-background[+0.10] without complete Strong confirmation | :gray-background[-0.10] through :gray-background[+0.10] | Below :gray-background[-0.10] without complete Strong confirmation | Below :gray-background[-0.25] and falling across two moves  |
+| :gray-background[CMF(21)] | Above :gray-background[+0.20] and rising across two moves  | Above :gray-background[+0.10] without complete Strong confirmation | :gray-background[-0.10] through :gray-background[+0.10] | Below :gray-background[-0.10] without complete Strong confirmation | Below :gray-background[-0.20] and falling across two moves  |
+| :gray-background[CMF(30)] | Above :gray-background[+0.175] and rising across two moves | Above :gray-background[+0.10] without complete Strong confirmation | :gray-background[-0.10] through :gray-background[+0.10] | Below :gray-background[-0.10] without complete Strong confirmation | Below :gray-background[-0.175] and falling across two moves |
+| :gray-background[CMF(50)] | Above :gray-background[+0.15] and rising across two moves  | Above :gray-background[+0.10] without complete Strong confirmation | :gray-background[-0.10] through :gray-background[+0.10] | Below :gray-background[-0.10] without complete Strong confirmation | Below :gray-background[-0.15] and falling across two moves  |
 
 
 | Signal      | One-sentence interpretation                                                         | Bottom-line                                                           |
@@ -29,16 +60,19 @@
 | Sell        | Selling pressure exists, but it is not both strong and steadily strengthening.      | **Selling pressure exists, but it is not fully confirmed as Strong.** |
 | Strong Sell | Selling pressure is strong and has strengthened through both recent moves.          | **Strong selling pressure is getting stronger.**                      |
 |             |                                                                                     |                                                                       |
+
 ## CMF(21) — brief overview
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 Chaikin Money Flow, or **CMF**, is a volume-based indicator that estimates whether a stock is experiencing more **accumulation pressure** or **distribution pressure** over a chosen period.
+- In other words, it builds on the **Accumulation/Distribution** concept by weighting daily closing-location contributions by volume over the selected lookback (typically 21 sessions).
 
 In ordinary language:
 - **Accumulation pressure** means volume has been associated more with closes near the upper part of each day’s trading range.
 - **Distribution pressure** means volume has been associated more with closes near the lower part of each day’s trading range.
 - A value near zero means neither pattern has established a strong enough advantage.
 
-For `CMF(21)`:
+For :blue-background[CMF(21)]:
 
 ```text
 21 = the most recent 21 trading periods used in the calculation
@@ -111,33 +145,33 @@ Mixed closes or closes near the middle
 
 ### What the displayed number means
 
-The app multiplies the raw CMF value by `100` for readability.
+The app multiplies the raw CMF value by :gray-background[100] for readability.
 
 | App display | Raw CMF used by the rules |
-| ----------: | ------------------------: |
-|       `+22` |     approximately `+0.22` |
-|       `+10` |     approximately `+0.10` |
-|        `+5` |     approximately `+0.05` |
-|         `0` |      approximately `0.00` |
-|       `-10` |     approximately `-0.10` |
-|       `-23` |     approximately `-0.23` |
+| :----------: | ------------------------: |
+|    :gray-background[+22.0] |     approximately :gray-background[+0.220] |
+|    :gray-background[+10.0] |     approximately :gray-background[+0.100] |
+|     :gray-background[+5.0] |     approximately :gray-background[+0.050] |
+|      :gray-background[0.0] |      approximately :gray-background[0.000] |
+|    :gray-background[-10.0] |     approximately :gray-background[-0.100] |
+|    :gray-background[-23.0] |     approximately :gray-background[-0.230] |
 
-The multiplication by `100` is display-only. The rule engine continues to evaluate the canonical raw decimal value.
+The multiplication by :gray-background[100] is display-only. Heatmap cells show **one decimal place**; classification and arrow qualification use the **unrounded raw CMF**.
 
-A cell displaying `+22` does **not** mean “22% price performance.” It means the raw CMF reading is approximately `+0.22`.
+A cell displaying :gray-background[+22.0] does **not** mean “22% price performance.” It means the raw CMF reading is approximately :gray-background[+0.220].
 
 
-### Why `+0.22` is already meaningful
+### Why +0.22 is already meaningful
 
-CMF has a theoretical range from `-1.00` to `+1.00`, but its real-world readings normally occupy a much narrower area.
+CMF has a theoretical range from :gray-background[-1.00] to :gray-background[+1.00], but its real-world readings normally occupy a much narrower area.
 
-To reach `+1.00`, every period in the entire lookback would need to close at its exact high.
+To reach :gray-background[+1.00], every period in the entire lookback would need to close at its exact high.
 
-To reach `-1.00`, every period would need to close at its exact low.
+To reach :gray-background[-1.00], every period would need to close at its exact low.
 
 Because real markets fluctuate inside each day’s range, those theoretical extremes are rarely approached. CMF typically operates within a substantially narrower practical range.
 
-That means a raw CMF of `+0.22` is not merely “22% of the way to the maximum.” It is already a materially positive reading within CMF’s normal operating range.
+That means a raw CMF of :gray-background[+0.22] is not merely “22% of the way to the maximum.” It is already a materially positive reading within CMF’s normal operating range.
 
 
 ### Quick intuitive model
@@ -213,7 +247,7 @@ This is not primarily:
 * a formal divergence model;
 * a standalone trading system.
 
-The labels `Buy` and `Sell` are project signal names.
+The labels '***Buy***' and '***Sell***' are project signal names.
 
 In CMF terms:
 
@@ -230,9 +264,9 @@ They are not automatic instructions to buy or sell the stock.
 ---
 
 ## How to read the CMF(21) heatmap
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 Each CMF(21) cell answers two related questions:
-
 1. **What is the current volume-backed pressure reading?**
 2. **Which project signal does that reading satisfy?**
 
@@ -240,11 +274,11 @@ The color comes from the rule-engine score:
 
 | Signal      | Score | General color meaning       |
 | ----------- | ----: | --------------------------- |
-| Strong Buy  |  `+2` | strongest bullish CMF state |
-| Buy         |  `+1` | bullish CMF state           |
-| Neutral     |   `0` | no directional CMF state    |
-| Sell        |  `-1` | bearish CMF state           |
-| Strong Sell |  `-2` | strongest bearish CMF state |
+| Strong Buy  | :gray-background[+2] | strongest bullish CMF state |
+| Buy         | :gray-background[+1] | bullish CMF state           |
+| Neutral     | :gray-background[0] | no directional CMF state    |
+| Sell        | :gray-background[-1] | bearish CMF state           |
+| Strong Sell | :gray-background[-2] | strongest bearish CMF state |
 
 The number printed in the cell is the scaled CMF value, not the score.
 
@@ -257,16 +291,16 @@ Cell color: dark green
 
 means:
 
-* the raw CMF value is approximately `+0.22`;
-* the classifier assigned Strong Buy, with a score of `+2`;
+* the raw CMF value is approximately :gray-background[+0.22];
+* the classifier assigned Strong Buy, with a score of :gray-background[+2];
 * the value alone was not enough—the two-move confirmation also had to be satisfied.
 
 ### The three questions behind the CMF(21) rules
 
 | Question                                               | CMF(21) test                                   | What it determines                                      |
 | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------------------------- |
-| Is there enough pressure to leave Neutral?             | Above `+0.10` or below `-0.10`                 | Whether a Buy or Sell side exists at all                |
-| Is the pressure large enough to be a Strong candidate? | Above `+0.20` or below `-0.20`                 | Whether magnitude qualifies for possible Strong status  |
+| Is there enough pressure to leave Neutral?             | Above :gray-background[+0.10] or below :gray-background[-0.10]                 | Whether a Buy or Sell side exists at all                |
+| Is the pressure large enough to be a Strong candidate? | Above :gray-background[+0.20] or below :gray-background[-0.20]                 | Whether magnitude qualifies for possible Strong status  |
 | Is that large pressure strengthening consistently?     | Rising or falling across two consecutive moves | Whether the candidate becomes Strong Buy or Strong Sell |
 
 The logic is layered:
@@ -288,11 +322,11 @@ This table is a reading aid, not a universal five-state industry standard.
 
 | App display area |       Raw CMF area | Practical reading                                                                             |
 | ---------------: | -----------------: | --------------------------------------------------------------------------------------------- |
-|      Above `+25` |      Above `+0.25` | Unusually heavy accumulation pressure;  Intense institutional accumulation.                   |
-|   `+10` to `+25` | `+0.10` to `+0.25` | Meaningful accumulation pressure; Real volume is backing the uptrend; a clear bullish signal. |
-|   `-10` to `+10` | `-0.10` to `+0.10` | Weak, mixed, or inconclusive pressure; Mostly minor retail trading or sideways consolidation. |
-|   `-25` to `-10` | `-0.25` to `-0.10` | Meaningful distribution pressure;  Institutional sell-offs are occurring.                     |
-|      Below `-25` |      Below `-0.25` | Unusually heavy distribution pressure; Severe capitulation or heavy shorting.                 |
+|      Above :gray-background[+25] |      Above :gray-background[+0.25] | Large positive accumulation-pressure reading; a Strong Buy **candidate**, depending on the period and two-move confirmation. |
+| :gray-background[+10] to :gray-background[+25] | :gray-background[+0.10] to :gray-background[+0.25] | Qualified accumulation pressure above +10; Strong status depends on the period-specific cutoff and confirmation. |
+| :gray-background[-10] to :gray-background[+10] | :gray-background[-0.10] to :gray-background[+0.10] | Neutral: neither directional pressure exceeds the project cutoff; CMF can still rise or fall. |
+| :gray-background[-25] to :gray-background[-10] | :gray-background[-0.25] to :gray-background[-0.10] | Qualified distribution pressure below −10; Strong status depends on the period-specific cutoff and confirmation. |
+|      Below :gray-background[-25] |      Below :gray-background[-0.25] | Large negative distribution-pressure reading; a Strong Sell **candidate**, depending on the period and two-move confirmation. |
 
 This practical magnitude guide and the project signal rules are related but not identical:
 
@@ -307,30 +341,73 @@ has it strengthened across two consecutive moves?
 
 Therefore:
 
-* `+24` can be **Buy** if it lacks the required two-move rise.
-* `+22` can be **Strong Buy** if its raw value is above `+0.20` and it has risen across both recent moves.
-* `-23` can be **Sell** if it lacks the required two-move decline.
-* `-21` can be **Strong Sell** if its raw value is below `-0.20` and it has fallen across both recent moves.
+* :gray-background[+24] can be **Buy** if it lacks the required two-move rise.
+* :gray-background[+22] can be **Strong Buy** if its raw value is above :gray-background[+0.20] and it has risen across both recent moves.
+* :gray-background[-23] can be **Sell** if it lacks the required two-move decline.
+* :gray-background[-21] can be **Strong Sell** if its raw value is below :gray-background[-0.20] and it has fallen across both recent moves.
 
 
-### Important rounding note
+**Important rounding note**:
+Heatmap cells show **one decimal place** (raw CMF × 100), but classification and arrow comparisons use full-precision raw values.
 
-Heatmap cells show whole numbers, but classification uses the unrounded raw value.
+For example, raw :gray-background[+0.0996] and :gray-background[+0.1004] both display approximately :gray-background[+10.0]. The first remains Neutral; the second qualifies for Buy.
 
-A cell displayed as `+10` could come from a raw value slightly below or above `+0.10`.
+At a displayed boundary, trust the **Signal** and its Rule explanation rather than reverse-engineering the classification from the rounded number. An arrow is a separate directional observation, never a change to that Signal.
 
-When a displayed value appears to sit exactly on a boundary, trust the signal label and underlying rule-engine result rather than reverse-engineering the classification from the rounded cell alone.
+---
+
+### The CMF patterns you should not overlook
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)] | **Related:** :small[[Most Important Patterns](#most-important-patterns)])
+
+Read **cell value + arrow + Signal color** together. The examples are illustrative; the actual Signal is always determined from the raw rulebook conditions.
+
+| Pattern | What it means | Why to notice it |
+|---|---|---|
+| **:red-background[Sell]** :red[−29.1]**↗** | CMF remains below −10 but has increased across 2 moves. | Qualified distribution pressure is **easing**, even if the Sell background has not changed. |
+| **:green-background[Buy]** :blue[+18.4]**↘** | CMF remains above +10 but has decreased across 2 moves. | Qualified accumulation pressure is **easing**, despite the Buy background. |
+| **:gray-background[Neutral]** :red[−7.0]**↘** | CMF has fallen for 4 moves; the latest reading is still within ±10. | Negative distribution bias is **building**, but Sell has **not** qualified. |
+| **:gray-background[Neutral]** :red[−3.0]**↗** | CMF has risen for 4 moves while still negative. | Negative distribution bias is **fading**; an upward arrow does not establish Buy. |
+| **:gray-background[Neutral]** :blue[+7.0]**↗** | CMF has risen for 4 moves while positive. | Positive accumulation bias is **building** without qualifying for Buy. |
+| **:gray-background[Neutral]** :blue[+3.0]**↘** | CMF has fallen for 4 moves while positive. | Positive accumulation bias is **fading**; a downward arrow does not establish Sell. |
+| **:green-background[Strong Buy]** :blue[+22.0] | CMF(21) is above +20 and rose across 2 moves. | Substantial accumulation pressure is still strengthening; **no easing arrow** is added. |
+| **:red-background[Strong Sell]** :red[−23.0] | CMF(21) is below −20 and fell across 2 moves. | Substantial distribution pressure is still strengthening; **no easing arrow** is added. |
+| **Price up + :red-background[Sell]** | Daily price gained, but CMF still qualifies as distribution. | Price direction and longer-window pressure are in **tension**; check the Bottom-line for today's comparison. |
+| **Price down + :green-background[Buy]** | Daily price declined, but CMF still qualifies as accumulation. | Price direction and longer-window pressure are in **tension**; neither is a guaranteed forecast. |
+
+
+**Priority:** \
+- First inspect qualified Buy/Sell cells with easing arrows and Neutral cells showing persistent movement toward or across zero.
+- Then use the hover's Rule and Bottom-line to understand the actual evidence.
+- **An arrow alone is not a trade signal.**
+
+**Neutral timing:** Four moves require **five** successive valid CMF readings. Only the *current* observation must be Neutral; prior readings may have been Buy or Sell. An arrow can therefore appear on the first visible day of a heatmap if sufficient earlier history exists. Missing or tied observations do not qualify. Strong Buy/Sell cells never receive arrows.
+
+#### How to prioritize the CMF patterns
+
+| Tier | Priority                        | Patterns                       |
+| ---- | ------------------------------- | ------------------------------ |
+| 1    | **Pressure weakening**          | Sell ↗ / Buy ↘                 |
+| 2    | **Strong pressure confirmed**   | Strong Buy / Strong Sell       |
+| 3    | **Price–CMF disagreement**      | Price ↑ + Sell / Price ↓ + Buy |
+| 4    | **Directional bias developing** | Neutral +↗ / −↘                |
+| 5    | **Unqualified pressure fading** | Neutral −↗ / +↘                |
+
+**Reading priority:** Focus first on qualified pressure that is weakening or strengthening, then examine whether CMF confirms the prevailing price trend. Use Neutral arrows as early context, not formal Buy/Sell signals.
+
+**Important:** These tiers rank practical interpretation value—not predictive accuracy or trading profitability.
 
 ---
 
 ### How to Read: 'Strong Buy'
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)])
+(:small[[See: 'Strong Buy'](#strong-buy-cmf)])
 
 ```json
 "strong_buy": "CMF_21 > 0.20 and rising_2bar(CMF_21)"
 ```
 
 A Strong Buy requires **both**:
-1. CMF is above the CMF(21) Strong threshold of `+0.20`.
+1. CMF is above the CMF(21) Strong threshold of :gray-background[+0.20].
 2. CMF has risen through both recent comparisons:
 
 ```text
@@ -346,9 +423,9 @@ Displayed:       +20 →    +22 →    +24
 
 At the latest observation:
 
-* `+0.24` is above the `+0.20` Strong threshold;
-* `+0.24 > +0.22`;
-* `+0.22 > +0.20`.
+* :gray-background[+0.24] is above the :gray-background[+0.20] Strong threshold;
+* :gray-background[+0.24 > +0.22];
+* :gray-background[+0.22 > +0.20].
 
 The value is already high, and pressure has continued strengthening.
 
@@ -375,6 +452,8 @@ It is a strong **CMF accumulation-pressure state**, not a valuation opinion or g
 ---
 
 ### How to Read: 'Buy'
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)])
+(:small[[See: 'Buy'](#buy-cmf)])
 
 ```json
 "buy": "CMF_21 > 0.10 and (CMF_21 <= 0.20 or not_rising_2bar(CMF_21))"
@@ -417,7 +496,7 @@ Current raw CMF: +0.15
 Displayed value: +15
 ```
 
-This is above the `+0.10` Buy cutoff but not above the `+0.20` Strong threshold.
+This is above the :gray-background[+0.10] Buy cutoff but not above the :gray-background[+0.20] Strong threshold.
 
 Translation:
 
@@ -430,7 +509,7 @@ CMF sequence: +0.20 → +0.18 → +0.22
 Displayed:       +20 →    +18 →    +22
 ```
 
-The latest value is above `+0.20`, but the sequence did not rise through both moves. It first fell and then rose.
+The latest value is above :gray-background[+0.20], but the sequence did not rise through both moves. It first fell and then rose.
 
 Translation:
 
@@ -459,12 +538,14 @@ and has strengthened twice in succession
 ---
 
 ### How to Read: 'Neutral'
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)])
+(:small[[See: 'Neutral'](#neutral-cmf)])
 
 ```json
 "neutral": "-0.10 <= CMF_21 <= 0.10"
 ```
 
-Neutral means the raw CMF value is inside the middle zone from `-0.10` through `+0.10`.
+Neutral means the raw CMF value is inside the middle zone from :gray-background[-0.10] through :gray-background[+0.10].
 
 The displayed equivalent is approximately:
 
@@ -484,13 +565,13 @@ Examples of Neutral readings include:
 -9
 ```
 
-A positive Neutral value such as `+8` means:
+A positive Neutral value such as :gray-background[+8] means:
 
-> Buying pressure has a slight advantage, but not enough to cross the project’s `+10` Buy cutoff.
+> Buying pressure has a slight advantage, but not enough to cross the project’s :gray-background[+10] Buy cutoff.
 
-A negative Neutral value such as `-7` means:
+A negative Neutral value such as :gray-background[-7] means:
 
-> Selling pressure has a slight advantage, but not enough to cross the project’s `-10` Sell cutoff.
+> Selling pressure has a slight advantage, but not enough to cross the project’s :gray-background[-10] Sell cutoff.
 
 #### How one beginner could explain it to another
 
@@ -519,11 +600,13 @@ CMF can also be rising quickly while still Neutral:
 -0.08 → +0.01 → +0.09
 ```
 
-The latest value remains below the `+0.10` Buy cutoff, so the result is Neutral.
+The latest value remains below the :gray-background[+0.10] Buy cutoff, so the result is Neutral.
 
 ---
 
 ### How to Read: 'Sell'
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)])
+(:small[[See: 'Sell'](#sell-cmf)])
 
 ```json
 "sell": "CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))"
@@ -566,7 +649,7 @@ Current raw CMF: -0.15
 Displayed value: -15
 ```
 
-This is below the `-0.10` Sell cutoff but not below the `-0.20` Strong Sell threshold.
+This is below the :gray-background[-0.10] Sell cutoff but not below the :gray-background[-0.20] Strong Sell threshold.
 
 Translation:
 
@@ -579,7 +662,7 @@ CMF sequence: -0.19 → -0.18 → -0.23
 Displayed:       -19 →    -18 →    -23
 ```
 
-The latest value is below `-0.20`, but the sequence did not fall through both moves. It first became less negative and then became more negative.
+The latest value is below :gray-background[-0.20], but the sequence did not fall through both moves. It first became less negative and then became more negative.
 
 Translation:
 
@@ -598,6 +681,8 @@ On the negative side, “strengthening” means becoming progressively more nega
 ---
 
 ### How to Read: 'Strong Sell'
+(:small[[Parent](#how-to-read-the-cmf-21-heatmap)])
+(:small[[See: 'Strong Sell'](#strong-sell-cmf)])
 
 ```json
 "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)"
@@ -605,7 +690,7 @@ On the negative side, “strengthening” means becoming progressively more nega
 
 A Strong Sell requires **both**:
 
-1. CMF is below the CMF(21) Strong Sell threshold of `-0.20`.
+1. CMF is below the CMF(21) Strong Sell threshold of :gray-background[-0.20].
 2. CMF has fallen through both recent comparisons:
 
 ```text
@@ -621,9 +706,9 @@ Displayed:       -20 →    -22 →    -29
 
 At the latest observation:
 
-* `-0.29` is below the `-0.20` Strong Sell threshold;
-* `-0.29 < -0.22`;
-* `-0.22 < -0.20`.
+* :gray-background[-0.29] is below the :gray-background[-0.20] Strong Sell threshold;
+* :gray-background[-0.29 < -0.22];
+* :gray-background[-0.22 < -0.20].
 
 The distribution reading is already high in magnitude, and it has continued strengthening.
 
@@ -640,10 +725,29 @@ Strong Sell is not a guaranteed prediction that price will fall next. It is the 
 ---
 
 ## CMF formula — what is being measured
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 CMF is calculated in three conceptual steps.
 
 ### Step 1 — Money Flow Multiplier
+(:small[[Parent: 'CMF formula — What's being measured'](#cmf-formula-what-is-being-measured)])
+
+---
+**Interpreting different multiplier values**
+
+| Multiplier | Where price closed                   |
+| ---------- | ------------------------------------ |
+| +1.00      | Exactly at the day's high            |
+| +0.80      | Very near the high                   |
+| +0.40      | Upper half of the range              |
+| 0.00       | Exactly halfway between high and low |
+| −0.40      | Lower half of the range              |
+| −0.60      | Near the low                         |
+| −1.00      | Exactly at the day's low             |
+
+
+---
+**Calculating the CMF Multiplier**
 
 ```text
 Money Flow Multiplier
@@ -661,15 +765,18 @@ This measures where the closing price sits inside that period’s High–Low ran
 
 | Closing position   | Approximate multiplier | Meaning                        |
 | ------------------ | ---------------------: | ------------------------------ |
-| At the period High |                 `+1.0` | maximum positive contribution  |
+| At the period High |               :gray-background[+1.0] | maximum positive contribution  |
 | Above the midpoint |               positive | accumulation-side contribution |
-| At the midpoint    |                  `0.0` | no directional contribution    |
+| At the midpoint    |                :gray-background[0.0] | no directional contribution    |
 | Below the midpoint |               negative | distribution-side contribution |
-| At the period Low  |                 `-1.0` | maximum negative contribution  |
+| At the period Low  |               :gray-background[-1.0] | maximum negative contribution  |
 
-If `High == Low`, the period has no usable range width; the implementation avoids dividing by zero.
+If :gray-background[High == Low], the period has no usable range width; the implementation avoids dividing by zero.
+
+
 
 ### Step 2 — Money Flow Volume
+(:small[[Parent: 'CMF formula — What's being measured'](#cmf-formula-what-is-being-measured)])
 
 ```text
 Money Flow Volume
@@ -685,6 +792,7 @@ For example:
 * the same closing location on light volume has less influence.
 
 ### Step 3 — Chaikin Money Flow
+(:small[[Parent: 'CMF formula — What's being measured'](#cmf-formula-what-is-being-measured)])
 
 ```text
 CMF(n)
@@ -695,6 +803,7 @@ CMF(n)
 The final result is a volume-weighted average of closing-location pressure over the selected period.
 
 ### Important implication
+(:small[[Parent: 'CMF formula — What's being measured'](#cmf-formula-what-is-being-measured)])
 
 CMF does not directly count “buy orders” and “sell orders.”
 
@@ -709,8 +818,11 @@ CMF can serve as a proxy for volume-backed buying or selling behavior, but it do
 ---
 
 ## CMF(21) Rule Translation
+(:small[[Back to top](#summary-cmf-21-signals)])
 
-### Strong buy
+### Strong buy (CMF)
+(:small[[Parent](#cmf-21-rule-translation)])
+(:small[[See: 'How to read: Strong Buy'](#how-to-read-strong-buy)])
 
 ```json
 "strong_buy": "CMF_21 > 0.20 and rising_2bar(CMF_21)"
@@ -718,14 +830,14 @@ CMF can serve as a proxy for volume-backed buying or selling behavior, but it do
 
 #### Literal component breakdown
 
-`CMF_21 > 0.20`
+:blue-background[CMF_21 > 0.20]
 
-* The current raw CMF(21) value is above `+0.20`.
+* The current raw CMF(21) value is above :gray-background[+0.20].
 * This is above the project’s CMF(21) positive Strong threshold.
-* On the heatmap’s scaled display, this is approximately above `+20`.
+* On the heatmap’s scaled display, this is approximately above :gray-background[+20].
 * Layman’s translation: **the 21-period accumulation-pressure reading is already high.**
 
-`rising_2bar(CMF_21)`
+:blue-background[rising_2bar(CMF_21)]
 
 * The helper evaluates three consecutive CMF observations.
 * It requires:
@@ -737,7 +849,7 @@ current CMF > prior CMF > CMF two periods ago
 * There are two consecutive upward moves.
 * Layman’s translation: **CMF has strengthened twice in succession.**
 
-`CMF_21 > 0.20 and rising_2bar(CMF_21)`
+:blue-background[CMF_21 > 0.20 and rising_2bar(CMF_21)]
 
 * Both conditions must be true.
 * A high reading without the rising sequence is not Strong Buy.
@@ -746,7 +858,7 @@ current CMF > prior CMF > CMF two periods ago
 
 #### Literal summary
 
-CMF(21) is above `+0.20`, and the current value is greater than the prior value, which is greater than the value two periods earlier.
+CMF(21) is above :gray-background[+0.20], and the current value is greater than the prior value, which is greater than the value two periods earlier.
 
 #### Plain-English version
 
@@ -764,12 +876,13 @@ It requires:
 * High confidence on the literal interpretation.
 * Positive CMF as accumulation pressure is conventional.
 * The exact five-state scoring system and two-move Strong confirmation are project-specific.
-* `+0.20` is the approved CMF(21) Strong threshold.
+* :gray-background[+0.20] is the approved CMF(21) Strong threshold.
 * Strong Buy does not guarantee that price will rise next.
 
 ---
 
-### Buy
+### Buy (CMF)
+(:small[[Parent](#cmf-21-rule-translation)] | :small[[See: 'How to read: Buy'](#how-to-read-buy)])
 
 ```json
 "buy": "CMF_21 > 0.10 and (CMF_21 <= 0.20 or not_rising_2bar(CMF_21))"
@@ -777,20 +890,20 @@ It requires:
 
 #### Literal component breakdown
 
-`CMF_21 > 0.10`
+:blue-background[CMF_21 > 0.10]
 
-* The current raw CMF(21) value is above `+0.10`.
+* The current raw CMF(21) value is above :gray-background[+0.10].
 * The reading crossed the project’s positive Buy cutoff.
 * It is outside Neutral on the accumulation side.
 * Layman’s translation: **meaningful buying pressure is present.**
 
-`CMF_21 <= 0.20`
+:blue-background[CMF_21 <= 0.20]
 
 * The current value is no higher than the CMF(21) Strong threshold.
-* Example: `+0.15` is Buy-side pressure but not a Strong candidate.
+* Example: :gray-background[+0.15] is Buy-side pressure but not a Strong candidate.
 * Layman’s translation: **buying pressure exists, but the reading is not above the Strong threshold.**
 
-`not_rising_2bar(CMF_21)`
+:blue-background[not_rising_2bar(CMF_21)]
 
 * The following strict sequence is not true:
 
@@ -801,18 +914,18 @@ current CMF > prior CMF > CMF two periods ago
 * The sequence may have risen then fallen, fallen then risen, stayed flat during either comparison, or fallen through both moves.
 * Layman’s translation: **CMF has not strengthened steadily through both recent moves.**
 
-`CMF_21 <= 0.20 or not_rising_2bar(CMF_21)`
+:blue-background[CMF_21 <= 0.20 or not_rising_2bar(CMF_21)]
 
 * Only one of the two conditions must be true.
 * It captures:
 
-  * readings above `+0.10` but no higher than `+0.20`; and
-  * readings above `+0.20` that lack the required two-move rise.
+  * readings above :gray-background[+0.10] but no higher than :gray-background[+0.20]; and
+  * readings above :gray-background[+0.20] that lack the required two-move rise.
 * Layman’s translation: **the reading does not have the complete “high and steadily strengthening” Strong Buy combination.**
 
 #### Literal summary
 
-CMF(21) is above `+0.10`, but it is either no higher than `+0.20` or has not risen through both recent moves.
+CMF(21) is above :gray-background[+0.10], but it is either no higher than :gray-background[+0.20] or has not risen through both recent moves.
 
 #### Plain-English version
 
@@ -825,13 +938,15 @@ This is a **bullish accumulation-pressure state without complete Strong confirma
 #### Notes / confidence
 
 * Buy is intentionally weaker than Strong Buy.
-* A CMF value above `+0.20` can still be Buy.
+* A CMF value above :gray-background[+0.20] can still be Buy.
 * Magnitude alone does not determine the Strong state.
 * Buy means accumulation pressure—not a guaranteed entry signal.
 
 ---
 
-### Neutral
+### Neutral (CMF)
+(:small[[Parent](#cmf-21-rule-translation)] | :small[[See: 'How to read: Neutral'](#how-to-read-neutral)])
+
 
 ```json
 "neutral": "-0.10 <= CMF_21 <= 0.10"
@@ -839,26 +954,26 @@ This is a **bullish accumulation-pressure state without complete Strong confirma
 
 #### Literal component breakdown
 
-`-0.10 <= CMF_21`
+:blue-background[-0.10 <= CMF_21]
 
 * CMF is not below the project’s negative Sell cutoff.
 * Distribution pressure has not become large enough to activate Sell.
 * Layman’s translation: **selling pressure is not large enough to create a negative CMF signal.**
 
-`CMF_21 <= 0.10`
+:blue-background[CMF_21 <= 0.10]
 
 * CMF is not above the project’s positive Buy cutoff.
 * Accumulation pressure has not become large enough to activate Buy.
 * Layman’s translation: **buying pressure is not large enough to create a positive CMF signal.**
 
-`-0.10 <= CMF_21 <= 0.10`
+:blue-background[-0.10 <= CMF_21 <= 0.10]
 
-* Exact raw values of `-0.10` and `+0.10` are included.
+* Exact raw values of :gray-background[-0.10] and :gray-background[+0.10] are included.
 * Layman’s translation: **CMF is inside the middle pressure zone.**
 
 #### Literal summary
 
-CMF(21) is between `-0.10` and `+0.10`, inclusive.
+CMF(21) is between :gray-background[-0.10] and :gray-background[+0.10], inclusive.
 
 #### Plain-English version
 
@@ -870,14 +985,15 @@ This is a **balanced / no-active-direction CMF state**.
 
 #### Notes / confidence
 
-* `+0.10` is Neutral; Buy requires strictly greater than `+0.10`.
-* `-0.10` is Neutral; Sell requires strictly less than `-0.10`.
+* :gray-background[+0.10] is Neutral; Buy requires strictly greater than :gray-background[+0.10].
+* :gray-background[-0.10] is Neutral; Sell requires strictly less than :gray-background[-0.10].
 * Recent direction does not override the Neutral zone.
 * Neutral does not mean price has no trend or that volume is low.
 
 ---
 
-### Sell
+### Sell (CMF)
+(:small[[Parent](#cmf-21-rule-translation)] | :small[[See: 'How to read: Sell'](#how-to-read-sell)])
 
 ```json
 "sell": "CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))"
@@ -885,20 +1001,20 @@ This is a **balanced / no-active-direction CMF state**.
 
 #### Literal component breakdown
 
-`CMF_21 < -0.10`
+:blue-background[CMF_21 < -0.10]
 
-* The current raw value is below `-0.10`.
+* The current raw value is below :gray-background[-0.10].
 * It crossed the project’s negative Sell cutoff.
 * It is outside Neutral on the distribution side.
 * Layman’s translation: **meaningful selling pressure is present.**
 
-`CMF_21 >= -0.20`
+:blue-background[CMF_21 >= -0.20]
 
 * The current value is no lower than the CMF(21) Strong Sell threshold.
-* Example: `-0.15` is Sell-side pressure but not a Strong candidate.
+* Example: :gray-background[-0.15] is Sell-side pressure but not a Strong candidate.
 * Layman’s translation: **selling pressure exists, but the reading is not below the Strong Sell threshold.**
 
-`not_falling_2bar(CMF_21)`
+:blue-background[not_falling_2bar(CMF_21)]
 
 * The following strict sequence is not true:
 
@@ -909,18 +1025,18 @@ current CMF < prior CMF < CMF two periods ago
 * The sequence may have fallen then risen, risen then fallen, stayed flat during either comparison, or risen through both moves.
 * Layman’s translation: **CMF has not worsened steadily through both recent moves.**
 
-`CMF_21 >= -0.20 or not_falling_2bar(CMF_21)`
+:blue-background[CMF_21 >= -0.20 or not_falling_2bar(CMF_21)]
 
 * Only one condition must be true.
 * It captures:
 
-  * readings below `-0.10` but no lower than `-0.20`; and
-  * readings below `-0.20` that lack the required two-move decline.
+  * readings below :gray-background[-0.10] but no lower than :gray-background[-0.20]; and
+  * readings below :gray-background[-0.20] that lack the required two-move decline.
 * Layman’s translation: **the reading does not have the complete “high and steadily strengthening” Strong Sell combination.**
 
 #### Literal summary
 
-CMF(21) is below `-0.10`, but it is either no lower than `-0.20` or has not fallen through both recent moves.
+CMF(21) is below :gray-background[-0.10], but it is either no lower than :gray-background[-0.20] or has not fallen through both recent moves.
 
 #### Plain-English version
 
@@ -933,13 +1049,15 @@ This is a **bearish distribution-pressure state without complete Strong confirma
 #### Notes / confidence
 
 * Sell is intentionally weaker than Strong Sell.
-* A value below `-0.20` can still be Sell.
+* A value below :gray-background[-0.20] can still be Sell.
 * Magnitude alone does not determine the Strong state.
 * Sell means distribution pressure—not a guaranteed exit signal.
 
 ---
 
-### Strong sell
+### Strong sell (CMF)
+(:small[[Parent](#cmf-21-rule-translation)])
+(:small[[See: 'How to read: Strong Sell'](#how-to-read-strong-sell)])
 
 ```json
 "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)"
@@ -947,14 +1065,14 @@ This is a **bearish distribution-pressure state without complete Strong confirma
 
 #### Literal component breakdown
 
-`CMF_21 < -0.20`
+:blue-background[CMF_21 < -0.20]
 
-* The current raw value is below `-0.20`.
+* The current raw value is below :gray-background[-0.20].
 * This is below the CMF(21) Strong Sell threshold.
-* On the scaled display, this is approximately below `-20`.
+* On the scaled display, this is approximately below :gray-background[-20].
 * Layman’s translation: **the 21-period distribution-pressure reading is already high.**
 
-`falling_2bar(CMF_21)`
+:blue-background[falling_2bar(CMF_21)]
 
 * The helper evaluates three observations.
 * It requires:
@@ -966,7 +1084,7 @@ current CMF < prior CMF < CMF two periods ago
 * There are two consecutive downward moves.
 * Layman’s translation: **CMF has become more negative twice in succession.**
 
-`CMF_21 < -0.20 and falling_2bar(CMF_21)`
+:blue-background[CMF_21 < -0.20 and falling_2bar(CMF_21)]
 
 * Both conditions must be true.
 * A deeply negative reading without the falling sequence is not Strong Sell.
@@ -975,7 +1093,7 @@ current CMF < prior CMF < CMF two periods ago
 
 #### Literal summary
 
-CMF(21) is below `-0.20`, and the current value is less than the prior value, which is less than the value two periods earlier.
+CMF(21) is below :gray-background[-0.20], and the current value is less than the prior value, which is less than the value two periods earlier.
 
 #### Plain-English version
 
@@ -990,12 +1108,13 @@ This is a **strong bearish distribution-continuation state**.
 * High confidence on the literal interpretation.
 * Negative CMF as distribution pressure is conventional.
 * The exact five-state system and two-move confirmation are project-specific.
-* `-0.20` is the approved CMF(21) Strong Sell threshold.
+* :gray-background[-0.20] is the approved CMF(21) Strong Sell threshold.
 * Strong Sell does not guarantee that price will fall next.
 
 ---
 
 ## Industry-standard baseline and project calibration
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 Industry practice generally agrees that:
 
@@ -1004,7 +1123,7 @@ Industry practice generally agrees that:
 * Negative CMF indicates distribution or selling pressure.
 * Zero is the natural centerline.
 * CMF can confirm or question price trends and breakouts.
-* Its theoretical `-1` to `+1` extremes are rarely reached.
+* Its theoretical :gray-background[-1] to :gray-background[+1] extremes are rarely reached.
 * Its practical range is substantially narrower.
 
 Industry practice does **not** define one universal:
@@ -1020,11 +1139,11 @@ classification system.
 
 |            Raw CMF | Scaled display | Practical interpretation               |
 | -----------------: | -------------: | -------------------------------------- |
-|      Above `+0.25` |    Above `+25` | unusually strong accumulation pressure |
-| `+0.10` to `+0.25` | `+10` to `+25` | meaningful accumulation pressure       |
-| `-0.10` to `+0.10` | `-10` to `+10` | weak, mixed, or inconclusive pressure  |
-| `-0.25` to `-0.10` | `-25` to `-10` | meaningful distribution pressure       |
-|      Below `-0.25` |    Below `-25` | unusually strong distribution pressure |
+|      Above :gray-background[+0.25] |    Above :gray-background[+25] | unusually strong accumulation pressure |
+| :gray-background[+0.10] to :gray-background[+0.25] | :gray-background[+10] to :gray-background[+25] | meaningful accumulation pressure       |
+| :gray-background[-0.10] to :gray-background[+0.10] | :gray-background[-10] to :gray-background[+10] | weak, mixed, or inconclusive pressure  |
+| :gray-background[-0.25] to :gray-background[-0.10] | :gray-background[-25] to :gray-background[-10] | meaningful distribution pressure       |
+|      Below :gray-background[-0.25] |    Below :gray-background[-25] | unusually strong distribution pressure |
 
 This is a practical reading guide, not a universal formal rulebook.
 
@@ -1051,24 +1170,24 @@ This is a practical reading guide, not a universal formal rulebook.
 ### Project-specific elements
 
 * the five signal labels;
-* scores from `-2` through `+2`;
-* the common `±0.10` Neutral-zone cutoffs;
+* scores from :gray-background[-2] through :gray-background[+2];
+* the common :gray-background[±0.10] Neutral-zone cutoffs;
 * period-specific Strong thresholds;
 * strict two-move Strong confirmation;
-* the `×100` display;
+* the :gray-background[×100] display;
 * exact boundary behavior.
 
 ### Buy/Sell cutoffs versus Strong thresholds
 
 | Threshold type                 |          CMF(21) value | Question answered                                                    |
 | ------------------------------ | ---------------------: | -------------------------------------------------------------------- |
-| Positive Buy cutoff            |                `+0.10` | Is accumulation pressure large enough to leave Neutral?              |
-| Negative Sell cutoff           |                `-0.10` | Is distribution pressure large enough to leave Neutral?              |
-| Positive Strong threshold      |                `+0.20` | Is accumulation pressure large enough for Strong Buy consideration?  |
-| Negative Strong Sell threshold |                `-0.20` | Is distribution pressure large enough for Strong Sell consideration? |
+| Positive Buy cutoff            |             :gray-background[+0.10] | Is accumulation pressure large enough to leave Neutral?              |
+| Negative Sell cutoff           |             :gray-background[-0.10] | Is distribution pressure large enough to leave Neutral?              |
+| Positive Strong threshold      |             :gray-background[+0.20] | Is accumulation pressure large enough for Strong Buy consideration?  |
+| Negative Strong Sell threshold |             :gray-background[-0.20] | Is distribution pressure large enough for Strong Sell consideration? |
 | Two-move confirmation          | three CMF observations | Is that large pressure still strengthening consistently?             |
 
-The `±0.10` cutoffs create a buffer around zero so tiny fluctuations do not continually alternate between Buy and Sell.
+The :gray-background[±0.10] cutoffs create a buffer around zero so tiny fluctuations do not continually alternate between Buy and Sell.
 
 The Strong thresholds test magnitude. The directional helper then tests continuation.
 
@@ -1077,17 +1196,18 @@ The Strong thresholds test magnitude. The directional helper then tests continua
 ---
 
 ## Comparison of the four CMF settings
+(:small[[Back to top](#summary-cmf-21-signals)])
 
-All four settings use the same `±0.10` Buy/Sell cutoffs and the same five-state model.
+All four settings use the same :gray-background[±0.10] Buy/Sell cutoffs and the same five-state model.
 
 Their Strong thresholds differ because longer, smoother CMF series generally occupy narrower empirical ranges.
 
 | Setting   | Relative speed      | Strong threshold | What it emphasizes                          | Main trade-off                                 |
 | --------- | ------------------- | ---------------: | ------------------------------------------- | ---------------------------------------------- |
-| `CMF(10)` | Fastest             |          `±0.25` | short-term changes in pressure              | reacts quickly, but changes state more often   |
-| `CMF(21)` | Standard / balanced |          `±0.20` | approximately one trading month of pressure | balances responsiveness and persistence        |
-| `CMF(30)` | Medium-slow         |         `±0.175` | more sustained pressure                     | smoother, but slower to react                  |
-| `CMF(50)` | Slowest             |          `±0.15` | persistent longer-horizon pressure          | filters more noise, but confirms changes later |
+| CMF(10) | Fastest             |       :gray-background[±0.25]| short-term changes in pressure              | reacts quickly, but changes state more often   |
+| CMF(21) | Standard / balanced |       :gray-background[±0.20]| approximately one trading month of pressure | balances responsiveness and persistence        |
+| CMF(30) | Medium-slow         |      :gray-background[±0.175]| more sustained pressure                     | smoother, but slower to react                  |
+| CMF(50) | Slowest             |       :gray-background[±0.15] | persistent longer-horizon pressure          | filters more noise, but confirms changes later |
 
 ### Practical selection guide
 
@@ -1110,141 +1230,103 @@ These are different time-horizon views of the same concept. They should not be t
 ---
 
 ## Rule interpretation tables
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 ### CMF(21) rules interpretation
 
 | Source      | Signal      | Rule logic                                                         | What’s happening                                                                           | Answers the question                                                                  | Bottom-line                                                                      |
 | ----------- | ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **CMF(21)** | Strong Buy  | `CMF_21 > 0.20 and rising_2bar(CMF_21)`                            | CMF is above the positive Strong threshold and has risen across both recent moves.         | *“Is accumulation pressure already high and still strengthening consistently?”*       | **Buying pressure is high and still strengthening.**                             |
-| **CMF(21)** | Buy         | `CMF_21 > 0.10 and (CMF_21 <= 0.20 or not_rising_2bar(CMF_21))`    | CMF is above the positive Buy cutoff, but the complete Strong Buy combination is absent.   | *“Is meaningful accumulation pressure present without complete Strong confirmation?”* | **Buying pressure exists, but it is not both high and steadily strengthening.**  |
-| **CMF(21)** | Neutral     | `-0.10 <= CMF_21 <= 0.10`                                          | CMF remains inside the middle pressure zone.                                               | *“Has neither side gained enough of a volume-backed advantage to leave Neutral?”*     | **Neither side has a clear volume-backed pressure advantage.**                   |
-| **CMF(21)** | Sell        | `CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))` | CMF is below the negative Sell cutoff, but the complete Strong Sell combination is absent. | *“Is meaningful distribution pressure present without complete Strong confirmation?”* | **Selling pressure exists, but it is not both high and steadily strengthening.** |
-| **CMF(21)** | Strong Sell | `CMF_21 < -0.20 and falling_2bar(CMF_21)`                          | CMF is below the negative Strong Sell threshold and has fallen across both recent moves.   | *“Is distribution pressure already high and still strengthening consistently?”*       | **Selling pressure is high and still strengthening.**                            |
+| **CMF(21)** | Strong Buy  | :gray-background[CMF_21 > 0.20 and rising_2bar(CMF_21)]                           | CMF is above the positive Strong threshold and has risen across both recent moves.         | *“Is accumulation pressure already high and still strengthening consistently?”*       | **Buying pressure is high and still strengthening.**                             |
+| **CMF(21)** | Buy         | :gray-background[CMF_21 > 0.10 and (CMF_21 <= 0.20 or not_rising_2bar(CMF_21))]   | CMF is above the positive Buy cutoff, but the complete Strong Buy combination is absent.   | *“Is meaningful accumulation pressure present without complete Strong confirmation?”* | **Buying pressure exists, but it is not both high and steadily strengthening.**  |
+| **CMF(21)** | Neutral     | :gray-background[-0.10 <= CMF_21 <= 0.10]                                         | CMF remains inside the middle pressure zone.                                               | *“Has neither side gained enough of a volume-backed advantage to leave Neutral?”*     | **Neither side has a clear volume-backed pressure advantage.**                   |
+| **CMF(21)** | Sell        | :gray-background[CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))]| CMF is below the negative Sell cutoff, but the complete Strong Sell combination is absent. | *“Is meaningful distribution pressure present without complete Strong confirmation?”* | **Selling pressure exists, but it is not both high and steadily strengthening.** |
+| **CMF(21)** | Strong Sell | :gray-background[CMF_21 < -0.20 and falling_2bar(CMF_21)]                         | CMF is below the negative Strong Sell threshold and has fallen across both recent moves.   | *“Is distribution pressure already high and still strengthening consistently?”*       | **Selling pressure is high and still strengthening.**                            |
 
 
 ---
 
-## Hover fields
+## Understanding the CMF hover
+(:small[[Back to top](#summary-cmf-21-signals)])
 
-CMF hover may display:
+The three heatmaps share the same authoritative CMF classification, Rule explanation and Context Interpretation. The opening layout differs slightly: **Rolling** leads with the indicator Value; **SCD Single Indicator** also shows price/volume context where available; **SCD Multiple Indicators** retains its trailing raw-payload summary. These additions do **not** change CMF scoring.
 
-```text
-Value
-Δ vs prior day
-Trend
-Signal
-Pressure
-Strong threshold
-2-move confirmation
-Rule
-Notes
-Definition
-How to Read
-```
+### Hover field map
+(:small[[Parent](#understanding-the-cmf-hover)])
 
-### Value
+| Field | What it tells you | Source / interpretation |
+|---|---|---|
+| **Value** | Current CMF × 100, to one decimal. | Numeric CMF level; the **cell-only** :red-background[↗] / :red-background[↘] suffix is not part of the hover's Value. |
+| **Δ vs prior day** | Current minus prior CMF, shown in scaled CMF points; a relative change may also appear. | One-session change, **not** a four-move trend. |
+| **Trend** | Rising, Falling or Flat relative to the previous CMF observation. | One CMF move only. |
+| **Signal** | Strong Buy / Buy / Neutral / Sell / Strong Sell. | Authoritative rule-engine state; determines the background color. |
+| **2-move confirmation** | Rising across 2 moves, Falling across 2 moves, Not met or Not available. | Uses three valid CMF readings; relevant to Strong qualification. It is **not** the Neutral arrow's four-move test. |
+| **Rule** | The actual threshold and historical evidence explaining this Signal. | Dynamic five-state explanation; shows why Strong did or did not qualify. |
+| **CMF Interpretation** | Interprets accumulation, distribution or Neutral from volume-weighted closing locations. | Describes the **CMF measurement window**, not a direct count of buyers or sellers. |
+| **Bottom-line** | Relates the latest verified price direction to current CMF pressure and, where established, its recent development. | Price comparison uses aligned canonical **Adjusted Close**, falling back to **Close**; no prediction. |
+| **Notes** | Additional rulebook guidance, including the :red-background[↗] / :red-background[↘] legend you've added. | Educational text; does not affect signals. |
+| **Definition / How to Read** | Indicator definition and interpretation guidance. | Static explanation text. |
 
-The hover value is the raw CMF multiplied by `100`.
+:red[Pressure] and :red[Strong threshold] are **not separate CMF hover fields** in the completed layout. The pressure qualification and period-specific Strong cutoff are conveyed by **Signal**, **Rule** and **CMF Interpretation**.
 
-```text
-Value: +12.2
-```
-
-corresponds to approximately:
-
-```text
-Raw CMF: +0.122
-```
-
-### Delta versus prior day
-
-The absolute delta is displayed in scaled CMF points.
+### Value and delta: concrete example
+(:small[[Parent](#understanding-the-cmf-hover)])
 
 ```text
 Current raw CMF: +0.122
 Prior raw CMF:   +0.125
-Raw difference:  -0.003
-Displayed delta: -0.3
+Hover Value:     +12.2
+Displayed Δ:    −0.3 CMF points
 ```
 
-The relative percentage, when shown, is calculated from raw values:
+The app multiplies the raw CMF by 100 **only for presentation**. The absolute delta is :gray-background[(current − prior) × 100]. If a relative percentage is shown, it is :gray-background[(current − prior) / abs(prior) × 100]. Very small prior CMF readings can produce large percentages; prefer the signed CMF level and **absolute** delta near zero.
+
+### Trend, confirmation and arrow timing are different
+(:small[[Parent](#understanding-the-cmf-hover)])
+
+| Observation | Required history | Example | Meaning |
+|---|---:|---|---|
+| **Trend: Rising** | 2 CMF readings | :gray-background[−29.9 → −29.1] | The latest CMF move rose. |
+| **2-move confirmation: Rising** | 3 CMF readings | :gray-background[−30.9 → −29.9 → −29.1] | Two consecutive increases. |
+| **Sell :red-background[↗]** | 3 CMF readings | :gray-background[−30.9 → −29.9 → −29.1] | Distribution pressure easing; Sell remains qualified. |
+| **Buy :red-background[↘]** | 3 CMF readings | :gray-background[+22.0 → +20.5 → +18.4] | Accumulation pressure easing; Buy remains qualified. |
+| **Neutral :red-background[↗] or :red-background[↘]** | 5 CMF readings | :gray-background[−16 → −13 → −9 → −5 → −2] | Four consecutive moves; only the **latest** reading must be Neutral. |
+
+The **2-move confirmation** field can say :gray-background[Rising across 2 moves] on a Neutral cell even when **no Neutral arrow** appears: the Neutral suffix requires four, not two, monotonic moves. Missing predecessor evidence cannot establish an arrow. A missing *current* CMF value must not be interpreted as a valid Neutral reading. All comparisons use the raw, unrounded observations, including days before the visible heatmap window.
+
+### How to read the Dynamic Rule and Context Interpretation
+(:small[[Parent](#understanding-the-cmf-hover)])
+
+Use the NVDA CMF(21) example as a concrete reading:
 
 ```text
-(current - prior) / abs(prior) × 100
+CMF sequence: −30.9 → −29.9 → −29.1
+Signal: Sell
+2-move confirmation: Rising across 2 moves
+Cell: −29.1↗
 ```
 
-When the prior CMF is close to zero, a small absolute move can create a very large relative percentage. Near zero, the CMF level and absolute change are generally more intuitive than that percentage.
+**Rule:** The current reading is below the −10 distribution cutoff and is also more negative than the CMF(21) Strong Sell threshold of −20. However, CMF **rose**, rather than fell, across the two moves. Thus the Strong Sell magnitude test passes, but its required two-move decline fails; Sell is correct. The Rule identifies the actual failed condition instead of merely repeating the Signal.
 
-### Trend versus two-move confirmation
+**CMF Interpretation:** The weighted closing locations over the **21-session measurement window** favor distribution pressure. This describes the CMF calculation, **not** today's stock-price direction or the identity of market participants.
 
-`Trend` compares only the current CMF value with the immediately prior value:
+**Bottom-line:** In this example, price rose on September 15, 2026, while CMF became less negative across the two moves: distribution pressure was **easing**. Daily price movement and 21-session CMF are different observation windows; neither establishes what price must do next.
 
-```text
-Rising
-Falling
-Flat
-```
-
-The Strong rule’s confirmation examines three values:
-
-```text
-current
-prior
-two periods ago
-```
-
-A hover can therefore say:
-
-```text
-Trend: Rising
-2-move confirmation: Not met
-```
-
-without contradiction.
-
-It means the latest move was upward, but the move before it did not also rise.
-
-### Pressure
-
-| Hover pressure     | Raw condition                    |
-| ------------------ | -------------------------------- |
-| Accumulation       | CMF above `+0.10`                |
-| Balanced / Neutral | CMF from `-0.10` through `+0.10` |
-| Distribution       | CMF below `-0.10`                |
-
-### Strong threshold
-
-| Row     | Hover threshold |
-| ------- | --------------: |
-| CMF(10) |           `±25` |
-| CMF(21) |           `±20` |
-| CMF(30) |         `±17.5` |
-| CMF(50) |           `±15` |
-
-### Two-move confirmation
-
-| Hover text             | Meaning                                                 |
-| ---------------------- | ------------------------------------------------------- |
-| Rising across 2 moves  | `current > prior > two periods ago`                     |
-| Falling across 2 moves | `current < prior < two periods ago`                     |
-| Not met                | three values exist, but neither strict sequence is true |
-| Not available          | insufficient prior observations are available           |
+The Bottom-line is conditional on verified, same-date canonical price observations. If price history is unavailable or misaligned, the display reports that limitation rather than inventing agreement or disagreement. The Context Interpretation also fails closed if the active rulebook or score does not match the approved CMF semantics. **A five-state rule is not finished if a human cannot reconstruct why an observation landed in each state.**
 
 ---
 
 ## Why price and CMF can move in opposite directions
+(:small[[Back to top](#summary-cmf-21-signals)] | :small[[Previous](#understanding-the-cmf-hover)])
 
 CMF and price do not measure the same thing.
 
 Price may rise while CMF falls when:
-
 * the stock rises from the prior close;
 * but closes lower within the current day’s range;
 * weaker closing locations carry heavier volume;
 * or recent positive money-flow contributions fade.
 
 Price may fall while CMF rises when:
-
 * the stock remains below the prior close;
 * but closes higher within the current day’s range;
 * or stronger closing locations carry heavier volume.
@@ -1264,6 +1346,7 @@ That may question the participation behind the price move, but the current proje
 ---
 
 ## Strengths and limitations
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 ### Strengths
 
@@ -1312,16 +1395,17 @@ A small prior value can create a large relative percentage even when the absolut
 ---
 
 ## Initial audit note
+(:small[[Back to top](#summary-cmf-21-signals)])
 
 The earlier CMF rules were not documented as authoritative without review.
 
 The final approved work included:
 * confirming canonical raw CMF units;
-* correcting computation to use raw `Close` consistently with raw `High` and `Low`;
+* correcting computation to use raw :gray-background[Close] consistently with raw :gray-background[High] and :gray-background[Low];
 * validating CMF(10), CMF(21), CMF(30), and CMF(50) through the production numeric and classifier paths;
 * selecting period-calibrated Strong thresholds;
 * making the five states complete and mutually exclusive;
-* preserving raw CMF for rules while applying `×100` only for display;
+* preserving raw CMF for rules while applying :gray-background[×100] only for display;
 * adding CMF-specific hover context;
 * verifying behavior in:
   * Rolling Signals Heatmap;
@@ -1341,6 +1425,8 @@ It is not an overbought/oversold reversal model.
 
 ---
 ## My Notes
+(:small[[Back to top](#summary-cmf-21-signals)])
+
 CMF is for assessing the prevailing buy or sell pressure over a sustained period. 
 - CMF helps confirm trends and potential reversals.
 
@@ -1373,3 +1459,61 @@ MFI gives a more direct overbought/oversold signal, whereas CMF is more focused 
 The main difference is that: 
 - Money Flow Index (MFI) is a momentum oscillator that uses price and volume to identify overbought/oversold conditions, ranging from 0-100
 - Chaikin Money Flow (CMF) measures the strength of buying and selling pressure over a longer period, using a multiplier based on the price's closing position within its high-low range, resulting in a range between -1 and +1. 
+
+## Table of Contents
+(:small[[Back to top](#summary-cmf-21-signals)])
+
+- [Summary: CMF(21) signals](#summary-cmf-21-signals)
+  - [Display-value Customizations: ↗ / ↘](#how-to-read-display-value-customizations)
+  - [Most Important Patterns](#most-important-patterns)
+  - [CMF period rule comparison](#cmf-period-rule-comparison)
+- [CMF(21) — brief overview](#cmf-21-brief-overview)
+  - [Simplest mental model](#simplest-mental-model)
+  - [What the displayed number means](#what-the-displayed-number-means)
+  - [Why +0.22 is already meaningful](#why-0-22-is-already-meaningful)
+  - [Quick intuitive model](#quick-intuitive-model)
+  - [Value-added use](#value-added-use)
+  - [Use with](#use-with)
+  - [Important distinction](#important-distinction)
+- [How to read the CMF(21) heatmap](#how-to-read-the-cmf-21-heatmap)
+  - [The three questions behind the CMF(21) rules](#the-three-questions-behind-the-cmf-21-rules)
+  - [Practical reading scale](#practical-reading-scale)
+  - [Important rounding note](#important-rounding-note)
+  - [The CMF patterns you should not overlook](#the-cmf-patterns-you-should-not-overlook)
+    - [How to prioritize the CMF patterns](#how-to-prioritize-the-cmf-patterns)
+  - [How to Read: Strong Buy](#how-to-read-strong-buy)
+  - [How to Read: Buy](#how-to-read-buy)
+  - [How to Read: Neutral](#how-to-read-neutral)
+  - [How to Read: Sell](#how-to-read-sell)
+  - [How to Read: Strong Sell](#how-to-read-strong-sell)
+- [CMF formula — what is being measured](#cmf-formula-what-is-being-measured)
+  - [Step 1 — Money Flow Multiplier](#step-1-money-flow-multiplier)
+  - [Step 2 — Money Flow Volume](#step-2-money-flow-volume)
+  - [Step 3 — Chaikin Money Flow](#step-3-chaikin-money-flow)
+  - [Important implication](#important-implication)
+- [CMF(21) Rule Translation](#cmf-21-rule-translation)
+  - [Strong Buy](#strong-buy-cmf)
+  - [Buy](#buy-cmf)
+  - [Neutral](#neutral-cmf)
+  - [Sell](#sell-cmf)
+  - [Strong Sell](#strong-sell-cmf)
+- [Industry-standard baseline and project calibration](#industry-standard-baseline-and-project-calibration)
+  - [Practical magnitude context](#practical-magnitude-context)
+  - [Conventional elements (Basic Interpretation)](#conventional-elements-basic-interpretation)
+  - [Project-specific elements](#project-specific-elements)
+  - [Buy/Sell cutoffs versus Strong thresholds](#buy-sell-cutoffs-versus-strong-thresholds)
+- [Comparison of the four CMF settings](#comparison-of-the-four-cmf-settings)
+  - [Practical selection guide](#practical-selection-guide)
+- [Rule interpretation tables](#rule-interpretation-tables)
+  - [CMF(21) rules interpretation](#cmf-21-rules-interpretation)
+- [Understanding the CMF hover](#understanding-the-cmf-hover)
+  - [Hover field map](#hover-field-map)
+  - [Value and delta: concrete example](#value-and-delta-concrete-example)
+  - [Trend, confirmation and arrow timing are different](#trend-confirmation-and-arrow-timing-are-different)
+  - [How to read the Dynamic Rule and Context Interpretation](#how-to-read-the-dynamic-rule-and-context-interpretation)
+- [Why price and CMF can move in opposite directions](#why-price-and-cmf-can-move-in-opposite-directions)
+- [Strengths and limitations](#strengths-and-limitations)
+  - [Strengths](#strengths)
+  - [Limitations](#limitations)
+- [Initial audit note](#initial-audit-note)
+- [My Notes](#my-notes)
