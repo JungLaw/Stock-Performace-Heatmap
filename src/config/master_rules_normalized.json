@@ -1225,7 +1225,7 @@
               "neutral": "pct_b >= 0.10 and pct_b <= 0.90",
               "sell": "pct_b > 0.90 and pct_b <= 1.20",
               "strong_sell": "pct_b > 1.20",
-              "notes": "ST Bollinger %B exhaustion model. Raw %B units: -0.20/0.10/0.90/1.20 correspond to displayed -20/10/90/120. Lower extremes are contrarian Buy-side exhaustion; upper extremes are contrarian Sell-side exhaustion. Strong thresholds are wider for BB(10,1.5) because its tighter short-term bands are breached more frequently."
+              "notes": "<span style=\"color:#A855F7\"><b>Purple values</b></span>: 'Very Narrow' Bandwidth (ST: < 10th percentile; MT/LT: < 5th percentile)<br><b>◆ Compression Exit:</b> Bands have emerged from compresed state & expanding"
             },
             "20_2.0": {
               "strong_buy": "pct_b < -0.10",
@@ -1233,7 +1233,7 @@
               "neutral": "pct_b >= 0.10 and pct_b <= 0.90",
               "sell": "pct_b > 0.90 and pct_b <= 1.10",
               "strong_sell": "pct_b > 1.10",
-              "notes": "MT Bollinger %B exhaustion model. Raw %B units: -0.10/0.10/0.90/1.10 correspond to displayed -10/10/90/110. Lower extremes are contrarian Buy-side exhaustion; upper extremes are contrarian Sell-side exhaustion. Strong thresholds are calibrated beyond the BB(20,2.0) envelope."
+              "notes": "<span style=\"color:#A855F7\"><b>Purple values</b></span>: 'Very Narrow' Bandwidth (ST: < 10th percentile; MT/LT: < 5th percentile)<br><b>◆ Compression Exit:</b> Bands have emerged from compresed state & expanding"
             },
             "50_2.5": {
               "strong_buy": "pct_b < 0.00",
@@ -1241,7 +1241,7 @@
               "neutral": "pct_b >= 0.10 and pct_b <= 0.90",
               "sell": "pct_b > 0.90 and pct_b <= 1.00",
               "strong_sell": "pct_b > 1.00",
-              "notes": "LT Bollinger %B exhaustion model. Raw %B units: 0.00/0.10/0.90/1.00 correspond to displayed 0/10/90/100. Lower extremes are contrarian Buy-side exhaustion; upper extremes are contrarian Sell-side exhaustion. For BB(50,2.5), an actual band breach is already sufficiently rare to qualify as Strong."
+              "notes": "<span style=\"color:#A855F7\"><b>Purple values</b></span>: 'Very Narrow' Bandwidth (ST: < 10th percentile; MT/LT: < 5th percentile)<br><b>◆ Compression Exit:</b> Bands have emerged from compresed state & expanding"
             }
           },
           "overlay": {
@@ -1366,7 +1366,7 @@
               "neutral": "-0.10 <= CMF_21 <= 0.10",
               "sell": "CMF_21 < -0.10 and (CMF_21 >= -0.20 or not_falling_2bar(CMF_21))",
               "strong_sell": "CMF_21 < -0.20 and falling_2bar(CMF_21)",
-              "notes": "<b>↗|↘:</b>: CMF increasing/decreasing—not stock price direction.<br><b>Sell ↗:</b> CMF rose 2 consecutive moves (Distribution pressure easing)<br><b>Buy ↘:</b> CMF fell 2 consecutive moves (Accumulation pressure easing)<br><b>Neutral ↗|↘:</b> CMF rose/fell for 4 consecutive moves (directional pressure may be building or easing)"
+              "notes": "<b>↗|↘:</b> CMF increasing/decreasing—not stock price direction.<br><b>Sell ↗:</b> CMF rose 2 consecutive moves (Distribution pressure easing)<br><b>Buy ↘:</b> CMF fell 2 consecutive moves (Accumulation pressure easing)<br><b>Neutral ↗|↘:</b> CMF rose/fell for 4 consecutive moves (directional pressure may be building or easing)"
             },
             "50": {
               "strong_buy": "CMF_50 > 0.15 and rising_2bar(CMF_50)",

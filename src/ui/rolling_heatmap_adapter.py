@@ -23,6 +23,8 @@ from src.ui.indicator_hover_explanations import (
     get_cmf_rule_explanation,
     get_cmf_context_interpretation,
     get_cmf_easing_marker,
+    get_bollinger_pct_b_rule_explanation,
+    get_bollinger_pct_b_bottom_line,
 )
 
 import numpy as np
@@ -131,6 +133,8 @@ def _compact_hover_rule(value: Any) -> str:
         "<br><b>Rule:</b><br>", "<b>Rule:</b> ", 1
     ).replace(
         "<br><b>Rule:</b> ", "<b>Rule:</b> ", 1
+    ).replace(
+        "<br><b>Rule (%B):</b><br>", "<b>Rule (%B):</b> ", 1
     )
 
 
@@ -1018,8 +1022,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW_ST": {
         "display_name": "BB Bandwidth(ST)",
-        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
-        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>4.20 | Normal | Stable → relatively narrow value, but normal for this ticker; little change.<br>18.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Bandwidth State = current width vs recent history. Bandwidth Change (1D) = widening, narrowing, or stable. Bandwidth Development: use to quantify compression-to-expansion movements.",
+        "how_to_read": "Read Value + Bandwidth State + Bandwidth Change (1D) together: Value = current band width; State = how unusual it is; 1D Change = where it's moving.",
     },
     "BB_PCT_B": {
         "display_name": "BB %B",
@@ -1039,8 +1043,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW": {
         "display_name": "BB Bandwidth",
-        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
-        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>4.20 | Normal | Stable → relatively narrow value, but normal for this ticker; little change.<br>25.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Bandwidth State = current width vs recent history. Bandwidth Change (1D) = widening, narrowing, or stable. Bandwidth Development: use to quantify compression-to-expansion movements.",
+        "how_to_read": "Read Value + Bandwidth State + Bandwidth Change (1D) together: Value = current band width; State = how unusual it is; 1D Change = where it's moving.",
     },
     "BB_PCT_B_LT": {
         "display_name": "BB %B(LT)",
@@ -1060,8 +1064,8 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "BB_BW_LT": {
         "display_name": "BB Bandwidth(LT)",
-        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Volatility State = current width vs recent history. Bandwidth Direction = widening, narrowing, or stable.",
-        "how_to_read": "Read Value + State + Direction together: Value = current band width; State = how unusual it is; Direction = where it's moving.<br>8.00 | Normal | Stable → moderate value, but normal for this ticker; little change.<br>42.00 | Very Expanded | Contracting → very wide vs recent history, but narrowing.",
+        "definition": "Bollinger Bandwidth = total Upper-to-Lower band width as a % of the middle band. Bandwidth State = current width vs recent history. Bandwidth Change (1D) = widening, narrowing, or stable. Bandwidth Development: use to quantify compression-to-expansion movements.",
+        "how_to_read": "Read Value + Bandwidth State + Bandwidth Change (1D) together: Value = current band width; State = how unusual it is; 1D Change = where it's moving.",
     },
     # Volatility / risk calibration
     "ATR_5": {
@@ -1992,6 +1996,44 @@ def get_indicator_doc_slug(row_key: str) -> str:
 # ----------------------------
 # Contract adapter (pure)
 # ----------------------------
+# Shared display vocabulary for standalone Bandwidth and enhanced %B hover.
+# Numeric, percentile, and rule semantics remain owned by the upstream producer.
+_BOLLINGER_BW_STATE_DISPLAY = {
+    "Very Compressed": "Very Narrow",
+    "Compressed": "Narrow",
+    "Normal": "Typical",
+    "Expanded": "Wide",
+    "Very Expanded": "Very Wide",
+}
+
+
+def _display_bollinger_bw_state(raw_state: Any, percentile: Any = None) -> str:
+    """Return consistent historical Bandwidth State text for both hover types."""
+    display = _BOLLINGER_BW_STATE_DISPLAY.get(raw_state, "Unavailable")
+    if display == "Unavailable":
+        return display
+    try:
+        rank = float(percentile)
+    except (TypeError, ValueError, OverflowError):
+        return display
+    if not np.isfinite(rank) or not 0 <= rank <= 1:
+        return display
+    # Fractional percentile labels should read "2.1st", not "2.1th".
+    rank_label = f"{rank * 100:.1f}"
+    if rank_label.endswith(".0"):
+        rank_label = rank_label[:-2]
+    decimal_digit = int(rank_label[-1]) if "." in rank_label else 0
+    if decimal_digit:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(decimal_digit, "th")
+    else:
+        whole = int(rank_label.split(".", 1)[0])
+        suffix = (
+            "th" if whole % 100 in (11, 12, 13)
+            else {1: "st", 2: "nd", 3: "rd"}.get(whole % 10, "th")
+        )
+    return f"{display} ({rank_label}{suffix} percentile)"
+
+
 def build_plotly_heatmap_inputs(
     *,
     rolling_payload: dict,
@@ -3341,6 +3383,15 @@ def build_plotly_heatmap_inputs(
                     except (TypeError, ValueError, OverflowError):
                         pass
 
+            # Bollinger %B delta/trend must use the real chronological
+            # predecessor, including on the first visible heatmap date.
+            if key.startswith("BB_PCT_B") and isinstance(extra_map, dict):
+                true_prior = _to_float_or_none(
+                    extra_map.get("bb_pct_b_prior_value")
+                )
+                if true_prior is not None:
+                    prev_v = true_prior
+
             # MACD's first displayed observation may have a valid historical
             # predecessor outside the visible window. Use the upstream
             # full-history histogram only for that first displayed date.
@@ -3462,13 +3513,11 @@ def build_plotly_heatmap_inputs(
                         rule_text = hma_curated
                         hma_curated_rule_valid = True
 
-            # BB_BW no longer inherits the parent Bollinger directional rule.
-            # Its score is Neutral / 0 by upstream semantic contract, so the
-            # legacy Bollinger price-position rule must not be presented as
-            # though it caused the BB_BW score.
+            # BB_BW keeps canonical Neutral / 0. The companion %B rule is
+            # independently verified before it can be displayed as context.
+            # Rule Notes come from the same horizon's existing rulebook entry.
             if key.startswith("BB_BW"):
                 rule_expr = ""
-                rule_notes = ""
                 rule_text = ""
 
             definition = defs.get(key, {}).get("definition", "")
@@ -3503,6 +3552,7 @@ def build_plotly_heatmap_inputs(
             dpo_context_block = ""
             band_context_block = ""
             bb_bw_context_block = ""
+            bb_pct_b_post_rule_block = ""
             ma_context_block = ""
             vwma_post_signal_block = ""
             vwma_context_interpretation_block = ""
@@ -4911,6 +4961,21 @@ def build_plotly_heatmap_inputs(
                 )
                 delta_unit_suffix = ""
 
+            elif key.startswith("BB_PCT_B"):
+                # %B raw fraction is displayed ×100; its absolute delta must
+                # use the same units. Relative percentage remains unchanged.
+                pct_b_delta_display = (
+                    delta_abs * 100.0 if delta_abs is not None else None
+                )
+                delta_abs_fmt = format_signed_number(
+                    pct_b_delta_display, decimals=1,
+                )
+                delta_pct_suffix = (
+                    " (" + format_signed_percent(delta_pct, decimals=1) + ")"
+                    if delta_pct is not None else ""
+                )
+                delta_unit_suffix = ""
+
             elif key.startswith("BB_BW"):
                 bb_bw_delta_display = (
                     delta_abs * 100.0
@@ -5094,7 +5159,52 @@ def build_plotly_heatmap_inputs(
                     signal_line = str(signal_line).removeprefix("<br>")
                     delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
                     trend_line = _bold_hover_prefix(trend_line, "Trend")
-            rule_block = _format_hover_block("Rule", rule_text, width=80)
+            # Guarded Bollinger Rule: validate the actual %B value, score,
+            # and entire active five-state rulebook. For BW, these come from
+            # the sibling %B observation; BW's own s/score stays Neutral / 0.
+            bb_rule = None
+            bb_companion_score = None
+            if key.startswith(("BB_PCT_B", "BB_BW")):
+                bb_variant = _rulebook_param_key(key)
+                bb_value = v
+                bb_score = s
+                bb_rules = all_state_rules
+                if key.startswith("BB_BW"):
+                    bb_value = _to_float_or_none(
+                        extra_map.get("bb_pct_b_companion_value")
+                    ) if isinstance(extra_map, dict) else None
+                    candidate = extra_map.get("bb_pct_b_companion_score") if isinstance(extra_map, dict) else None
+                    bb_score = (
+                        candidate if isinstance(candidate, int)
+                        and not isinstance(candidate, bool)
+                        and candidate in (-2, -1, 0, 1, 2) else None
+                    )
+                    if bb_score is not None:
+                        _, _, _, bb_rules = _find_rule_block(key, bb_score)
+                bb_rule = get_bollinger_pct_b_rule_explanation(
+                    bb_variant, score_to_rule_key(bb_score), bb_score,
+                    bb_rules, bb_value,
+                ) if bb_value is not None and bb_score is not None else None
+                if bb_rule:
+                    rule_text = bb_rule
+                    if key.startswith("BB_BW"):
+                        bb_companion_score = bb_score
+
+            rule_block = _format_hover_block(
+                "Rule (%B)" if key.startswith("BB_BW") else "Rule",
+                rule_text, width=80,
+            )
+            if key.startswith(("BB_PCT_B", "BB_BW")):
+                rule_block = _compact_hover_rule(rule_block)
+                delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
+                trend_line = _bold_hover_prefix(trend_line, "Trend")
+                signal_line = signal_line.removeprefix("<br>")
+                if key.startswith("BB_BW"):
+                    companion_label = (
+                        score_to_label(bb_companion_score)
+                        if bb_companion_score is not None else "Unavailable"
+                    )
+                    signal_line = f"<b>Signal (%B):</b> {companion_label}<br>"
             if key.startswith("CMF_"):
                 # Compact CMF layout keeps all approved labels on one line.
                 rule_block = _compact_hover_rule(rule_block).removeprefix("<br>")
@@ -5277,7 +5387,7 @@ def build_plotly_heatmap_inputs(
 
             # BOLLINGERS: Custom hover content (deltas)
             #if key in {"BB_PCT_B", "BB_BW"} and isinstance(extra_map, dict) and extra_map:
-            if key in {"BB_PCT_B_ST", "BB_BW_ST", "BB_PCT_B", "BB_BW", "BB_PCT_B_LT", "BB_BW_LT"} and isinstance(extra_map, dict) and extra_map:
+            if key in {"BB_PCT_B_ST", "BB_BW_ST", "BB_PCT_B", "BB_BW", "BB_PCT_B_LT", "BB_BW_LT"} and isinstance(extra_map, dict):
                 parts = []
                 current_price = price_by_date.get(d_raw)
 
@@ -5306,53 +5416,138 @@ def build_plotly_heatmap_inputs(
                 if parts:
                     band_context_block = "<br>" + "<br>".join(parts) + "<br>"
 
-                # Bollinger Bandwidth semantic context comes directly from the
-                # upstream rolling payload. Do not recompute Bandwidth state,
-                # percentile, or direction in the adapter.
-                #
-                # Standalone BB_BW rows show their own State/Direction.
-                # %B rows additionally show the matching sibling Bandwidth value
-                # transported upstream by technical.py.
-                if key.startswith("BB_BW") or key.startswith("BB_PCT_B"):
-                    semantic_parts = []
+                # Shared state/development/breach/Bottom-line presentation.
+                # BW displays its own numeric value in the opening; the
+                # companion %B signal/rule are explicitly labeled above.
+                if key.startswith(("BB_PCT_B", "BB_BW")):
+                    # All values and event semantics originate upstream.
+                    # Each line has one information job; this block appears
+                    # AFTER Signal/Rule in all three heatmap consumers.
+                    def _bb_number(name: str) -> Optional[float]:
+                        return _to_float_or_none(extra_map.get(name))
 
-                    volatility_state = extra_map.get(
-                        "volatility_state"
+                    lines = []
+                    width = _bb_number("bandwidth_value")
+                    delta_1d = _bb_number("bandwidth_delta_1d")
+                    rel_1d = _bb_number("bandwidth_relative_change")
+                    if key.startswith("BB_BW"):
+                        # The row's Value already supplies current Bandwidth.
+                        pass
+                    elif width is not None:
+                        suffix = ""
+                        if delta_1d is not None:
+                            movement = (
+                                "Rising" if delta_1d > 0 else
+                                "Falling" if delta_1d < 0 else "Flat"
+                            )
+                            suffix = f" ({delta_1d * 100:+.2f}"
+                            if rel_1d is not None:
+                                suffix += f", {rel_1d * 100:+.1f}%"
+                            suffix += f" | {movement})"
+                        lines.append(
+                            f"<b>Bandwidth:</b> {width * 100:.2f}{suffix}"
+                        )
+                    elif key.startswith("BB_PCT_B"):
+                        lines.append("<b>Bandwidth:</b> Unavailable")
+
+                    state = extra_map.get("volatility_state")
+                    percentile = _bb_number("bandwidth_percentile")
+                    lines.append(
+                        "<b>Bandwidth State:</b> "
+                        + _display_bollinger_bw_state(state, percentile)
                     )
-                    bandwidth_direction = extra_map.get(
-                        "bandwidth_direction"
+
+                    bw_direction = extra_map.get("bandwidth_direction")
+                    lines.append(
+                        "<b>Bandwidth Change (1D):</b> "
+                        + (bw_direction if bw_direction in (
+                            "Expanding", "Contracting", "Stable"
+                        ) else "Unavailable")
                     )
 
-                    if key.startswith("BB_PCT_B"):
-                        bandwidth_value = extra_map.get(
-                            "bandwidth_value"
+                    delta_5d = _bb_number("bandwidth_delta_5d")
+                    rel_5d = _bb_number("bandwidth_relative_5d")
+                    streak = extra_map.get("bandwidth_direction_streak")
+                    streak_exact = extra_map.get("bandwidth_streak_exact")
+                    if delta_5d is not None and rel_5d is not None:
+                        development = (
+                            f"{delta_5d * 100:+.2f} points "
+                            f"({rel_5d * 100:+.1f}%) over 5 sessions"
                         )
+                        if (
+                            bw_direction in ("Expanding", "Contracting")
+                            and isinstance(streak, int) and not isinstance(streak, bool)
+                            and streak > 0
+                        ):
+                            known = "" if streak_exact is True else "at least "
+                            development += (
+                                f"; {known}{streak} consecutive "
+                                f"{bw_direction} sessions"
+                            )
+                        if extra_map.get("bandwidth_compression_exit") is True:
+                            development += "; Compression Exit today"
+                    else:
+                        development = "Unavailable"
+                    lines.append(
+                        "<b>Bandwidth Development:</b> "
+                        + _wrap_hover_text(development, width=80)
+                    )
 
-                        if not _is_missing(bandwidth_value):
-                            try:
-                                bandwidth_display = (
-                                    float(bandwidth_value) * 100.0
-                                )
-                                semantic_parts.append(
-                                    f"Bandwidth: {bandwidth_display:.2f}"
-                                )
-                            except (TypeError, ValueError):
-                                pass
+                    breach = extra_map.get("bb_breach_status")
+                    allowed_breach = {
+                        "Fresh Lower Breach", "Continuing Lower Breach",
+                        "Lower-Band Re-entry", "Fresh Upper Breach",
+                        "Continuing Upper Breach", "Upper-Band Re-entry",
+                        "No Active Breach", "Transition Unavailable",
+                        "Outside Lower Band (Onset Unknown)",
+                        "Outside Upper Band (Onset Unknown)",
+                    }
+                    if breach not in allowed_breach:
+                        breach = "Unavailable"
+                    count = extra_map.get("bb_breach_count")
+                    exact = extra_map.get("bb_breach_count_exact")
+                    if breach.startswith("Continuing ") and (
+                        isinstance(count, int) and not isinstance(count, bool)
+                        and count >= 2
+                    ):
+                        qualifier = "" if exact is True else "at least "
+                        breach += f" ({qualifier}{count} consecutive closes)"
+                    lines.append(f"<b>Breach Status:</b> {breach}")
 
-                    if not _is_missing(volatility_state):
-                        semantic_parts.append(
-                            f"Volatility State: {volatility_state}"
+                    variant = _rulebook_param_key(key)
+                    bottom_score = (
+                        bb_companion_score if key.startswith("BB_BW") else s
+                    )
+                    bottom_value = (
+                        _bb_number("bb_pct_b_companion_value")
+                        if key.startswith("BB_BW") else v
+                    )
+                    bottom_rules = (
+                        _find_rule_block(key, bottom_score)[3]
+                        if key.startswith("BB_BW") and bottom_score is not None
+                        else all_state_rules
+                    )
+                    state_key = score_to_rule_key(bottom_score)
+                    bottom = get_bollinger_pct_b_bottom_line(
+                        variant, state_key, bottom_score, bottom_rules, bottom_value,
+                        breach_status=extra_map.get("bb_breach_status"),
+                        breach_count=extra_map.get("bb_breach_count"),
+                        breach_count_exact=extra_map.get("bb_breach_count_exact"),
+                        bandwidth_state=state,
+                        bandwidth_percentile=percentile,
+                        bandwidth_direction=bw_direction,
+                        bandwidth_relative_5d=rel_5d,
+                        bandwidth_direction_streak=streak,
+                        bandwidth_compression_exit=extra_map.get(
+                            "bandwidth_compression_exit"
+                        ),
+                    ) if bb_rule else None
+                    if bottom:
+                        lines.append(
+                            "<b>Bottom-line:</b> "
+                            + _wrap_hover_text(bottom, width=80)
                         )
-
-                    if not _is_missing(bandwidth_direction):
-                        semantic_parts.append(
-                            f"Bandwidth Direction: {bandwidth_direction}"
-                        )
-
-                    if semantic_parts:
-                        bb_bw_context_block = (
-                            "<br>".join(semantic_parts) + "<br>"
-                        )
+                    bb_pct_b_post_rule_block = "<br>".join(lines) + "<br>"
 
             volume_value = None
             volume_delta = None
@@ -6062,6 +6257,31 @@ def build_plotly_heatmap_inputs(
                     "delta_line": delta_line,
                     "trend_line": trend_line,
                     "bb_bw_context_block": bb_bw_context_block,
+                    "bb_pct_b_post_rule_block": bb_pct_b_post_rule_block,
+                    # Display-only Bollinger flags. The upstream numeric
+                    # layer owns the historical State and Compression Exit.
+                    # The canonical BB_BW score remains Neutral / 0.
+                    "bb_pct_b_companion_visual_score": (
+                        bb_companion_score if key.startswith("BB_BW")
+                        else None
+                    ),
+                    # No new percentile/event qualification occurs here.
+                    "bb_visual_very_narrow": (
+                        key in {"BB_PCT_B_ST", "BB_PCT_B", "BB_PCT_B_LT",
+                                "BB_BW_ST", "BB_BW", "BB_BW_LT"}
+                        and isinstance(extra_map, dict)
+                        and extra_map.get("volatility_state") == "Very Compressed"
+                        and not _is_missing(v)
+                        and s in (-2, -1, 0, 1, 2)
+                    ),
+                    "bb_visual_compression_exit": (
+                        key in {"BB_PCT_B_ST", "BB_PCT_B", "BB_PCT_B_LT",
+                                "BB_BW_ST", "BB_BW", "BB_BW_LT"}
+                        and isinstance(extra_map, dict)
+                        and extra_map.get("bandwidth_compression_exit") is True
+                        and not _is_missing(v)
+                        and s in (-2, -1, 0, 1, 2)
+                    ),
                     "alignment_line": alignment_line,
                     "signal_line": signal_line,
                     "rule_block": rule_block,
@@ -6193,6 +6413,119 @@ def build_plotly_heatmap_inputs(
         customdata.append(cd_row)
 
     return PlotlyHeatmapInputs(z=z, text=text, customdata=customdata, x=x, y=y, row_keys=row_keys)
+
+
+def apply_bollinger_pct_b_visual_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Show Bollinger compression, exit, and BW's companion %B color.
+
+    All modifications affect the Plotly figure only. BW's upstream
+    score and adapter-owned customdata remain directional-neutral.
+
+    Persistent Very Narrow State: visibly purple numeric text on light
+    cells; contrast-preserving purple/lavender on darker score cells.
+    One-day Compression Exit: an unboxed black diamond positioned a single
+    visual space after the numeric value.
+    The two flags are supplied by the adapter from upstream evidence;
+    this function performs no indicator, threshold, or event calculations.
+    """
+    if not fig.data:
+        return
+
+    base_text = [list(row) for row in fig.data[0].text]
+    vivid_points: Dict[str, List[Any]] = {"x": [], "y": [], "text": []}
+    sell_points: Dict[str, List[Any]] = {"x": [], "y": [], "text": []}
+    light_points: Dict[str, List[Any]] = {"x": [], "y": [], "text": []}
+    allowed_keys = {
+        "BB_PCT_B_ST", "BB_PCT_B", "BB_PCT_B_LT",
+        "BB_BW_ST", "BB_BW", "BB_BW_LT",
+    }
+    display_z = np.array(fig.data[0].z, dtype=float, copy=True)
+    z_changed = False
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(base_text) or row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(base_text[row_idx]) or col_idx >= len(x):
+                continue
+            if not isinstance(cell, dict):
+                continue
+            indicator = cell.get("indicator_key")
+            if indicator not in allowed_keys:
+                continue
+
+            companion_score = cell.get("bb_pct_b_companion_visual_score")
+            if indicator.startswith("BB_BW") and (
+                isinstance(companion_score, int)
+                and not isinstance(companion_score, bool)
+                and companion_score in (-2, -1, 0, 1, 2)
+                and row_idx < display_z.shape[0]
+                and col_idx < display_z.shape[1]
+            ):
+                display_z[row_idx, col_idx] = companion_score
+                z_changed = True
+
+            value_text = base_text[row_idx][col_idx]
+            if not isinstance(value_text, str) or value_text in ("", "—"):
+                continue
+
+            very_narrow = cell.get("bb_visual_very_narrow") is True
+            compression_exit = cell.get("bb_visual_compression_exit") is True
+            # A true exit cannot simultaneously be in Very Narrow State.
+            if very_narrow and compression_exit:
+                continue
+            if very_narrow:
+                # Plotly heatmap owns the value normally. Suppress only
+                # this glyph and overlay it in a readable purple.
+                base_text[row_idx][col_idx] = ""
+                score = (
+                    companion_score if indicator.startswith("BB_BW")
+                    and isinstance(companion_score, int) else cell.get("score")
+                )
+                if score in (-2, 2):
+                    group = light_points
+                elif score == -1:
+                    # Sell-cell red needs the darker shade for contrast.
+                    group = sell_points
+                else:
+                    group = vivid_points
+                group["x"].append(x[col_idx])
+                group["y"].append(y[row_idx])
+                group["text"].append(value_text)
+            elif compression_exit:
+                # Numeric glyph widths vary with value length. This places
+                # the diamond just beyond the right edge of the centered
+                # number, with roughly one text-space of separation.
+                diamond_offset = round(9 + 3.5 * len(value_text))
+                fig.add_annotation(
+                    x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                    text="◆", showarrow=False, xshift=diamond_offset, yshift=0,
+                    xanchor="center", yanchor="middle",
+                    font=dict(size=12, color="black"),
+                    captureevents=False,
+                )
+
+    if z_changed:
+        fig.data[0].z = display_z
+    fig.data[0].text = base_text
+    for points, color in (
+        (vivid_points, "#6A0DAD"),
+        (sell_points, "#27043B"),
+        (light_points, "#F4E7FF"),
+    ):
+        if points["x"]:
+            fig.add_trace(go.Scatter(
+                x=points["x"], y=points["y"],
+                mode="text", text=points["text"],
+                textfont=dict(size=12, color=color),
+                hoverinfo="skip", showlegend=False,
+            ))
 
 
 def build_cmf_easing_heatmap_text(
@@ -7303,7 +7636,7 @@ def make_rolling_heatmap_figure(
                     "rolling_value_line",
                     f"Value: {cell.get('formatted_value', '')}<br>",
                 )
-                if str(cell.get("indicator_key", "")).startswith("CMF_"):
+                if str(cell.get("indicator_key", "")).startswith(("CMF_", "BB_PCT_B", "BB_BW")):
                     cell["rolling_value_line"] = _bold_hover_prefix(
                         cell["rolling_value_line"], "Value"
                     )
@@ -7331,6 +7664,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
@@ -7431,6 +7765,10 @@ def make_rolling_heatmap_figure(
     # Append CMF suffix after all other indicator overlays have finished.
     fig.data[0].text = build_cmf_easing_heatmap_text(
         fig.data[0].text, hm.customdata,
+    )
+
+    apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 
     # Display all row labels on ''rolling signals heatmap'

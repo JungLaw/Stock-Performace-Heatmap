@@ -1734,3 +1734,402 @@ def get_cmf_context_interpretation(
         else:
             bottom = f"{price_move} while CMF remains Neutral."
     return cmf_interpretation, bottom
+
+
+# Bollinger %B IVE Stage 6 — guarded, display-only explanatory content.
+# The classifier owns the five-state Signal. These functions never rescore.
+_BB_PCT_B_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_BB_PCT_B_SCORES = {
+    "strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2,
+}
+_BB_PCT_B_BOUNDARIES = {
+    "10_1.5": ("-0.20", "1.20"),
+    "20_2.0": ("-0.10", "1.10"),
+    "50_2.5": ("0.00", "1.00"),
+}
+_BB_PCT_B_BREACH_STATUSES = frozenset({
+    "Fresh Lower Breach", "Continuing Lower Breach",
+    "Lower-Band Re-entry", "Fresh Upper Breach",
+    "Continuing Upper Breach", "Upper-Band Re-entry",
+    "No Active Breach", "Transition Unavailable",
+    "Outside Lower Band (Onset Unknown)",
+    "Outside Upper Band (Onset Unknown)",
+})
+
+
+def _bb_pct_b_approved_rules(variant: str) -> dict[str, str]:
+    """Independent five-state fingerprints, not a second rule evaluator."""
+    low, high = _BB_PCT_B_BOUNDARIES[variant]
+    return {
+        "strong_buy": f"pct_b < {low}",
+        "buy": f"pct_b >= {low} and pct_b < 0.10",
+        "neutral": "pct_b >= 0.10 and pct_b <= 0.90",
+        "sell": f"pct_b > 0.90 and pct_b <= {high}",
+        "strong_sell": f"pct_b > {high}",
+    }
+
+
+def _bb_pct_b_finite(value: object) -> Optional[float]:
+    """Reject booleans and invalid floating-point values."""
+    from math import isfinite
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _bb_pct_b_verified_value(
+    variant: str,
+    state: str,
+    score: object,
+    active_rules: Mapping[str, str],
+    raw_pct_b: object,
+) -> Optional[float]:
+    """Fail closed if score, live rulebook, or raw location disagree."""
+    if variant not in _BB_PCT_B_BOUNDARIES or state not in _BB_PCT_B_STATES:
+        return None
+    if isinstance(score, bool) or score != _BB_PCT_B_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _bb_pct_b_approved_rules(variant)
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or "")) != _fingerprint(approved[key])
+        for key in _BB_PCT_B_STATES
+    ):
+        return None
+    value = _bb_pct_b_finite(raw_pct_b)
+    if value is None:
+        return None
+    low, high = (float(bound) for bound in _BB_PCT_B_BOUNDARIES[variant])
+    expected_state = (
+        "strong_buy" if value < low else
+        "buy" if value < 0.10 else
+        "neutral" if value <= 0.90 else
+        "sell" if value <= high else
+        "strong_sell"
+    )
+    return value if expected_state == state else None
+
+
+def _bb_pct_b_display(value: float, variant: str) -> str:
+    """Show normal one-decimal precision, expanding near a rule boundary.
+
+    Never print a rounded number equal to a cutoff while prose asserts a
+    strict less-than/greater-than inequality that only the raw value proves.
+    """
+    x = value * 100.0
+    low, high = (float(bound) * 100.0 for bound in _BB_PCT_B_BOUNDARIES[variant])
+    thresholds = (low, 10.0, 90.0, high)
+    for decimals in (1, 3, 6, 10):
+        rendered = f"{x:.{decimals}f}"
+        rounded = float(rendered)
+        if all(not (rounded == boundary and x != boundary) for boundary in thresholds):
+            return rendered
+    return repr(x)
+
+
+def get_bollinger_pct_b_rule_explanation(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    raw_pct_b: object,
+) -> Optional[str]:
+    """Observation-specific Rule for the verified five-state %B classifier.
+
+    Returns None on rulebook drift, score mismatch, invalid inputs or a
+    conflict with the raw observation. A caller must retain its existing
+    rule-translation fallback when None is returned.
+    """
+    value = _bb_pct_b_verified_value(variant, state, score, active_rules, raw_pct_b)
+    if value is None:
+        return None
+    shown = _bb_pct_b_display(value, variant)
+    low, high = (float(bound) * 100 for bound in _BB_PCT_B_BOUNDARIES[variant])
+    low_text, high_text = f"{low:g}", f"{high:g}"
+    if state == "strong_buy":
+        return (f"%B is {shown}, below the {low_text} Strong Buy cutoff; "
+                "price is extended below the lower band.")
+    if state == "buy":
+        position = (
+            "below the lower band" if value < 0 else
+            "on the lower band" if value == 0 else
+            "inside the lower portion of the bands"
+        )
+        return (f"%B is {shown}, within the Buy interval from {low_text} inclusive "
+                f"to below 10; price is {position}.")
+    if state == "neutral":
+        return f"%B is {shown}, within the Neutral interval of 10 through 90."
+    if state == "sell":
+        position = (
+            "above the upper band" if value > 1 else
+            "on the upper band" if value == 1 else
+            "inside the upper portion of the bands"
+        )
+        return (f"%B is {shown}, within the Sell interval above 90 through "
+                f"{high_text} inclusive; price is {position}.")
+    return (f"%B is {shown}, above the {high_text} Strong Sell cutoff; "
+            "price is extended above the upper band.")
+
+
+def get_bollinger_pct_b_bottom_line(
+    variant: str,
+    state: str,
+    score: int,
+    active_rules: Mapping[str, str],
+    raw_pct_b: object,
+    *,
+    breach_status: object = None,
+    breach_count: object = None,
+    breach_count_exact: object = None,
+    bandwidth_state: object = None,
+    bandwidth_percentile: object = None,
+    bandwidth_direction: object = None,
+    bandwidth_relative_5d: object = None,
+    bandwidth_direction_streak: object = None,
+    bandwidth_compression_exit: object = None,
+) -> Optional[str]:
+    """Explain the dominant Bollinger price/volatility *condition*.
+
+    Priority: re-entry event -> compression exit -> compressed environment ->
+    qualified expansion -> cooling -> remaining material band interaction.
+    All evidence is contemporaneous, with no future-bar/outcome inference.
+    No five-state score or primary rule is modified.
+
+    Material five-session BW changes (>=20% or <=-20%) are provisional
+    *context filters*, never new trading thresholds or a breakout verdict.
+    """
+    value = _bb_pct_b_verified_value(variant, state, score, active_rules, raw_pct_b)
+    if value is None:
+        return None
+
+    # Existing independent breach-status integrity contract.
+    if breach_status is not None:
+        if not isinstance(breach_status, str) or breach_status not in _BB_PCT_B_BREACH_STATUSES:
+            return None
+        allowed = (
+            {"Fresh Lower Breach", "Continuing Lower Breach", "Outside Lower Band (Onset Unknown)"}
+            if value < 0 else
+            {"Fresh Upper Breach", "Continuing Upper Breach", "Outside Upper Band (Onset Unknown)"}
+            if value > 1 else
+            {"Lower-Band Re-entry", "Upper-Band Re-entry", "No Active Breach", "Transition Unavailable"}
+        )
+        if breach_status not in allowed:
+            return None
+    if breach_count is not None:
+        if isinstance(breach_count, bool) or not isinstance(breach_count, int) or breach_count < 0:
+            return None
+        if breach_status and breach_status.startswith("Continuing ") and breach_count < 2:
+            return None
+        if breach_status and breach_status.startswith("Fresh ") and breach_count != 1:
+            return None
+        if breach_status in ("No Active Breach", "Lower-Band Re-entry", "Upper-Band Re-entry") and breach_count != 0:
+            return None
+    if breach_count_exact is not None and not isinstance(breach_count_exact, bool):
+        return None
+
+    # Classify *historical* Bandwidth level from verified production context.
+    # The percentile is raw 0..1, with horizon-specific existing cutoffs.
+    thresholds = {
+        "10_1.5": (0.10, 0.25, 0.75, 0.90),
+        "20_2.0": (0.05, 0.15, 0.85, 0.95),
+        "50_2.5": (0.05, 0.15, 0.85, 0.95),
+    }
+    known_states = (
+        "Very Compressed", "Compressed", "Normal", "Expanded", "Very Expanded"
+    )
+    if bandwidth_state is not None and bandwidth_state not in known_states:
+        return None
+    p = _bb_pct_b_finite(bandwidth_percentile)
+    if bandwidth_percentile is not None and (p is None or not 0 <= p <= 1):
+        return None
+    if p is not None and bandwidth_state is not None:
+        p1, p2, p3, p4 = thresholds[variant]
+        expected = (
+            "Very Compressed" if p < p1 else
+            "Compressed" if p < p2 else
+            "Normal" if p <= p3 else
+            "Expanded" if p <= p4 else
+            "Very Expanded"
+        )
+        if expected != bandwidth_state:
+            return None
+
+    if bandwidth_direction not in (None, "Expanding", "Contracting", "Stable"):
+        return None
+    delta5 = _bb_pct_b_finite(bandwidth_relative_5d)
+    if bandwidth_relative_5d is not None and delta5 is None:
+        return None
+    streak = bandwidth_direction_streak
+    if streak is not None and (isinstance(streak, bool) or not isinstance(streak, int) or streak < 0):
+        return None
+    if streak is not None and bandwidth_direction is not None:
+        if (bandwidth_direction == "Stable" and streak != 0) or (
+            bandwidth_direction in ("Expanding", "Contracting") and streak < 1
+        ):
+            return None
+    if bandwidth_compression_exit is not None and not isinstance(bandwidth_compression_exit, bool):
+        return None
+    if bandwidth_compression_exit is True and (
+        bandwidth_direction != "Expanding"
+        or bandwidth_state in ("Very Compressed", "Compressed")
+    ):
+        return None
+
+    narrow = bandwidth_state in ("Very Compressed", "Compressed")
+    wide = bandwidth_state in ("Expanded", "Very Expanded")
+    narrow_text = "exceptionally narrow" if bandwidth_state == "Very Compressed" else "historically narrow"
+    wide_text = "exceptionally wide" if bandwidth_state == "Very Expanded" else "historically wide"
+    # Percentage threshold is a provisional materiality filter; it does not
+    # independently qualify a release or direction of price movement.
+    sustained_widening = (
+        delta5 is not None and delta5 >= 0.20
+        and bandwidth_direction == "Expanding"
+        and streak is not None and streak >= 2
+    )
+    sustained_narrowing = (
+        delta5 is not None and delta5 <= -0.20
+        and bandwidth_direction == "Contracting"
+        and streak is not None and streak >= 2
+    )
+    side = "lower" if value < 0 else "upper" if value > 1 else None
+    pressure = "downside" if side == "lower" else "upside" if side == "upper" else None
+    fresh = breach_status in ("Fresh Lower Breach", "Fresh Upper Breach")
+    continuing = breach_status in ("Continuing Lower Breach", "Continuing Upper Breach")
+    reentry = breach_status in ("Lower-Band Re-entry", "Upper-Band Re-entry")
+
+    # 1. Fresh re-entry: a structural change in price's relation to the band,
+    # interpreted in the *actual* contemporaneous volatility environment.
+    if reentry:
+        prior_side = "lower" if breach_status == "Lower-Band Re-entry" else "upper"
+        if bandwidth_compression_exit is True:
+            return (f"Price has returned inside from beyond the {prior_side} band as the envelope exits "
+                    "historical compression; band position and volatility are changing together.")
+        if narrow:
+            return (f"Price has returned inside from beyond the {prior_side} band while the envelope "
+                    f"remains {narrow_text}; the earlier extension has eased within a compressed market.")
+        if sustained_widening:
+            return (f"Price has returned inside from beyond the {prior_side} band, interrupting that "
+                    "extension while substantial Bandwidth expansion continues.")
+        if sustained_narrowing or (wide and bandwidth_direction == "Contracting"):
+            return (f"Price has returned inside from beyond the {prior_side} band as Bandwidth contracts; "
+                    "both the outside-band extension and envelope width are easing.")
+        return (f"Price has returned inside from beyond the {prior_side} band; the outside-band "
+                "extension has ended while the current Bandwidth State persists.") if bandwidth_state is not None else None
+
+    # 2. First actual transition out of compressed State, not a rolling
+    # 'was compressed recently' flag.
+    if bandwidth_compression_exit is True:
+        if side:
+            return (f"The envelope has just exited historical compression while price "
+                    f"remains beyond the {side} band; {pressure} pressure is developing "
+                    "alongside materially wider bands.")
+        position = "lower" if value < 0.5 else "upper" if value > 0.5 else "middle"
+        return ("Bandwidth has just exited historical compression and is expanding "
+                f"materially, with price still inside the {position} portion of the envelope.")
+
+    # 3. Historical compression is meaningful on its own. A large increase
+    # from a tiny starting base does not override a still-compressed State.
+    if narrow:
+        if side:
+            if sustained_widening:
+                return (f"Price is {'newly ' if fresh else ''}beyond the {side} band while "
+                        f"the still {narrow_text} envelope widens repeatedly; an emerging "
+                        f"{pressure} release is being tested from compressed conditions.")
+            if fresh:
+                return (f"Price has newly breached the {side} band while Bandwidth is "
+                        f"still {narrow_text}; this is an initial {pressure} extension "
+                        "within a compressed volatility environment.")
+            return (f"Price remains beyond the {side} band, but Bandwidth is still "
+                    f"{narrow_text}; {pressure} pressure is occurring without an "
+                    "established expansion out of compression.")
+        if sustained_narrowing or bandwidth_direction == "Contracting":
+            return (f"The {narrow_text} envelope is contracting further; price "
+                    "remains inside the bands as volatility compression deepens.")
+        if sustained_widening:
+            return (f"Bandwidth is widening repeatedly but remains {narrow_text}; "
+                    "the compressed environment has not yet transitioned into a broader envelope.")
+        if bandwidth_direction == "Expanding":
+            return (f"Bandwidth is widening today but remains {narrow_text}; "
+                    "the earlier compression has not yet been released.")
+        if delta5 is not None and delta5 >= 0.20:
+            return ("Bandwidth has widened considerably over five sessions, but the envelope "
+                    f"remains {narrow_text}; historical compression is still in place.")
+        if delta5 is not None and delta5 <= -0.20:
+            return (f"Bandwidth remains {narrow_text} after considerable recent contraction; "
+                    "the latest daily movement has paused, but compression persists.")
+        location = "lower" if value < 0.5 else "upper" if value > 0.5 else "middle"
+        article = "an" if bandwidth_state == "Very Compressed" else "a"
+        return (f"Price remains in the {location} portion of {article} {narrow_text} envelope; "
+                "the low-volatility environment is still in place.")
+
+    # 4. Established multi-session expansion, with band breach and interior
+    # cases distinguished from the price's directional trend.
+    if sustained_widening:
+        if continuing:
+            return (f"Repeated closes beyond the {side} band accompany sustained "
+                    f"Bandwidth expansion, indicating persistent {pressure} pressure "
+                    "in a widening envelope.")
+        if fresh:
+            return (f"Price has newly breached the {side} band during established "
+                    f"multi-session Bandwidth expansion; {pressure} pressure is intensifying.")
+        if side:
+            return (f"Price remains beyond the {side} band during sustained widening; "
+                    f"the extension and expanding volatility remain aligned to the {pressure} side.")
+        return ("Price is inside the bands while the envelope widens materially "
+                "across consecutive sessions; volatility expansion remains active "
+                "without a current outside-band extension.")
+
+    # 5. Cooling is a *contraction in a still-wide envelope*, not a confirmed
+    # change in the future trend or an unsupported historical peak claim.
+    if wide and sustained_narrowing:
+        if side:
+            return (f"Price remains beyond the {side} band while historically wide "
+                    "bands contract across recent sessions; the volatility expansion is easing.")
+        return ("The historically wide envelope is narrowing across recent sessions; "
+                "price is inside the bands as the volatility expansion cools.")
+
+    # 6. Material event/level combinations that do not satisfy an established
+    # multi-session expansion or contraction threshold.
+    if wide and side:
+        article = "an" if bandwidth_state == "Very Expanded" else "a"
+        return (f"Price remains beyond the {side} band in {article} {wide_text} volatility "
+                f"envelope; {pressure} extension is occurring under elevated dispersion.")
+    if wide and bandwidth_direction == "Contracting":
+        return ("The historically wide envelope is beginning to contract; "
+                "volatility remains elevated even as daily band width eases.")
+    if fresh and bandwidth_state is not None:
+        return (f"Price has newly breached the {side} band while Bandwidth is "
+                f"in its {('typical' if bandwidth_state == 'Normal' else 'elevated')} historical range; "
+                f"this marks a fresh {pressure} extension without established multi-session expansion.")
+    if bandwidth_direction == "Expanding" and delta5 is not None and delta5 <= -0.20:
+        return ("Bandwidth widened today but remains materially narrower than "
+                "five sessions earlier; the broader recent movement is still contraction.")
+
+    # 7. An exceptionally wide envelope after material five-session growth
+    # remains notable even when the latest daily widening has paused.
+    # This is lower priority than every existing event/level condition.
+    if (
+        bandwidth_state == "Very Expanded"
+        and p is not None
+        and bandwidth_direction == "Stable"
+        and delta5 is not None and delta5 >= 0.20
+        and breach_status == "No Active Breach"
+    ):
+        if value >= 0.90:
+            position = "near the upper band, indicating upper-side price strength"
+        elif value <= 0.10:
+            position = "near the lower band, indicating lower-side price pressure"
+        elif value > 0.50:
+            position = "in the upper portion of the bands"
+        elif value < 0.50:
+            position = "in the lower portion of the bands"
+        else:
+            position = "near the middle of the bands"
+        return ("Bandwidth remains exceptionally wide after substantial five-session "
+                f"expansion, with price {position}. Material daily widening has paused.")
+    return None

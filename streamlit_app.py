@@ -72,6 +72,7 @@ from ui.rolling_heatmap_adapter import (
     apply_stoch_kd_crossover_overlay,
     apply_hma_turn_text_overlay,
     apply_vwma_volume_extreme_text_overlay,
+    apply_bollinger_pct_b_visual_overlay,
     build_plotly_heatmap_inputs,
     build_cmf_easing_heatmap_text,
     build_vwma_hover_opening,
@@ -4926,6 +4927,7 @@ def _build_scd_hover_customdata(
         "delta_line",
         "trend_line",
         "bb_bw_context_block",
+        "bb_pct_b_post_rule_block",
         "alignment_line",
         "adx_context_block",
         "signal_line",
@@ -4969,7 +4971,7 @@ def _build_scd_hover_customdata(
             f"{custom.get('formatted_value', '')}<br>"
         )
 
-    if row_key.startswith("CMF_"):
+    if row_key.startswith(("CMF_", "BB_PCT_B", "BB_BW")):
         # Keep SCD's original value and diagnostic suffix; bold label only.
         value_line = str(custom["scd_value_line"])
         if value_line.startswith("Value:"):
@@ -4991,11 +4993,9 @@ def _build_scd_hover_customdata(
 
     payload_hover = cell.get("hover")
 
-    # Bollinger, Bull/Bear Power, VWMA, HMA, and UO rows already expose
-    # their user-facing information through structured adapter hover fields.
-    # Suppress the redundant raw payload summary in SCD so diagnostic-style
-    # payload text does not duplicate structured context or dominate hover
-    # geometry.
+    # Indicators with structured adapter hover fields do not need a
+    # duplicate raw SCD payload summary. Suppress that presentation-only
+    # block without altering the underlying indicator or score payload.
     if (
         row_key in {
             "BB_PCT_B_ST",
@@ -5012,6 +5012,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("UO_")
         or row_key.startswith("MACD_")
         or row_key.startswith("CCI_")
+        or row_key.startswith("STOCH_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5181,6 +5182,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
         "%{customdata.stoch_context_block}"
@@ -5281,6 +5283,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     # Suffix is Plotly-only and must run after text-rewriting overlays.
     fig.data[0].text = build_cmf_easing_heatmap_text(
         fig.data[0].text, customdata,
+    )
+
+    apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
     )
 
     row_count = max(len(y_labels), 1)
@@ -5682,7 +5688,7 @@ def _build_scd_single_indicator_hover_customdata(
     else:
         custom["single_combined_trend_line"] = ""
 
-    if row_key.startswith(("MACD_", "STOCH_", "CCI_", "CMF_")):
+    if row_key.startswith(("MACD_", "STOCH_", "CCI_", "CMF_", "BB_PCT_B", "BB_BW")):
         def _bold_macd_opening(value: Any, label: str) -> str:
             content = str(value or "")
             prefix = f"{label}:"
@@ -5907,6 +5913,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.dpo_context_block}"
             "%{customdata.bullbear_context_block}"
             "%{customdata.rule_block}"
+            "%{customdata.bb_pct_b_post_rule_block}"
             "%{customdata.cmf_interpretation_block}"
             "%{customdata.cci_interpretation_block}"
             "%{customdata.bbp_context_interpretation_block}"
@@ -6003,6 +6010,10 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     # Suffix is Plotly-only and must run after text-rewriting overlays.
     fig.data[0].text = build_cmf_easing_heatmap_text(
         fig.data[0].text, customdata,
+    )
+
+    apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
     )
 
     dynamic_height = max(450, 24 * max(len(dates), 1) + 180)    # dynamic_height = max(900, 42 * max(len(dates), 1) + 360)
@@ -6285,6 +6296,27 @@ def _get_scd_chart_signal_text(
     if not isinstance(cell, dict):
         return "N/A"
 
+    # BB Bandwidth retains Neutral/0 internally. Its chart hover uses
+    # the already-validated companion %B Signal from the heatmap adapter.
+    if row_key.startswith("BB_BW"):
+        adapter_cd = cell.get("adapter_customdata")
+
+        if isinstance(adapter_cd, dict):
+            companion_score = adapter_cd.get(
+                "bb_pct_b_companion_visual_score"
+            )
+            labels = {
+                -2: "Strong Sell",
+                -1: "Sell",
+                 0: "Neutral",
+                 1: "Buy",
+                 2: "Strong Buy",
+            }
+            if type(companion_score) is int:
+                return labels.get(companion_score, "Unavailable")
+
+        return "Unavailable"
+
     if row_key.startswith("UO_"):
         adapter_cd = cell.get("adapter_customdata")
 
@@ -6369,9 +6401,18 @@ def _get_scd_single_chart_hover_fields(
     ):
         indicator_delta_line = (
             str(indicator_cd.get("delta_line", ""))
-            .removeprefix("Δ vs prior day: ")
+            .removeprefix("<br>")
             .removesuffix("<br>")
+            .strip()
         )
+
+        # The chart supplies its own "Δ vs prior day:" label.
+        # Strip either adapter label format to prevent duplication.
+        for prefix in ("<b>Δ vs prior day:</b>", "Δ vs prior day:"):
+            if indicator_delta_line.startswith(prefix):
+                indicator_delta_line = indicator_delta_line[len(prefix):].strip()
+                break
+
     else:
         try:
             date_position = dates.index(date_key)
@@ -6520,6 +6561,7 @@ def _build_scd_single_indicator_chart_figure(
     )
 
     fig = go.Figure()
+    signal_label = "Signal (%B)" if row_key.startswith("BB_BW") else "Signal"
 
     for ticker in visible_tickers:
         y_values = series_by_ticker.get(ticker, [])
@@ -6548,7 +6590,7 @@ def _build_scd_single_indicator_chart_figure(
                     "Δ vs prior day: %{customdata[6]}<br>"
                     "%{customdata[7]}"
                     f"Chart value ({resolved_mode}): %{{customdata[3]:.2f}}<br>"
-                    "Signal: %{customdata[2]}<br>"
+                    f"{signal_label}: %{{customdata[2]}}<br>"
                     "Price: %{customdata[4]}<br>"
                     "Price Δ vs prior day: %{customdata[5]}"
                     "<extra></extra>"
@@ -6769,6 +6811,7 @@ def _build_scd_single_price_chart_figure(
     )
 
     fig = go.Figure()
+    signal_label = "Signal (%B)" if row_key.startswith("BB_BW") else "Signal"
 
     for ticker in visible_tickers:
         y_values = display_series.get(ticker, [])
@@ -6860,7 +6903,7 @@ def _build_scd_single_price_chart_figure(
                     "Date: %{customdata[0]}<br>"
                     f"{chart_value_line}"
                     "Indicator value: %{customdata[2]}<br>"
-                    "Signal: %{customdata[3]}<br>"
+                    f"{signal_label}: %{{customdata[3]}}<br>"
                     "<extra></extra>"
                 ),
             )

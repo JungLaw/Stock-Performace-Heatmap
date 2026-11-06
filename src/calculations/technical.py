@@ -2236,13 +2236,176 @@ class DatabaseIntegratedTechnicalCalculator:
                 )
             )
 
+            # Full-history factual changes; no new scores or thresholds.
+            prior_bw = bandwidth.shift(1)
+            five_prior_bw = bandwidth.shift(5)
+            five_valid = bandwidth.rolling(6, min_periods=6).count().eq(6)
+            bw_delta_1d = (bandwidth - prior_bw).replace(
+                [np.inf, -np.inf], np.nan,
+            )
+            bw_delta_5d = (bandwidth - five_prior_bw).where(
+                five_valid,
+            ).replace([np.inf, -np.inf], np.nan)
+            bw_relative_5d = (bandwidth / five_prior_bw - 1.0).where(
+                five_valid & five_prior_bw.gt(0) & bandwidth.ge(0),
+            ).replace([np.inf, -np.inf], np.nan)
+
+            # Streaks count existing tolerance-qualified Direction states,
+            # not merely positive/negative mathematical changes.
+            # An unknown run start is explicitly flagged as inexact.
+            streak = pd.Series(pd.NA, index=bandwidth.index, dtype="Int64")
+            streak_exact = pd.Series(pd.NA, index=bandwidth.index, dtype="boolean")
+            run_direction = None
+            run_length = 0
+            run_exact = False
+            direction_values = bandwidth_direction.tolist()
+            for pos, current_direction in enumerate(direction_values):
+                if pd.isna(current_direction):
+                    run_direction = None
+                    run_length = 0
+                    run_exact = False
+                    continue
+                if current_direction not in ("Expanding", "Contracting"):
+                    streak.iloc[pos] = 0
+                    streak_exact.iloc[pos] = True
+                    run_direction = None
+                    run_length = 0
+                    run_exact = True
+                    continue
+                if current_direction == run_direction:
+                    run_length += 1
+                else:
+                    run_length = 1
+                    run_exact = (
+                        pos > 0 and pd.notna(direction_values[pos - 1])
+                    )
+                run_direction = current_direction
+                streak.iloc[pos] = run_length
+                streak_exact.iloc[pos] = run_exact
+
+            previous_state = volatility_state.shift(1)
+            valid_exit = (
+                previous_state.notna()
+                & volatility_state.notna()
+                & bandwidth_direction.notna()
+            )
+            compression_exit = pd.Series(
+                pd.NA, index=bandwidth.index, dtype="boolean",
+            )
+            compression_exit.loc[valid_exit] = False
+            compression_exit.loc[
+                valid_exit
+                & previous_state.isin(("Very Compressed", "Compressed"))
+                & volatility_state.isin(("Normal", "Expanded", "Very Expanded"))
+                & bandwidth_direction.eq("Expanding")
+            ] = True
+
             context[display_key] = {
                 "percentile": percentile,
                 "relative_change": relative_change,
                 "volatility_state": volatility_state,
                 "bandwidth_direction": bandwidth_direction,
+                "delta_1d": bw_delta_1d,
+                "delta_5d": bw_delta_5d,
+                "relative_5d": bw_relative_5d,
+                "direction_streak": streak,
+                "direction_streak_exact": streak_exact,
+                "compression_exit": compression_exit,
             }
 
+        return context
+
+    def _build_bb_pct_b_breach_context(
+        self,
+        df_ind: pd.DataFrame,
+        optionc_meta: list[dict[str, Any]],
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """Full-history %B breach facts; hover-only, independent of scores.
+
+        Raw %B has a 0..1 in-band scale; strict <0 and >1 are breaches.
+        A missing current observation breaks the streak, while a missing
+        predecessor makes the onset/transition unknown, not a fresh event.
+        The count is a known lower bound if its start is outside the history.
+        """
+        context: Dict[str, Dict[str, pd.Series]] = {}
+        if df_ind is None or df_ind.empty:
+            return context
+
+        for meta in optionc_meta:
+            display_key = meta.get("display_key")
+            if display_key not in ("BB_PCT_B_ST", "BB_PCT_B", "BB_PCT_B_LT"):
+                continue
+            value_col = meta.get("value_col")
+            if value_col not in df_ind.columns:
+                continue
+
+            pct_b = pd.to_numeric(
+                df_ind[value_col], errors="coerce",
+            ).astype("float64").replace([np.inf, -np.inf], np.nan)
+            status = pd.Series(pd.NA, index=pct_b.index, dtype="object")
+            count = pd.Series(pd.NA, index=pct_b.index, dtype="Int64")
+            count_exact = pd.Series(pd.NA, index=pct_b.index, dtype="boolean")
+
+            previous_zone = None
+            active_side = None
+            active_count = 0
+            active_exact = False
+
+            for pos, current in enumerate(pct_b.to_numpy(dtype="float64")):
+                if not np.isfinite(current):
+                    previous_zone = None
+                    active_side = None
+                    active_count = 0
+                    active_exact = False
+                    continue
+
+                zone = "lower" if current < 0.0 else (
+                    "upper" if current > 1.0 else "inside"
+                )
+
+                if zone == "inside":
+                    count.iloc[pos] = 0
+                    count_exact.iloc[pos] = True
+                    if previous_zone == "lower":
+                        status.iloc[pos] = "Lower-Band Re-entry"
+                    elif previous_zone == "upper":
+                        status.iloc[pos] = "Upper-Band Re-entry"
+                    elif previous_zone == "inside":
+                        status.iloc[pos] = "No Active Breach"
+                    else:
+                        status.iloc[pos] = "Transition Unavailable"
+                    active_side = None
+                    active_count = 0
+                    active_exact = True
+                else:
+                    if zone == active_side:
+                        active_count += 1
+                    else:
+                        active_count = 1
+                        active_exact = previous_zone is not None
+                    active_side = zone
+                    count.iloc[pos] = active_count
+                    count_exact.iloc[pos] = active_exact
+
+                    side_label = "Lower" if zone == "lower" else "Upper"
+                    if previous_zone is None:
+                        status.iloc[pos] = (
+                            f"Outside {side_label} Band (Onset Unknown)"
+                        )
+                    elif previous_zone == zone:
+                        status.iloc[pos] = f"Continuing {side_label} Breach"
+                    else:
+                        # A direct jump across both bands is a new breach of
+                        # the destination band, not an in-band re-entry.
+                        status.iloc[pos] = f"Fresh {side_label} Breach"
+
+                previous_zone = zone
+
+            context[display_key] = {
+                "status": status,
+                "count": count,
+                "count_exact": count_exact,
+            }
         return context
 
 
@@ -3261,6 +3424,13 @@ class DatabaseIntegratedTechnicalCalculator:
         # BB_BW semantic context must be derived on the complete chronological
         # indicator history before any visible-date/window reduction.
         bb_bw_context = self._build_bb_bw_semantic_context(
+            df_ind=df_ind,
+            optionc_meta=optionc_meta,
+        )
+
+        # %B breach and re-entry facts are based on the complete chronological
+        # indicator history, never on the cropped visible-date window.
+        bb_pct_b_breach_context = self._build_bb_pct_b_breach_context(
             df_ind=df_ind,
             optionc_meta=optionc_meta,
         )
@@ -4510,6 +4680,17 @@ class DatabaseIntegratedTechnicalCalculator:
                 display_key
             ] = hma_context
 
+        # Display-only full-history predecessor for %B hover opening.
+        # The first heatmap date may begin after the calculation history.
+        bb_pct_b_prior_by_display_key = {
+            meta["display_key"]: df_ind[meta["value_col"]].shift(1)
+            for meta in optionc_meta
+            if meta["display_key"] in {
+                "BB_PCT_B_ST", "BB_PCT_B", "BB_PCT_B_LT"
+            }
+            and meta["value_col"] in df_ind.columns
+        }
+
         indicators = [m["display_key"] for m in optionc_meta]
         data: Dict[str, Dict[str, Any]] = {}
 
@@ -4786,6 +4967,97 @@ class DatabaseIntegratedTechnicalCalculator:
                             extras["bandwidth_direction"] = str(
                                 raw_direction
                             )
+
+                    # Display-only evidence is now also available to standalone
+                    # BB_BW. No new percentile or event is calculated here.
+                    if display_key in pct_b_to_bw_key or display_key.startswith("BB_BW"):
+                        for series_key, extra_key in (
+                            ("percentile", "bandwidth_percentile"),
+                            ("relative_change", "bandwidth_relative_change"),
+                            ("delta_1d", "bandwidth_delta_1d"),
+                            ("delta_5d", "bandwidth_delta_5d"),
+                            ("relative_5d", "bandwidth_relative_5d"),
+                            ("direction_streak", "bandwidth_direction_streak"),
+                            ("direction_streak_exact", "bandwidth_streak_exact"),
+                            ("compression_exit", "bandwidth_compression_exit"),
+                        ):
+                            series = bw_ctx.get(series_key)
+                            if not isinstance(series, pd.Series) or dt not in series.index:
+                                continue
+                            raw = series.loc[dt]
+                            if pd.isna(raw):
+                                continue
+                            if series_key in ("direction_streak_exact", "compression_exit"):
+                                extras[extra_key] = bool(raw)
+                            elif series_key == "direction_streak":
+                                extras[extra_key] = int(raw)
+                            else:
+                                numeric = float(raw)
+                                if np.isfinite(numeric):
+                                    extras[extra_key] = numeric
+
+                # %B-only predecessor: preserves correct Δ/Trend on the
+                # first visible date without changing canonical numeric truth.
+                bb_prior = bb_pct_b_prior_by_display_key.get(display_key)
+                if isinstance(bb_prior, pd.Series) and dt in bb_prior.index:
+                    raw_prior = bb_prior.loc[dt]
+                    if pd.notna(raw_prior) and np.isfinite(float(raw_prior)):
+                        extras["bb_pct_b_prior_value"] = float(raw_prior)
+
+                # Standalone Bandwidth borrows the matching %B classification
+                # and numeric reading only as contextual presentation evidence.
+                # Never replace the canonical BB_BW Neutral / 0 score.
+                bw_to_pct_b_key = {
+                    "BB_BW_ST": ("BB_PCT_B_ST", "BB_PCT_B_10_1_5"),
+                    "BB_BW": ("BB_PCT_B", "BB_PCT_B"),
+                    "BB_BW_LT": ("BB_PCT_B_LT", "BB_PCT_B_50_2_5"),
+                }
+                pct_b_sibling = bw_to_pct_b_key.get(display_key)
+                if pct_b_sibling and dt in df_ind.index:
+                    _, pct_b_value_col = pct_b_sibling
+                    if pct_b_value_col in df_ind.columns:
+                        raw_pct_b = df_ind.loc[dt, pct_b_value_col]
+                        if pd.notna(raw_pct_b):
+                            try:
+                                pct_b_number = float(raw_pct_b)
+                                if np.isfinite(pct_b_number):
+                                    extras["bb_pct_b_companion_value"] = pct_b_number
+                            except (TypeError, ValueError, OverflowError):
+                                pass
+                    sibling_scores = scores.get("Bollinger", {}).get(param_key)
+                    if isinstance(sibling_scores, pd.Series) and dt in sibling_scores.index:
+                        raw_sibling_score = sibling_scores.loc[dt]
+                        if pd.notna(raw_sibling_score):
+                            try:
+                                sibling_score = int(raw_sibling_score)
+                                if (
+                                    float(raw_sibling_score) == sibling_score
+                                    and sibling_score in (-2, -1, 0, 1, 2)
+                                ):
+                                    extras["bb_pct_b_companion_score"] = sibling_score
+                            except (TypeError, ValueError, OverflowError):
+                                pass
+
+                # Carry the same full-history %B breach evidence into the
+                # sibling Bandwidth hover. No new breach classification.
+                breach_key = pct_b_sibling[0] if pct_b_sibling else display_key
+                breach_ctx = bb_pct_b_breach_context.get(breach_key)
+                if isinstance(breach_ctx, dict) and dt in df_ind.index:
+                    status_series = breach_ctx.get("status")
+                    count_series = breach_ctx.get("count")
+                    exact_series = breach_ctx.get("count_exact")
+                    if isinstance(status_series, pd.Series):
+                        raw_status = status_series.loc[dt]
+                        if pd.notna(raw_status):
+                            extras["bb_breach_status"] = str(raw_status)
+                    if isinstance(count_series, pd.Series):
+                        raw_count = count_series.loc[dt]
+                        if pd.notna(raw_count):
+                            extras["bb_breach_count"] = int(raw_count)
+                    if isinstance(exact_series, pd.Series):
+                        raw_exact = exact_series.loc[dt]
+                        if pd.notna(raw_exact):
+                            extras["bb_breach_count_exact"] = bool(raw_exact)
 
                 # Bull/Bear Power — carry the upstream Elder-Ray setup
                 # label as typed context only. This does not alter score truth.
