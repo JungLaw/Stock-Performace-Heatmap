@@ -25,6 +25,9 @@ from src.ui.indicator_hover_explanations import (
     get_cmf_easing_marker,
     get_bollinger_pct_b_rule_explanation,
     get_bollinger_pct_b_bottom_line,
+    get_adx_rule_explanation,
+    get_adx_development_interpretation,
+    get_adx_di_crossover,
 )
 
 import numpy as np
@@ -1122,17 +1125,17 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "ADX_9": {
         "display_name": "ADX (9)",
         "definition": "Average Directional Index measures trend strength (not direction).",
-        "how_to_read": "More responsive than ADX(14); can react faster to emerging trends.",
+        "how_to_read": "Faster ADX trend strength. Black ▲/▼: new DI leader; blue/red ◆: confirmed weakening trend at a lower price low/higher price high; blue/red value: DI gap widened/narrowed twice. None changes Signal or predicts a reversal.",
     },
     "ADX_14": {
         "display_name": "ADX (14)",
         "definition": "Average Directional Index measures trend strength (not direction).",
-        "how_to_read": "Higher = stronger trend; lower = weaker or ranging market.",
+        "how_to_read": "▲/▼: DI Crossover; ◆: ADX/Price Divergence (Blue: Price lower low + ADX lower high | Red: Price higher high + ADX lower high); Blue/Red value: DI spread (Red: narrowing | Blue: Widening)",
     },
     "ADX_20": {
         "display_name": "ADX (20)",
         "definition": "Average Directional Index measures trend strength (not direction).",
-        "how_to_read": "Smoother than ADX(14); better for longer trend-strength regimes.",
+        "how_to_read": "Smoother ADX trend strength. Black ▲/▼: new DI leader; ◆: ADX/Price divergence (Blue: ↑ ADX|↓ Price) (Red: ↓ ADX | ↑ Price ); blue/red value: DI gap widened/narrowed twice. None changes Signal or predicts a reversal.",
     },
     "MACD_12_26_9": {
         "display_name": "MACD(12,26,9)",
@@ -2199,14 +2202,14 @@ def build_plotly_heatmap_inputs(
             ohlcv_by_date = {}
             close_history_by_date = {}
 
-    # MACD first-visible-date hover support.
+    # MACD/ADX first-visible-date hover support.
     # Find the immediately preceding full-history OHLCV observation once.
     # This is display-only; no calculations, scoring, or acquisition.
     first_visible_prior_ohlcv: Dict[str, Any] = {}
 
     if (
         raw_dates
-        and any(str(k).startswith("MACD_") for k in indicator_keys)
+        and any(str(k).startswith(("MACD_", "ADX_")) for k in indicator_keys)
         and ohlcv_df is not None
     ):
         try:
@@ -3285,6 +3288,13 @@ def build_plotly_heatmap_inputs(
                         "macd_context_block": "",
                         "macd_interpretation_block": "",
                         "adx_context_block": "",
+                        "adx_di_crossover": None,
+                        "adx_crossover_block": "",
+                        "adx_visual_divergence": None,
+                        "adx_visual_spread_style": None,
+                        "adx_visual_divergence_block": "",
+                        "adx_visual_spread_block": "",
+                        "adx_interpretation_block": "",
                         "stoch_context_block": "",
                         "cmf_context_block": "",
                         "cmf_interpretation_block": "",
@@ -3391,6 +3401,12 @@ def build_plotly_heatmap_inputs(
                 )
                 if true_prior is not None:
                     prev_v = true_prior
+
+            # ADX: true chronological predecessor may predate visible dates.
+            if key.startswith("ADX_") and idx == 0 and first_visible_prior_ohlcv:
+                prior_adx = _to_float_or_none(first_visible_prior_ohlcv.get(key))
+                if prior_adx is not None:
+                    prev_v = prior_adx
 
             # MACD's first displayed observation may have a valid historical
             # predecessor outside the visible window. Use the upstream
@@ -3567,6 +3583,13 @@ def build_plotly_heatmap_inputs(
 
             vwma_volume_extreme_event_value = None
             adx_context_block = ""
+            adx_crossover_block = ""
+            adx_interpretation_block = ""
+            adx_di_crossover = None
+            adx_visual_divergence = None
+            adx_visual_spread_style = None
+            adx_visual_divergence_block = ""
+            adx_visual_spread_block = ""
             crossover_context_block = ""
             crossover_summary_block = ""
             crossover_cell_text = ""
@@ -4844,9 +4867,12 @@ def build_plotly_heatmap_inputs(
                 dip_col = f"DIp_{length_part}"
                 din_col = f"DIn_{length_part}"
 
-                current_row = ohlcv_by_date.get(str(d_raw), {})
+                current_row = _lookup_hover_mapping(ohlcv_by_date, d_raw, {})
                 prev_date = raw_dates[idx - 1] if idx > 0 else None
-                prev_row = ohlcv_by_date.get(str(prev_date), {}) if prev_date is not None else {}
+                prev_row = (
+                    first_visible_prior_ohlcv if idx == 0
+                    else _lookup_hover_mapping(ohlcv_by_date, prev_date, {})
+                )
 
                 dip_val = current_row.get(dip_col) if isinstance(current_row, dict) else None
                 din_val = current_row.get(din_col) if isinstance(current_row, dict) else None
@@ -4874,7 +4900,7 @@ def build_plotly_heatmap_inputs(
                             f"{f', {format_signed_percent(delta_pct, decimals=1)}' if delta_pct is not None else ''})"
                         )
 
-                    return f"{label}: {float(curr_value):.2f}{suffix}"
+                    return f"<b>{label}:</b> {float(curr_value):.2f}{suffix}"
 
                 dip_line = _format_adx_component_line("+DI", dip_val, prev_dip_val)
                 if dip_line:
@@ -4907,6 +4933,10 @@ def build_plotly_heatmap_inputs(
                         except Exception:
                             spread_delta_abs = None
 
+                    # Show point and relative changes even on a DI crossover.
+                    # The separate event line identifies the leadership reversal;
+                    # a relative change is not a same-direction widening rate.
+                    # Zero/missing prior Spread still has no valid percentage.
                     spread_delta_pct = safe_pct_delta(spread_val, prev_spread_val)
 
                     spread_suffix = ""
@@ -4917,11 +4947,143 @@ def build_plotly_heatmap_inputs(
                         )
 
                     parts.append(
-                        f"Spread: {format_signed_number(spread_val, decimals=2)}{spread_suffix}"
+                        f"<b>Spread:</b> {format_signed_number(spread_val, decimals=2)}{spread_suffix}"
                     )
 
                 if parts:
-                    adx_context_block = "<br>" + "<br>".join(parts) + "<br>"
+                    # Preserve the Trend -> +DI line break, but no empty line.
+                    adx_context_block = "<br>".join(parts) + "<br>"
+
+                # Fail closed on rulebook/score/evidence mismatch: retain
+                # generic Rule rather than misstate a derived interpretation.
+                adx_state = score_to_rule_key(s)
+                try:
+                    adx_period = int(length_part)
+                except (TypeError, ValueError):
+                    adx_period = None
+                if adx_period is not None and adx_state:
+                    curated = get_adx_rule_explanation(
+                        adx_period, adx_state, s, all_state_rules,
+                        v, dip_val, din_val,
+                    )
+                    if curated is not None:
+                        rule_text = curated
+                        adx_di_crossover = get_adx_di_crossover(
+                            dip_val, din_val, prev_dip_val, prev_din_val,
+                        )
+                        if (
+                            adx_di_crossover
+                            and spread_val is not None
+                            and prev_spread_val is not None
+                        ):
+                            leader = (
+                                "+DI overtook −DI"
+                                if adx_di_crossover == "Bullish"
+                                else "−DI overtook +DI"
+                            )
+                            adx_crossover_block = (
+                                "<b>DI Crossover:</b> "
+                                f"({adx_di_crossover}) {leader}, reversing the "
+                                f"Spread from {prev_spread_val:+.2f} to "
+                                f"{spread_val:+.2f} points.<br>"
+                            )
+                        # Already-confirmed full-history price/ADX event.
+                        # DI alignment qualifies its meaning, not its existence.
+                        # Never derive a swing or look ahead in the adapter.
+                        if isinstance(extra_map, dict):
+                            direction = extra_map.get("adx_visual_divergence")
+                            pattern = extra_map.get("adx_visual_price_pattern")
+                            expected_pattern = {
+                                "Bullish": "lower_low", "Bearish": "higher_high",
+                            }.get(direction)
+                            alignment = extra_map.get("adx_visual_di_alignment")
+                            if expected_pattern == pattern and alignment in ("Aligned", "Contrary", "Tied"):
+                                try:
+                                    old_price = float(extra_map["adx_visual_prior_price"])
+                                    new_price = float(extra_map["adx_visual_current_price"])
+                                    old_peak = float(extra_map["adx_visual_prior_adx_peak"])
+                                    new_peak = float(extra_map["adx_visual_current_adx_peak"])
+                                    old_date = pd.Timestamp(extra_map["adx_visual_prior_pivot"])
+                                    new_date = pd.Timestamp(extra_map["adx_visual_current_pivot"])
+                                    confirmed = pd.Timestamp(extra_map["adx_visual_confirmation"])
+                                    if (
+                                        all(np.isfinite(n) for n in (old_price, new_price, old_peak, new_peak))
+                                        and new_peak < old_peak
+                                        and ((new_price < old_price) if direction == "Bullish"
+                                             else (new_price > old_price))
+                                        and confirmed.strftime("%Y-%m-%d") == str(d_raw)[:10]
+                                    ):
+                                        adx_visual_divergence = direction
+                                        price_move = "lower swing low" if direction == "Bullish" else "higher swing high"
+                                        actor = "Bears" if direction == "Bullish" else "Bulls"
+                                        opposite = "Bulls" if direction == "Bullish" else "Bears"
+                                        if alignment == "Aligned":
+                                            interpretation = (
+                                                f"{actor} still control direction, but trend strength "
+                                                "did not confirm the new price extreme."
+                                            )
+                                        elif alignment == "Contrary":
+                                            interpretation = (
+                                                f"{opposite} now control directional movement; "
+                                                "this price/ADX mismatch does not establish a new trend."
+                                            )
+                                        else:
+                                            interpretation = (
+                                                "Neither DI currently leads; ADX alone cannot "
+                                                "establish trend direction."
+                                            )
+                                        divergence_text = (
+                                            f"({direction}) Price made a {price_move} "
+                                            f"(${old_price:.2f} → ${new_price:.2f}; "
+                                            f"{old_date.month}/{old_date.day} → {new_date.month}/{new_date.day}); "
+                                            f"nearby ADX({adx_period}) peaks fell "
+                                            f"({old_peak:.2f} → {new_peak:.2f}). "
+                                            + interpretation
+                                        )
+                                        adx_visual_divergence_block = (
+                                            "<b>Price/ADX Divergence:</b> "
+                                            + _wrap_hover_text(divergence_text, width=82) + "<br>"
+                                        )
+                                except (KeyError, ValueError, TypeError, OverflowError):
+                                    pass
+                            spread_style = extra_map.get("adx_visual_spread_style")
+                            spread_leader = extra_map.get("adx_visual_spread_leader")
+                            if (
+                                spread_style in ("Widening", "Narrowing")
+                                and spread_leader in ("Bulls", "Bears")
+                                and adx_di_crossover is None
+                            ):
+                                adx_visual_spread_style = spread_style
+                                movement = ("gaining control" if spread_style == "Widening"
+                                            else "losing some control")
+                                font_color = "Blue" if spread_style == "Widening" else "Red"
+                                adx_visual_spread_block = (
+                                    f"<b>Spread Color:</b> ({font_color}) {spread_leader} are {movement} "
+                                    "for two consecutive DI moves (ADX >20).<br>"
+                                )
+                        price_column = (
+                            "Adj Close" if "Adj Close" in current_row
+                            else "Close"
+                        )
+                        interpreted = get_adx_development_interpretation(
+                            adx_period, adx_state, s, all_state_rules,
+                            v, dip_val, din_val,
+                            prev_v, prev_dip_val, prev_din_val,
+                            current_row.get(price_column),
+                            prev_row.get(price_column),
+                        )
+                        if interpreted:
+                            context_text, bottom_text = interpreted
+                            adx_interpretation_block = (
+                                "<b>Context Interpretation:</b> "
+                                + _wrap_hover_text(context_text, width=88) + "<br>"
+                            )
+                            if bottom_text:
+                                adx_interpretation_block += (
+                                    "<b>Bottom-line:</b> "
+                                    + _wrap_hover_text(bottom_text, width=88)
+                                    + "<br>"
+                                )
 
             # ----------------------------
             # Preformatted hover fragments ('Indicator'-row)
@@ -5194,6 +5356,18 @@ def build_plotly_heatmap_inputs(
                 "Rule (%B)" if key.startswith("BB_BW") else "Rule",
                 rule_text, width=80,
             )
+            if key.startswith("ADX_") and rule_text:
+                rule_block = _compact_hover_rule(rule_block).removeprefix("<br>")
+                delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
+                trend_line = _bold_hover_prefix(trend_line, "Trend")
+                # Bold the inline price/volume labels without changing their values.
+                delta_line = delta_line.replace(" | Price:", " | <b>Price:</b>").replace(
+                    " | Vol:", " | <b>Vol:</b>"
+                )
+                trend_line = trend_line.replace(" | Price:", " | <b>Price:</b>").replace(
+                    " | Vol:", " | <b>Vol:</b>"
+                )
+                signal_line = signal_line.removeprefix("<br>")
             if key.startswith(("BB_PCT_B", "BB_BW")):
                 rule_block = _compact_hover_rule(rule_block)
                 delta_line = _bold_hover_prefix(delta_line, "Δ vs prior day")
@@ -5216,6 +5390,17 @@ def build_plotly_heatmap_inputs(
             notes_block = _format_hover_block("Notes", rule_notes, width=80)
             definition_block = _format_hover_block("Definition", definition, width=78)
             how_to_read_block = _format_hover_block("How to Read", how_to_read, width=80)
+            if key.startswith("ADX_") and adx_interpretation_block:
+                # Preserve all educational fields while reclaiming vertical space.
+                notes_block = notes_block.replace(
+                    "<br><b>Notes:</b><br>", "<br><b>Notes:</b> ", 1
+                )
+                definition_block = definition_block.replace(
+                    "<br><b>Definition:</b><br>", "<br><b>Definition:</b> ", 1
+                )
+                how_to_read_block = how_to_read_block.replace(
+                    "<br><b>How to Read:</b><br>", "<br><b>How to Read:</b> ", 1
+                )
 
             # indicator rows do not use volume hover fields
             volume_block = ""
@@ -6359,6 +6544,13 @@ def build_plotly_heatmap_inputs(
                     "macd_interpretation_block": macd_interpretation_block,
                     "macd_signal_crossover": macd_signal_crossover,
                     "adx_context_block": adx_context_block,
+                    "adx_di_crossover": adx_di_crossover,
+                    "adx_crossover_block": adx_crossover_block,
+                    "adx_visual_divergence": adx_visual_divergence,
+                    "adx_visual_spread_style": adx_visual_spread_style,
+                    "adx_visual_divergence_block": adx_visual_divergence_block,
+                    "adx_visual_spread_block": adx_visual_spread_block,
+                    "adx_interpretation_block": adx_interpretation_block,
                     "stoch_context_block": stoch_context_block,
                     "stoch_divergence": stoch_divergence_value,
                     "stoch_divergence_evidence": stoch_divergence_evidence,
@@ -6978,6 +7170,88 @@ def apply_stoch_kd_crossover_overlay(
                 xanchor="center", yanchor="middle",
                 font=dict(size=12, color="#FFD700" if conflict else "black"),
                 captureevents=False,
+            )
+
+
+def apply_adx_visual_value_overlays(
+    fig: go.Figure, *, customdata: List[List[dict]], x: List[Any], y: List[Any],
+) -> None:
+    """Display-only blue/red ADX values and directional diamonds.
+
+    Score heatmap/customdata remain untouched. A colored value replaces its
+    uncolored heatmap text exactly once. Diamond remains a separate annotation,
+    compatible with the existing black DI crossover arrow on the opposite side.
+    Must execute after other text overlays have completed.
+    """
+    if not fig.data:
+        return
+    heatmap = fig.data[0]
+    old_text = [list(row) for row in heatmap.text]
+    colors = {"Widening": ([], [], []), "Narrowing": ([], [], [])}
+    diamond_coordinates = []
+    for i, row in enumerate(customdata):
+        if i >= len(y) or i >= len(old_text):
+            continue
+        for j, cell in enumerate(row):
+            if j >= len(x) or j >= len(old_text[i]) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("ADX_"):
+                continue
+            style = cell.get("adx_visual_spread_style")
+            if style in colors and old_text[i][j] not in (None, ""):
+                colors[style][0].append(x[j])
+                colors[style][1].append(y[i])
+                colors[style][2].append(str(old_text[i][j]))
+                old_text[i][j] = ""
+            direction = cell.get("adx_visual_divergence")
+            if direction in ("Bullish", "Bearish"):
+                diamond_coordinates.append((x[j], y[i], direction))
+    heatmap.text = old_text
+    for style, color in (("Widening", "blue"), ("Narrowing", "red")):
+        xs, ys, ts = colors[style]
+        if ts:
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys, mode="text", text=ts,
+                textfont=dict(size=12, color=color),
+                hoverinfo="skip", showlegend=False,
+            ))
+    for cx, cy, direction in diamond_coordinates:
+        fig.add_annotation(
+            x=cx, y=cy, xref="x", yref="y", text="◆", showarrow=False,
+            xshift=-25, yshift=0, xanchor="center", yanchor="middle",
+            font=dict(size=12, color="blue" if direction == "Bullish" else "red"),
+            captureevents=False,
+        )
+
+
+def apply_adx_di_crossover_overlay(
+    fig: go.Figure, *, customdata: List[List[dict]],
+    x: List[Any], y: List[Any],
+) -> None:
+    """Render only independently verified ADX DI leadership changes.
+
+    The black arrow identifies DI crossover direction, not the Signal or
+    current ADX movement. Preserve numerical text, score and hover metadata.
+    """
+    if not fig.data:
+        return
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("ADX_"):
+                continue
+            event = cell.get("adx_di_crossover")
+            if event not in ("Bullish", "Bearish"):
+                continue
+            fig.add_annotation(
+                x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                text="▲" if event == "Bullish" else "▼",
+                showarrow=False, xshift=22, yshift=0,
+                xanchor="center", yanchor="middle",
+                font=dict(size=12, color="black"), captureevents=False,
             )
 
 
@@ -7636,10 +7910,14 @@ def make_rolling_heatmap_figure(
                     "rolling_value_line",
                     f"Value: {cell.get('formatted_value', '')}<br>",
                 )
-                if str(cell.get("indicator_key", "")).startswith(("CMF_", "BB_PCT_B", "BB_BW")):
+                if str(cell.get("indicator_key", "")).startswith(("CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
                     cell["rolling_value_line"] = _bold_hover_prefix(
                         cell["rolling_value_line"], "Value"
                     )
+                    if str(cell.get("indicator_key", "")).startswith("ADX_"):
+                        cell["rolling_value_line"] = cell["rolling_value_line"].replace(
+                            " | Price:", " | <b>Price:</b>"
+                        ).replace(" | Vol:", " | <b>Vol:</b>")
 
     hovertemplate = (
         "<b>%{customdata.display_name}</b><br>"
@@ -7656,6 +7934,9 @@ def make_rolling_heatmap_figure(
         "%{customdata.adx_context_block}"
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.adx_crossover_block}"
+        "%{customdata.adx_visual_divergence_block}"
+        "%{customdata.adx_visual_spread_block}"
         "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
@@ -7664,6 +7945,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
@@ -7739,6 +8021,10 @@ def make_rolling_heatmap_figure(
         y=hm.y,
     )
 
+    apply_adx_di_crossover_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+
     apply_stoch_divergence_text_overlay(
         fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
@@ -7768,6 +8054,10 @@ def make_rolling_heatmap_figure(
     )
 
     apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+
+    apply_adx_visual_value_overlays(
         fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 

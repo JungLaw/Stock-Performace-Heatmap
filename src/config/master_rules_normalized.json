@@ -20,27 +20,27 @@
           "heatmap": {
             "9": {
               "strong_buy": "ADX_9 > 25 and (DIp_9 - DIn_9) >= 10",
-              "buy": "ADX_9 > 20 and (DIp_9 - DIn_9) >= 5",
+              "buy": "ADX_9 > 20 and (DIp_9 - DIn_9) >= 5 and (ADX_9 <= 25 or (DIp_9 - DIn_9) < 10)",
               "neutral": "ADX_9 <= 20 or abs(DIp_9 - DIn_9) < 5",
-              "sell": "ADX_9 > 20 and (DIn_9 - DIp_9) >= 5",
+              "sell": "ADX_9 > 20 and (DIn_9 - DIp_9) >= 5 and (ADX_9 <= 25 or (DIn_9 - DIp_9) < 10)",
               "strong_sell": "ADX_9 > 25 and (DIn_9 - DIp_9) >= 10",
               "type": "trend_strength",
               "notes": "Strong uses larger DI gap (>=10) and higher ADX (>25). Variables: ADX, +DI, -DI."
             },
             "14": {
               "strong_buy": "ADX_14 > 25 and (DIp_14 - DIn_14) >= 10",
-              "buy": "ADX_14 > 20 and (DIp_14 - DIn_14) >= 5",
+              "buy": "ADX_14 > 20 and (DIp_14 - DIn_14) >= 5 and (ADX_14 <= 25 or (DIp_14 - DIn_14) < 10)",
               "neutral": "ADX_14 <= 20 or abs(DIp_14 - DIn_14) < 5",
-              "sell": "ADX_14 > 20 and (DIn_14 - DIp_14) >= 5",
+              "sell": "ADX_14 > 20 and (DIn_14 - DIp_14) >= 5 and (ADX_14 <= 25 or (DIn_14 - DIp_14) < 10)",
               "strong_sell": "ADX_14 > 25 and (DIn_14 - DIp_14) >= 10",
               "type": "trend_strength",
               "notes": "Standard ADX(14); DI gap and ADX thresholds identical across TFs for consistency."
             },
             "20": {
               "strong_buy": "ADX_20 > 25 and (DIp_20 - DIn_20) >= 10",
-              "buy": "ADX_20 > 20 and (DIp_20 - DIn_20) >= 5",
+              "buy": "ADX_20 > 20 and (DIp_20 - DIn_20) >= 5 and (ADX_20 <= 25 or (DIp_20 - DIn_20) < 10)",
               "neutral": "ADX_20 <= 20 or abs(DIp_20 - DIn_20) < 5",
-              "sell": "ADX_20 > 20 and (DIn_20 - DIp_20) >= 5",
+              "sell": "ADX_20 > 20 and (DIn_20 - DIp_20) >= 5 and (ADX_20 <= 25 or (DIn_20 - DIp_20) < 10)",
               "strong_sell": "ADX_20 > 25 and (DIn_20 - DIp_20) >= 10",
               "type": "trend_strength",
               "notes": "Longer smoothing but same decision thresholds to keep signals comparable."

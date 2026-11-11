@@ -1059,6 +1059,129 @@ class DatabaseIntegratedTechnicalCalculator:
             & (s > s.shift(-2))
         )
 
+    @staticmethod
+    def _build_adx_visual_context(df_ind: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+        """Read-only ADX display observations from the complete chronology.
+
+        Diamond: consecutive confirmed 5-bar PRICE swing highs/lows with a
+        lower nearby (pivot +/-2) ADX maximum; emit on newer pivot +2 only.
+        High-high means Bearish *price/strength nonconfirmation*; low-low
+        means Bullish. Record DI leadership on the event date and explicitly
+        distinguish aligned, contrary and tied cases; never infer direction
+        from ADX itself. Suppress simultaneous opposing candidates rather
+        than assigning artificial precedence.
+
+        Numeric font: same DI leader in three successive observations, with
+        two successive strict increases/decreases in |+DI - -DI| and ADX>20.
+        Widen/Narrow color describes DI separation, never ADX's own slope.
+        No score, rulebook, DB, or numeric indicator values are changed.
+        """
+        result: Dict[str, Dict[str, Any]] = {}
+        if (
+            df_ind is None or df_ind.empty or not df_ind.index.is_unique
+            or not {"High", "Low"}.issubset(df_ind.columns)
+        ):
+            return result
+
+        dates = df_ind.index
+        n = len(df_ind)
+        highs = pd.to_numeric(df_ind["High"], errors="coerce")
+        lows = pd.to_numeric(df_ind["Low"], errors="coerce")
+        high_indices = np.flatnonzero(
+            DatabaseIntegratedTechnicalCalculator._confirmed_swing_high_5bar(highs).to_numpy(dtype=bool)
+        )
+        low_indices = np.flatnonzero(
+            DatabaseIntegratedTechnicalCalculator._confirmed_swing_low_5bar(lows).to_numpy(dtype=bool)
+        )
+
+        for period in (9, 14, 20):
+            key = f"ADX_{period}"
+            dip_key, din_key = f"DIp_{period}", f"DIn_{period}"
+            if not {key, dip_key, din_key}.issubset(df_ind.columns):
+                continue
+            adx = pd.to_numeric(df_ind[key], errors="coerce")
+            plus = pd.to_numeric(df_ind[dip_key], errors="coerce")
+            minus = pd.to_numeric(df_ind[din_key], errors="coerce")
+
+            gap = plus - minus
+            magnitude = gap.abs()
+            sign = np.sign(gap)
+            valid = adx.notna() & plus.notna() & minus.notna()
+            history_ok = valid & valid.shift(1, fill_value=False) & valid.shift(2, fill_value=False)
+            same_leader = (
+                history_ok & (sign != 0)
+                & (sign == sign.shift(1)) & (sign == sign.shift(2))
+            )
+            move = magnitude.diff()
+            prior_move = move.shift(1)
+            spread_style = pd.Series(None, index=dates, dtype="object")
+            spread_style.loc[same_leader & (adx > 20) & (move > 0) & (prior_move > 0)] = "Widening"
+            spread_style.loc[same_leader & (adx > 20) & (move < 0) & (prior_move < 0)] = "Narrowing"
+            leader = pd.Series(None, index=dates, dtype="object")
+            leader.loc[valid & (gap > 0)] = "Bulls"
+            leader.loc[valid & (gap < 0)] = "Bears"
+
+            events = pd.Series([None] * n, index=dates, dtype="object")
+            blocked = set()
+            adx_values = adx.to_numpy(dtype=float)
+            plus_values = plus.to_numpy(dtype=float)
+            minus_values = minus.to_numpy(dtype=float)
+            for kind, pivot_indices, prices, direction in (
+                ("higher_high", high_indices, highs.to_numpy(dtype=float), "Bearish"),
+                ("lower_low", low_indices, lows.to_numpy(dtype=float), "Bullish"),
+            ):
+                for old, new in zip(pivot_indices[:-1], pivot_indices[1:]):
+                    confirmation = int(new) + 2
+                    if confirmation >= n or new < 2 or old < 2 or confirmation in blocked:
+                        continue
+                    old_price, new_price = prices[old], prices[new]
+                    if not (np.isfinite(old_price) and np.isfinite(new_price)):
+                        continue
+                    if kind == "higher_high" and not new_price > old_price:
+                        continue
+                    if kind == "lower_low" and not new_price < old_price:
+                        continue
+                    older = adx_values[old - 2:old + 3]
+                    newer = adx_values[new - 2:new + 3]
+                    if not (len(older) == len(newer) == 5
+                            and np.isfinite(older).all() and np.isfinite(newer).all()):
+                        continue
+                    old_peak, new_peak = float(older.max()), float(newer.max())
+                    if not new_peak < old_peak:
+                        continue
+                    if not (np.isfinite(plus_values[confirmation])
+                            and np.isfinite(minus_values[confirmation])):
+                        continue
+                    # Price-swing direction defines the divergence *type*.
+                    # DI at confirmation qualifies its meaning instead of
+                    # discarding counter-directional evidence from the user.
+                    plus_leads = plus_values[confirmation] > minus_values[confirmation]
+                    minus_leads = minus_values[confirmation] > plus_values[confirmation]
+                    aligned = plus_leads if direction == "Bearish" else minus_leads
+                    leadership = "Aligned" if aligned else (
+                        "Contrary" if (plus_leads or minus_leads) else "Tied"
+                    )
+                    item = {
+                        "adx_visual_divergence": direction,
+                        "adx_visual_di_alignment": leadership,
+                        "adx_visual_price_pattern": kind,
+                        "adx_visual_prior_pivot": pd.Timestamp(dates[old]).strftime("%Y-%m-%d"),
+                        "adx_visual_current_pivot": pd.Timestamp(dates[new]).strftime("%Y-%m-%d"),
+                        "adx_visual_confirmation": pd.Timestamp(dates[confirmation]).strftime("%Y-%m-%d"),
+                        "adx_visual_prior_price": float(old_price),
+                        "adx_visual_current_price": float(new_price),
+                        "adx_visual_prior_adx_peak": old_peak,
+                        "adx_visual_current_adx_peak": new_peak,
+                    }
+                    existing = events.iloc[confirmation]
+                    if existing is not None:
+                        events.iloc[confirmation] = None
+                        blocked.add(confirmation)
+                    else:
+                        events.iat[confirmation] = item
+            result[key] = {"events": events, "spread_style": spread_style, "leader": leader}
+        return result
+
     def _build_stoch_emerging_divergence_context(
         self,
         df_ind: pd.DataFrame,
@@ -3546,6 +3669,10 @@ class DatabaseIntegratedTechnicalCalculator:
                     "bbp_two_sessions_ago": bbp_series.shift(2),
                 }
 
+        # ADX visual events are derived once on full chronological history.
+        # Confirmed swing events are emitted on pivot+2, never backpainted.
+        adx_visual_by_display_key = self._build_adx_visual_context(df_ind)
+
         # STOCH emerging divergence: detect on full chronological history,
         # before visible-window reduction, using the approved awareness-first
         # reference pivot / first-alert episode algorithm.
@@ -5102,6 +5229,21 @@ class DatabaseIntegratedTechnicalCalculator:
                                 raw_divergence
                             )
 
+                # ADX display-only metadata. All timing/leadership and two-move
+                # observations are based on full history and not recomputed
+                # in either Plotly/SCD consumer.
+                if eng_name == "ADX":
+                    visual = adx_visual_by_display_key.get(display_key, {})
+                    if visual:
+                        event = visual["events"].get(dt)
+                        if isinstance(event, dict):
+                            extras.update(event)
+                        style = visual["spread_style"].get(dt)
+                        leader = visual["leader"].get(dt)
+                        if style in ("Widening", "Narrowing") and leader in ("Bulls", "Bears"):
+                            extras["adx_visual_spread_style"] = style
+                            extras["adx_visual_spread_leader"] = leader
+
                 # STOCH awareness-only divergence metadata. No score, pivot,
                 # or event recomputation occurs in the adapter/UI layer.
                 if eng_name == "Stochastic":
@@ -5571,7 +5713,7 @@ class DatabaseIntegratedTechnicalCalculator:
                     for k, v in extras.items():
                         # CMF history is internal interpretation evidence, not
                         # an extra line in SCD's already-long raw hover summary.
-                        if k.startswith("cmf_"):
+                        if k.startswith(("cmf_", "adx_visual_")):
                             continue
                         if isinstance(v, (int, float, np.number)):
                             extras_parts.append(

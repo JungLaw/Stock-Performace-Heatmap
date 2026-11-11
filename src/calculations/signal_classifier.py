@@ -521,6 +521,21 @@ class SignalEngine:
                         | df[d_col].isna()
                     )
 
+            elif indicator_name == "ADX":
+                adx_col = f"ADX_{param_key}"
+                dip_col = f"DIp_{param_key}"
+                din_col = f"DIn_{param_key}"
+
+                if all(
+                    col in df.columns
+                    for col in (adx_col, dip_col, din_col)
+                ):
+                    indicator_missing_mask = (
+                        df[adx_col].isna()
+                        | df[dip_col].isna()
+                        | df[din_col].isna()
+                    )
+
         # Build context from df columns
         context = {col: df[col] for col in df.columns}
 

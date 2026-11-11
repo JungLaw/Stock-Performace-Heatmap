@@ -68,6 +68,8 @@ from ui.rolling_heatmap_adapter import (
     apply_cci_zero_line_arrow_overlay,
     apply_uo_divergence_symbol_overlay,
     apply_macd_signal_crossover_overlay,
+    apply_adx_di_crossover_overlay,
+    apply_adx_visual_value_overlays,
     apply_stoch_divergence_text_overlay,
     apply_stoch_kd_crossover_overlay,
     apply_hma_turn_text_overlay,
@@ -2893,6 +2895,13 @@ def _build_scd_price_cell_from_context_df(
             "ma_context_block": "",
             "macd_context_block": "",
             "adx_context_block": "",
+            "adx_di_crossover": None,
+            "adx_crossover_block": "",
+            "adx_visual_divergence": None,
+            "adx_visual_spread_style": None,
+            "adx_visual_divergence_block": "",
+            "adx_visual_spread_block": "",
+            "adx_interpretation_block": "",
             "stoch_context_block": "",
             "dpo_context_block": "",
             "bullbear_context_block": "",
@@ -4930,6 +4939,10 @@ def _build_scd_hover_customdata(
         "bb_pct_b_post_rule_block",
         "alignment_line",
         "adx_context_block",
+        "adx_crossover_block",
+        "adx_visual_divergence_block",
+        "adx_visual_spread_block",
+        "adx_interpretation_block",
         "signal_line",
         "bbp_exhaustion_context_block",
         "macd_context_block",
@@ -4971,13 +4984,16 @@ def _build_scd_hover_customdata(
             f"{custom.get('formatted_value', '')}<br>"
         )
 
-    if row_key.startswith(("CMF_", "BB_PCT_B", "BB_BW")):
+    if row_key.startswith(("CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
         # Keep SCD's original value and diagnostic suffix; bold label only.
         value_line = str(custom["scd_value_line"])
         if value_line.startswith("Value:"):
             custom["scd_value_line"] = "<b>Value:</b>" + value_line[6:]
 
     custom.setdefault("scd_single_value_line", custom["scd_value_line"])
+    if row_key.startswith("ADX_"):
+        # ADX value and first-line labels should match Rolling and SCD views.
+        custom["scd_single_value_line"] = custom["scd_value_line"]
     custom["ticker"] = ticker
     custom["row_key"] = row_key
     custom["status"] = cell.get("status")
@@ -5011,6 +5027,11 @@ def _build_scd_hover_customdata(
         or row_key.startswith("HMA_")
         or row_key.startswith("UO_")
         or row_key.startswith("MACD_")
+        or (
+            row_key.startswith("ADX_")
+            and custom.get("rule_block")
+            and custom.get("adx_context_block")
+        )
         or row_key.startswith("CCI_")
         or row_key.startswith("STOCH_")
     ):
@@ -5174,6 +5195,9 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.adx_context_block}"
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.adx_crossover_block}"
+        "%{customdata.adx_visual_divergence_block}"
+        "%{customdata.adx_visual_spread_block}"
         "%{customdata.hma_post_signal_block}"
         "%{customdata.vwma_post_signal_block}"
         "%{customdata.cci_context_block}"
@@ -5182,6 +5206,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
         "%{customdata.cci_interpretation_block}"
@@ -5256,6 +5281,9 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         x=tickers,
         y=y_labels,
     )
+    apply_adx_di_crossover_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
+    )
 
     apply_stoch_divergence_text_overlay(
         fig, customdata=customdata, x=tickers, y=y_labels,
@@ -5286,6 +5314,9 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
+    )
+    apply_adx_visual_value_overlays(
         fig, customdata=customdata, x=tickers, y=y_labels,
     )
 
@@ -5688,7 +5719,7 @@ def _build_scd_single_indicator_hover_customdata(
     else:
         custom["single_combined_trend_line"] = ""
 
-    if row_key.startswith(("MACD_", "STOCH_", "CCI_", "CMF_", "BB_PCT_B", "BB_BW")):
+    if row_key.startswith(("MACD_", "STOCH_", "CCI_", "CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
         def _bold_macd_opening(value: Any, label: str) -> str:
             content = str(value or "")
             prefix = f"{label}:"
@@ -5705,6 +5736,18 @@ def _build_scd_single_indicator_hover_customdata(
         custom["single_combined_trend_line"] = _bold_macd_opening(
             custom.get("single_combined_trend_line"), "Trend"
         )
+
+    if row_key.startswith("ADX_"):
+        for field in (
+            "scd_single_value_line",
+            "single_combined_delta_line",
+            "single_combined_trend_line",
+        ):
+            custom[field] = (
+                str(custom.get(field) or "")
+                .replace(" | Price:", " | <b>Price:</b>")
+                .replace(" | Vol:", " | <b>Vol:</b>")
+            )
 
     return custom
 
@@ -5905,6 +5948,9 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.adx_context_block}"
             "%{customdata.uo_context_block}"
             "%{customdata.signal_line}"
+            "%{customdata.adx_crossover_block}"
+            "%{customdata.adx_visual_divergence_block}"
+            "%{customdata.adx_visual_spread_block}"
             "%{customdata.cci_context_block}"
             "%{customdata.bbp_exhaustion_context_block}"
             "%{customdata.macd_context_block}"
@@ -5913,6 +5959,7 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.dpo_context_block}"
             "%{customdata.bullbear_context_block}"
             "%{customdata.rule_block}"
+            "%{customdata.adx_interpretation_block}"
             "%{customdata.bb_pct_b_post_rule_block}"
             "%{customdata.cmf_interpretation_block}"
             "%{customdata.cci_interpretation_block}"
@@ -5983,6 +6030,9 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         x=tickers,
         y=date_labels,
     )
+    apply_adx_di_crossover_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
+    )
 
     apply_stoch_divergence_text_overlay(
         fig, customdata=customdata, x=tickers, y=date_labels,
@@ -6013,6 +6063,9 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_bollinger_pct_b_visual_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
+    )
+    apply_adx_visual_value_overlays(
         fig, customdata=customdata, x=tickers, y=date_labels,
     )
 

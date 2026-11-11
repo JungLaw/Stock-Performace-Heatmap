@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import math
 from functools import lru_cache
 from numbers import Real
 from typing import Mapping, Optional
@@ -2133,3 +2134,393 @@ def get_bollinger_pct_b_bottom_line(
         return ("Bandwidth remains exceptionally wide after substantial five-session "
                 f"expansion, with price {position}. Material daily widening has paused.")
     return None
+
+
+# ADX IVE: guarded interpretation of the repaired five-state Trend rulebook.
+_ADX_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_ADX_SCORES = {"strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2}
+
+
+@lru_cache(maxsize=3)
+def _approved_adx_rules(period: int) -> dict[str, str]:
+    """Reviewed rules, independent of the active rulebook (all 3 ADX periods)."""
+    a, p, n = (f"ADX_{period}", f"DIp_{period}", f"DIn_{period}")
+    positive = f"({p} - {n})"
+    negative = f"({n} - {p})"
+    return {
+        "strong_buy": f"{a} > 25 and {positive} >= 10",
+        "buy": f"{a} > 20 and {positive} >= 5 and ({a} <= 25 or {positive} < 10)",
+        "neutral": f"{a} <= 20 or abs({p} - {n}) < 5",
+        "sell": f"{a} > 20 and {negative} >= 5 and ({a} <= 25 or {negative} < 10)",
+        "strong_sell": f"{a} > 25 and {negative} >= 10",
+    }
+
+
+@lru_cache(maxsize=128)
+def _adx_rule_fingerprints(expressions: tuple[str, ...]) -> tuple[Optional[str], ...]:
+    """Cache pure parsed rule shapes across heatmap dates, without caching scores."""
+    return tuple(_fingerprint(expr) for expr in expressions)
+
+
+def _adx_finite(value: object) -> Optional[float]:
+    """Reject missing/non-finite or boolean evidence rather than inferring zero."""
+    if isinstance(value, bool):
+        return None
+    try:
+        value = float(value)
+        return value if math.isfinite(value) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _adx_show(value: float, *boundaries: float) -> str:
+    """Avoid rounding an unqualified strict comparison to its threshold."""
+    if any(round(value, 2) == limit and value != limit for limit in boundaries):
+        return repr(value)
+    return f"{value:.2f}"
+
+
+def _adx_verified_observation(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str],
+    adx_value: object, dip_value: object, din_value: object,
+) -> Optional[tuple[float, float, float, float]]:
+    """Do not override source Rule text if rulebook, score or evidence differ."""
+    if period not in (9, 14, 20) or state not in _ADX_STATES:
+        return None
+    if isinstance(score, bool) or score != _ADX_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    approved = _approved_adx_rules(period)
+    active_expressions = tuple(str(active_rules.get(k, "") or "") for k in _ADX_STATES)
+    approved_expressions = tuple(approved[k] for k in _ADX_STATES)
+    if _adx_rule_fingerprints(active_expressions) != _adx_rule_fingerprints(approved_expressions):
+        return None
+    a, p, n = (_adx_finite(adx_value), _adx_finite(dip_value), _adx_finite(din_value))
+    if a is None or p is None or n is None:
+        return None
+    gap = p - n
+    actual = (
+        "strong_buy" if a > 25 and gap >= 10 else
+        "buy" if a > 20 and gap >= 5 else
+        "strong_sell" if a > 25 and gap <= -10 else
+        "sell" if a > 20 and gap <= -5 else
+        "neutral"
+    )
+    return (a, p, n, gap) if actual == state else None
+
+
+def get_adx_rule_explanation(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str],
+    adx_value: object, dip_value: object, din_value: object,
+) -> Optional[str]:
+    """Explain the classified ADX condition in human terms and exact thresholds."""
+    facts = _adx_verified_observation(
+        period, state, score, active_rules, adx_value, dip_value, din_value,
+    )
+    if facts is None:
+        return None
+    a, p, n, gap = facts
+    a_text, p_text, n_text = _adx_show(a, 20, 25), _adx_show(p), _adx_show(n)
+    magnitude = _adx_show(abs(gap), 5, 10)
+    if state == "neutral":
+        if gap > 0:
+            opening = f"Buyers hold a {magnitude}-point DI lead (+DI {p_text} versus −DI {n_text}), "
+        elif gap < 0:
+            opening = f"Sellers hold a {magnitude}-point DI lead (−DI {n_text} versus +DI {p_text}), "
+        else:
+            opening = f"+DI and −DI are tied at {p_text}, "
+        if a <= 20 and abs(gap) < 5:
+            return (
+                opening + f"but ADX {a_text} does not exceed 20 and the lead is below "
+                "5 points. Neither Buy nor Sell qualifies; the Signal remains Neutral."
+            )
+        if a <= 20:
+            return (
+                opening + f"but ADX at {a_text} does not exceed the required 20. "
+                "The directional lead alone cannot establish Buy or Sell, so the Signal is Neutral."
+            )
+        return (
+            opening + f"but the lead is below the required 5 points despite ADX "
+            f"at {a_text}. Neither side qualifies for Buy or Sell; the Signal is Neutral."
+        )
+
+    bullish = state in ("strong_buy", "buy")
+    leader, follower = ("+DI", "−DI") if bullish else ("−DI", "+DI")
+    lead_value, follow_value = (p_text, n_text) if bullish else (n_text, p_text)
+    who = "Buyers" if bullish else "Sellers"
+    direction = "bullish" if bullish else "bearish"
+    label = "Strong Buy" if state == "strong_buy" else "Strong Sell" if state == "strong_sell" else "Buy" if bullish else "Sell"
+    opening = (
+        f"{who} {'firmly control' if state.startswith('strong_') else 'have the advantage in'} "
+        f"directional movement: {leader} at {lead_value} exceeds {follower} at "
+        f"{follow_value}; the {direction} lead is {magnitude} points. "
+    )
+    if state.startswith("strong_"):
+        return (
+            opening + f"ADX at {a_text} is above 25 and the lead meets the "
+            f"10-point requirement. Both {label} conditions are satisfied."
+        )
+    misses = []
+    if a <= 25:
+        misses.append(f"ADX at {a_text} is not above 25")
+    if abs(gap) < 10:
+        qualifier = "just below" if (10 - abs(gap)) <= 1 else "below"
+        misses.append(f"the {magnitude}-point lead is {qualifier} the required 10")
+    # A Buy/Sell state can qualify only if at least one Strong gate fails.
+    return (
+        opening + f"ADX at {a_text} exceeds 20 and the lead meets the 5-point "
+        f"threshold, qualifying as {label}. It is not {('Strong Buy' if bullish else 'Strong Sell')} "
+        f"because {' and '.join(misses)}."
+    )
+
+
+def get_adx_di_crossover(
+    dip_value: object, din_value: object,
+    prior_dip_value: object, prior_din_value: object,
+) -> Optional[str]:
+    """Strict opposite-sign crossover on the current observation; equality is not a cross."""
+    p, n, pp, pn = (
+        _adx_finite(dip_value), _adx_finite(din_value),
+        _adx_finite(prior_dip_value), _adx_finite(prior_din_value),
+    )
+    if any(v is None for v in (p, n, pp, pn)):
+        return None
+    previous, current = pp - pn, p - n
+    if previous < 0 < current:
+        return "Bullish"
+    if previous > 0 > current:
+        return "Bearish"
+    return None
+
+
+def get_adx_development_interpretation(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str],
+    adx_value: object, dip_value: object, din_value: object,
+    prior_adx: object, prior_dip: object, prior_din: object,
+    current_price: object = None, prior_price: object = None,
+) -> Optional[tuple[str, Optional[str]]]:
+    """Context explains change; Bottom-line combines state, change and price.
+
+    It never changes the score or treats a one-day price/DI contrast as
+    formal divergence or a confirmed reversal.  Missing prior evidence
+    remains explicit; fully initialized observations receive a synthesis.
+    """
+    facts = _adx_verified_observation(
+        period, state, score, active_rules, adx_value, dip_value, din_value,
+    )
+    if facts is None:
+        return None
+    a, p, n, gap = facts
+    prior = tuple(_adx_finite(x) for x in (prior_adx, prior_dip, prior_din))
+    if any(x is None for x in prior):
+        return ("Prior-session ADX/DI development is unavailable.", None)
+    prev_a, prev_p, prev_n = prior
+    prev_gap = prev_p - prev_n
+    event = get_adx_di_crossover(p, n, prev_p, prev_n)
+    lead = "bullish" if gap > 0 else "bearish" if gap < 0 else "balanced"
+    leader = "buyers" if gap > 0 else "sellers" if gap < 0 else "neither side"
+    gap_change = abs(gap) - abs(prev_gap)
+    adx_change = a - prev_a
+
+    def di_motion(label: str, current: float, previous: float) -> str:
+        if current > previous:
+            return f"{label} rose {current - previous:.2f}"
+        if current < previous:
+            return f"{label} fell {previous - current:.2f}"
+        return f"{label} was unchanged"
+
+    motions = f"{di_motion('+DI', p, prev_p)} while {di_motion('−DI', n, prev_n)}"
+    if event:
+        context_open = (
+            f"Directional leadership switched toward {leader}: {motions}. "
+        )
+    elif gap != 0 and prev_gap != 0 and (gap > 0) == (prev_gap > 0):
+        if gap_change > 0:
+            verb = "edged wider" if gap_change < 0.5 else "widened"
+        elif gap_change < 0:
+            verb = "edged narrower" if gap_change > -0.5 else "narrowed"
+        else:
+            verb = "held steady"
+        context_open = (
+            f"The {lead} DI advantage {verb} from {abs(prev_gap):.2f} "
+            f"to {abs(gap):.2f} points; {motions}. "
+        )
+    else:
+        context_open = (
+            f"DI leadership is tied or transitioning ({prev_gap:+.2f} to {gap:+.2f}); "
+            f"{motions}. "
+        )
+
+    if adx_change > 0:
+        adx_phrase = f"ADX rose from {prev_a:.2f} to {a:.2f}"
+    elif adx_change < 0:
+        adx_phrase = f"ADX eased from {prev_a:.2f} to {a:.2f}"
+    else:
+        adx_phrase = f"ADX held steady at {a:.2f}"
+
+    if a <= 20:
+        interpretation = "; smoothed trend strength remains below the Buy/Sell requirement of 20."
+    elif event and adx_change <= 0:
+        interpretation = (
+            "; the new directional lead is not yet accompanied by increasing "
+            "smoothed trend strength."
+        )
+    elif event:
+        interpretation = "; smoothed trend strength is also improving after the change in leadership."
+    elif gap * prev_gap > 0 and gap_change * adx_change < 0:
+        interpretation = (
+            "; the directional lead is holding up, but the trend is not clearly "
+            "strengthening at the same time."
+        )
+    elif gap * prev_gap > 0 and gap_change > 0 and adx_change > 0:
+        interpretation = "; both measures currently point to strengthening conditions."
+    elif gap * prev_gap > 0 and gap_change < 0 and adx_change < 0:
+        interpretation = "; both measures suggest directional support is easing."
+    else:
+        interpretation = "; this describes smoothed trend strength, not direction by itself."
+    context = context_open + adx_phrase + interpretation
+
+    current_px, prior_px = _adx_finite(current_price), _adx_finite(prior_price)
+    price_available = (
+        current_px is not None and prior_px is not None
+        and current_px > 0 and prior_px > 0
+    )
+    price_phrase = ""
+    price_agrees = None
+    if price_available:
+        change_pct = (current_px / prior_px - 1) * 100
+        if change_pct > 0:
+            price_phrase = f"Price rose {abs(change_pct):.1f}%"
+            price_agrees = gap > 0 if gap != 0 else None
+        elif change_pct < 0:
+            price_phrase = f"Price fell {abs(change_pct):.1f}%"
+            price_agrees = gap < 0 if gap != 0 else None
+        else:
+            price_phrase = "Price was unchanged"
+
+    if gap > 0:
+        direction = "bullish"
+        side = "buyers"
+    elif gap < 0:
+        direction = "bearish"
+        side = "sellers"
+    else:
+        direction = "balanced"
+        side = "neither side"
+    signal_name = {
+        "strong_buy": "Strong Buy", "buy": "Buy", "neutral": "Neutral",
+        "sell": "Sell", "strong_sell": "Strong Sell",
+    }[state]
+
+    if event and state == "neutral":
+        if price_agrees is True:
+            opening = f"{price_phrase} alongside the {lead} DI crossover. "
+        elif price_agrees is False:
+            opening = f"{price_phrase} despite the new {lead} DI crossover. "
+        else:
+            opening = f"A {lead} DI crossover has occurred. "
+        if a <= 20:
+            if adx_change > 0:
+                closing = (
+                    f"{side.capitalize()} now have the advantage and ADX is rising, "
+                    f"but it is still below 20; the shift does not yet qualify as "
+                    f"{'Buy' if gap > 0 else 'Sell'}."
+                )
+            else:
+                closing = (
+                    f"The new advantage remains unconfirmed by stronger ADX "
+                    f"and does not yet qualify as {'Buy' if gap > 0 else 'Sell'}."
+                )
+        else:
+            closing = (
+                f"The {abs(gap):.2f}-point lead is still too small for Buy/Sell; "
+                "directional leadership has changed without a qualified trend signal."
+            )
+        return context, opening + closing
+
+    if state == "neutral":
+        if price_available:
+            opening = f"{price_phrase}, but the directional evidence still does not qualify for Buy or Sell. "
+        else:
+            opening = "Neither direction currently meets the Buy/Sell rule. "
+        if a <= 20:
+            closing = (
+                f"ADX at {a:.2f} remains below the trend-strength requirement; "
+                "directional control is not yet confirmed."
+            )
+        else:
+            closing = (
+                f"ADX is adequate, but the DI advantage is below 5 points; "
+                "direction remains insufficiently differentiated."
+            )
+        return context, opening + closing
+
+    if event:
+        if price_agrees is True:
+            opening = f"{price_phrase} as {side} took the DI lead, consistent with {signal_name}. "
+        elif price_agrees is False:
+            opening = f"{price_phrase} despite the new {direction} DI lead. "
+        else:
+            opening = f"{side.capitalize()} have taken directional control, qualifying as {signal_name}. "
+        if adx_change <= 0:
+            closing = (
+                "ADX softened despite the leadership change; the new move has "
+                "not yet developed into a strengthening trend."
+            )
+        else:
+            closing = (
+                "ADX is also rising, although the crossover alone cannot "
+                "confirm future continuation."
+            )
+        # Ordinary state near the stronger gap threshold is useful context.
+        if (state in ("buy", "sell") and a > 25
+                and abs(gap) < 10 and abs(gap) >= 9):
+            closing = (
+                f"ADX has {'risen' if adx_change > 0 else 'eased'} and the "
+                f"{abs(gap):.2f}-point lead narrowly misses Strong "
+                f"{'Buy' if gap > 0 else 'Sell'}; further trend strengthening is unconfirmed."
+            )
+        return context, opening + closing
+
+    if price_agrees is True:
+        opening = f"{price_phrase} in line with the {direction} DI advantage. "
+    elif price_agrees is False:
+        opening = f"{price_phrase} despite the {direction} DI advantage. "
+    elif price_available:
+        opening = f"{price_phrase} while {side} retain directional leadership. "
+    else:
+        opening = f"{side.capitalize()} retain directional leadership. "
+
+    if gap * prev_gap > 0 and gap_change > 0 and adx_change > 0:
+        closing = (
+            f"{signal_name} remains supported, with both trend strength and "
+            "the directional advantage increasing."
+        )
+    elif gap * prev_gap > 0 and gap_change < 0 and adx_change < 0:
+        closing = (
+            f"{signal_name} still qualifies, but ADX and the directional "
+            "advantage are both easing; current support is moderating."
+        )
+    elif adx_change < 0:
+        closing = (
+            f"{signal_name} remains supported, but the lower ADX and "
+            f"{'small DI-gap increase' if gap_change > 0 and gap_change < 0.5 else 'mixed directional development'} "
+            "point to continuing control rather than clear new acceleration."
+        )
+    elif gap_change < 0 and gap * prev_gap > 0:
+        closing = (
+            f"{signal_name} still qualifies, although the directional lead "
+            "narrowed; strengthening ADX does not erase that moderation."
+        )
+    else:
+        closing = (
+            f"{signal_name} is supported by current ADX and DI readings, "
+            "but a single session does not establish future continuation."
+        )
+    if price_agrees is False:
+        closing += " The one-session price contrast does not confirm a reversal."
+    return context, opening + closing
