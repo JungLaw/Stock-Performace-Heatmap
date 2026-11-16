@@ -860,7 +860,7 @@
               "neutral": "-0.02 <= ROC_9 <= 0.02",
               "sell": "ROC_9 >= -0.05 and ROC_9 < -0.02",
               "strong_sell": "ROC_9 < -0.05",
-              "notes": "Symmetric thresholds; ROC strong zones represent meaningful momentum."
+              "notes": "Fast/noisy; use ADX to gauge trend strength. Events are context, not Signal."
             },
             "12": {
               "strong_buy": "ROC_12 > 0.07",
@@ -868,7 +868,7 @@
               "neutral": "-0.03 <= ROC_12 <= 0.03",
               "sell": "ROC_12 >= -0.07 and ROC_12 < -0.03",
               "strong_sell": "ROC_12 < -0.07",
-              "notes": "Longer ROC slightly larger thresholds."
+              "notes": "Compare ROC(50) for broader alignment. Events are context, not Signal."
             },
             "14": {
               "strong_buy": "ROC_14 > 0.07",
@@ -876,7 +876,7 @@
               "neutral": "-0.03 <= ROC_14 <= 0.03",
               "sell": "ROC_14 >= -0.07 and ROC_14 < -0.03",
               "strong_sell": "ROC_14 < -0.07",
-              "notes": "Measures the momentum of price changes. Compares the current price to a price 'n' periods ago."
+              "notes": "Use ADX for trend strength and RSI for extremes. Events are context, not Signal."
             },
             "20": {
               "strong_buy": "ROC_20 > 0.07",
@@ -884,7 +884,7 @@
               "neutral": "-0.03 <= ROC_20 <= 0.03",
               "sell": "ROC_20 >= -0.07 and ROC_20 < -0.03",
               "strong_sell": "ROC_20 < -0.07",
-              "notes": "Longer ROC slightly larger thresholds."
+              "notes": "Compare ROC(12/14) for earlier shifts. Events are context, not Signal."
             },
             "50": {
               "strong_buy": "ROC_50 > 0.10",
@@ -892,7 +892,7 @@
               "neutral": "-0.05 <= ROC_50 <= 0.05",
               "sell": "ROC_50 >= -0.10 and ROC_50 < -0.05",
               "strong_sell": "ROC_50 < -0.10",
-              "notes": "Long ROC smooths momentum widen bands."
+              "notes": "Broader momentum backdrop; fast ROC may differ. Events are context, not Signal."
             }
           },
           "overlay": {

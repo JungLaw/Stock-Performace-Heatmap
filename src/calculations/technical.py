@@ -166,8 +166,11 @@ class DatabaseIntegratedTechnicalCalculator:
             return None
         
         try:
+            # Keep adjusted price ROC-only; exposing "Adj Close" here would
+            # change the shared price basis for unrelated indicators.
             query = f"""
-            SELECT Date, Open, High, Low, Close, Volume
+            SELECT Date, Open, High, Low, Close,
+                   "Adj Close" AS ROC_DB_Adj_Close, Volume
             FROM {self.daily_prices_table}
             WHERE Ticker = ? AND Date >= ? AND Date <= ?
             ORDER BY Date ASC
@@ -1058,6 +1061,173 @@ class DatabaseIntegratedTechnicalCalculator:
             & (s > s.shift(-1))
             & (s > s.shift(-2))
         )
+
+    @staticmethod
+    def _build_roc_event_context(df_ind: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+        """Full-history ROC evidence; never changes classifier scores.
+
+        ROC is fractional internally. Price-pivot deltas are percent, while
+        ROC-pivot deltas are percentage points. Event evidence is dated only
+        when its qualifying observations are available (no back-painting).
+        """
+        output: Dict[str, Dict[str, Any]] = {}
+        if "ROC_Canonical_Price" not in df_ind.columns:
+            return output
+
+        price = pd.to_numeric(
+            df_ind["ROC_Canonical_Price"], errors="coerce"
+        ).astype("float64")
+        price = price.where(np.isfinite(price) & (price > 0.0))
+        count = len(price)
+
+        # 11-session price pivots: candidate +/- five observed sessions.
+        # These masks are shared by every ROC period, not recomputed per cell.
+        valid_window = price.notna()
+        high_mask = price.notna()
+        low_mask = price.notna()
+        for offset in (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5):
+            neighbor = price.shift(offset)
+            valid_window = valid_window & neighbor.notna()
+            high_mask = high_mask & (price > neighbor)
+            low_mask = low_mask & (price < neighbor)
+        high_positions = np.flatnonzero((valid_window & high_mask).to_numpy())
+        low_positions = np.flatnonzero((valid_window & low_mask).to_numpy())
+
+        # RVOL compares today's activity with the 20 PREVIOUS sessions.
+        rvol20 = None
+        if "Volume" in df_ind.columns:
+            volume = pd.to_numeric(df_ind["Volume"], errors="coerce")
+            volume = volume.where(np.isfinite(volume) & (volume >= 0.0))
+            prior_mean = volume.shift(1).rolling(20, min_periods=20).mean()
+            rvol20 = (volume / prior_mean.where(prior_mean > 0.0)).replace(
+                [np.inf, -np.inf], np.nan
+            )
+
+        for period in (9, 12, 14, 20, 50):
+            key = f"ROC_{period}"
+            if key not in df_ind.columns:
+                continue
+            roc = pd.to_numeric(df_ind[key], errors="coerce").astype("float64")
+            roc = roc.where(np.isfinite(roc))
+            arr = roc.to_numpy(dtype="float64")
+            dated_events: Dict[Any, Dict[str, Any]] = {}
+
+            # A transition is confirmed on session 3 of the new nonzero sign.
+            # Zero interrupts the run; missing observations also reset the
+            # prior sign, so a crossover cannot span missing ROC history.
+            last_sign = 0
+            run_sign = 0
+            run_length = 0
+            run_started_opposite = False
+            for i, value in enumerate(arr):
+                if not np.isfinite(value):
+                    last_sign = run_sign = run_length = 0
+                    run_started_opposite = False
+                    continue
+                sign = int(np.sign(value))
+                if sign == 0:
+                    run_sign = run_length = 0
+                    run_started_opposite = False
+                    continue
+                if sign != run_sign:
+                    run_sign = sign
+                    run_length = 1
+                    run_started_opposite = (last_sign == -sign)
+                else:
+                    run_length += 1
+                if run_length == 3 and run_started_opposite:
+                    dated_events.setdefault(df_ind.index[i], {})[
+                        "roc_zero_line_crossover"
+                    ] = "Positive" if sign > 0 else "Negative"
+                last_sign = sign
+
+            # Compare consecutive price pivots of the SAME kind. The price
+            # owns both pivot dates; ROC is sampled on those two dates only.
+            first_evaluable: Dict[str, int] = {}
+            for direction, positions in (
+                ("Bullish", low_positions), ("Bearish", high_positions)
+            ):
+                for previous, current in zip(positions[:-1], positions[1:]):
+                    p0, p1 = float(price.iloc[previous]), float(price.iloc[current])
+                    r0, r1 = float(arr[previous]), float(arr[current])
+                    if not all(np.isfinite(x) for x in (p0, p1, r0, r1)):
+                        continue
+                    event_pos = current + 5
+                    if event_pos >= count:
+                        continue
+                    if direction not in first_evaluable:
+                        first_evaluable[direction] = event_pos
+                    price_delta_pct = 100.0 * (p1 / p0 - 1.0)
+                    roc_delta_pps = 100.0 * (r1 - r0)
+                    qualifies = (
+                        (direction == "Bullish"
+                         and price_delta_pct <= -0.5 and roc_delta_pps >= 0.5)
+                        or
+                        (direction == "Bearish"
+                         and price_delta_pct >= 0.5 and roc_delta_pps <= -0.5)
+                    )
+                    if not qualifies:
+                        continue
+                    event_date = df_ind.index[event_pos]
+                    event = dated_events.setdefault(event_date, {})
+                    # Fail closed on any pathological opposite-direction
+                    # collision instead of assigning arbitrary precedence.
+                    if "roc_divergence" in event:
+                        event["roc_divergence"] = "Collision"
+                        continue
+                    event.update({
+                        "roc_divergence": direction,
+                        "roc_divergence_prior_pivot_date": pd.Timestamp(
+                            df_ind.index[previous]
+                        ).date().isoformat(),
+                        "roc_divergence_current_pivot_date": pd.Timestamp(
+                            df_ind.index[current]
+                        ).date().isoformat(),
+                        "roc_divergence_confirmation_date": pd.Timestamp(
+                            event_date
+                        ).date().isoformat(),
+                        "roc_divergence_prior_price": p0,
+                        "roc_divergence_current_price": p1,
+                        "roc_divergence_price_delta_pct": price_delta_pct,
+                        "roc_divergence_prior_roc_fraction": r0,
+                        "roc_divergence_current_roc_fraction": r1,
+                        "roc_divergence_roc_delta_pps": roc_delta_pps,
+                    })
+            for event in dated_events.values():
+                if event.get("roc_divergence") == "Collision":
+                    for field in list(event):
+                        if field.startswith("roc_divergence"):
+                            del event[field]
+
+            # Historical standing: causal, 120 consecutive valid readings,
+            # with midrank for ties. Vectorized so no per-cell scans.
+            standing = np.full(count, np.nan)
+            higher = np.full(count, np.nan)
+            if count >= 120:
+                windows = np.lib.stride_tricks.sliding_window_view(arr, 120)
+                ready = np.isfinite(windows).all(axis=1)
+                current_values = windows[:, -1, None]
+                lower_counts = (windows < current_values).sum(axis=1)
+                tie_counts = (windows == current_values).sum(axis=1)
+                higher_counts = 120 - lower_counts - tie_counts
+                standing[119:] = np.where(
+                    ready, 100.0 * (lower_counts + 0.5 * tie_counts) / 120, np.nan
+                )
+                higher[119:] = np.where(ready, higher_counts, np.nan)
+
+            # Carry one-session and full-history observations for hover.
+            output[key] = {
+                "events": dated_events,
+                "prior_roc": roc.shift(1),
+                "current_price": price,
+                "prior_price": price.shift(1),
+                "historical_percentile": pd.Series(standing, index=df_ind.index),
+                "historical_higher_count": pd.Series(higher, index=df_ind.index),
+                "rvol20": rvol20,
+                "divergence_ready_from": max(first_evaluable.values())
+                if len(first_evaluable) == 2 else None,
+            }
+        return output
 
     @staticmethod
     def _build_adx_visual_context(df_ind: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
@@ -3544,6 +3714,10 @@ class DatabaseIntegratedTechnicalCalculator:
         #   because BB_BW semantic context requires full chronological history.
         optionc_meta = self._get_optionc_meta()
 
+        # ROC context is calculated once from full chronological history.
+        # Consumers receive dated facts only; classification remains unchanged.
+        roc_context_by_display_key = self._build_roc_event_context(df_ind)
+
         # BB_BW semantic context must be derived on the complete chronological
         # indicator history before any visible-date/window reduction.
         bb_bw_context = self._build_bb_bw_semantic_context(
@@ -4888,6 +5062,35 @@ class DatabaseIntegratedTechnicalCalculator:
                 # Existing numeric extras remain numeric; BB_BW also carries
                 # upstream semantic state/direction strings.
                 extras: Dict[str, Any] = {}
+
+                if eng_name == "ROC":
+                    roc_context = roc_context_by_display_key.get(display_key)
+                    if roc_context:
+                        dated_event = roc_context["events"].get(dt)
+                        if isinstance(dated_event, dict):
+                            extras.update(dated_event)
+                        for context_name, extras_name in (
+                            ("prior_roc", "roc_prior_value"),
+                            ("current_price", "roc_price_current"),
+                            ("prior_price", "roc_price_prior"),
+                            ("historical_percentile", "roc_historical_percentile"),
+                            ("historical_higher_count", "roc_historical_higher_count"),
+                            ("rvol20", "roc_relative_volume_20"),
+                        ):
+                            source_series = roc_context.get(context_name)
+                            if not isinstance(source_series, pd.Series):
+                                continue
+                            raw_context = source_series.get(dt)
+                            if raw_context is not None and pd.notna(raw_context):
+                                if np.isfinite(float(raw_context)):
+                                    extras[extras_name] = float(raw_context)
+                        first_ready = roc_context.get("divergence_ready_from")
+                        if first_ready is not None:
+                            history_pos = df_ind.index.get_loc(dt)
+                            if isinstance(history_pos, (int, np.integer)):
+                                extras["roc_divergence_evaluable"] = (
+                                    int(history_pos) >= first_ready
+                                )
 
                 # CMF: transport true full-history predecessors and the
                 # same-index canonical price comparison before display slicing.

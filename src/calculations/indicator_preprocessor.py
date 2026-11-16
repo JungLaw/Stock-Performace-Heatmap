@@ -762,10 +762,35 @@ def compute_all_indicators(
     # ====================================================
     # ROC (Rate of Change) - pandas_ta_classic.roc
     # ====================================================
+    # The DB reader supplies adjusted close under a ROC-only alias to avoid
+    # silently changing all other indicators' price series. For mixed
+    # DB/yfinance history, prefer that alias, then the ordinary adjusted
+    # column (when present), then Close, on each date.
+    if cfg.get("ROC", []):
+        if "ROC_DB_Adj_Close" in df.columns:
+            db_adjusted = pd.to_numeric(
+                df["ROC_DB_Adj_Close"], errors="coerce"
+            ).astype("float64")
+            external_adjusted = pd.to_numeric(
+                df["Adj Close"] if "Adj Close" in df.columns else df["Close"],
+                errors="coerce",
+            ).astype("float64")
+            raw_close = pd.to_numeric(
+                df["Close"], errors="coerce"
+            ).astype("float64")
+            roc_price = (
+                db_adjusted.combine_first(external_adjusted)
+                .combine_first(raw_close)
+            )
+        else:
+            roc_price = pd.to_numeric(price, errors="coerce").astype("float64")
+        # Carry this exact series to the ROC event and hover consumers.
+        df["ROC_Canonical_Price"] = roc_price
+
     for length in cfg.get("ROC", []):
         l_i = int(length)
         roc_series = ta.roc(
-            close=price,
+            close=roc_price,
             length=l_i,
         )
 

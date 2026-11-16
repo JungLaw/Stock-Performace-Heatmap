@@ -28,6 +28,8 @@ from src.ui.indicator_hover_explanations import (
     get_adx_rule_explanation,
     get_adx_development_interpretation,
     get_adx_di_crossover,
+    get_roc_rule_explanation,
+    get_roc_hover_interpretation,
 )
 
 import numpy as np
@@ -968,28 +970,43 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     },
     "ROC_9": {
         "display_name": "ROC(9)",
-        "definition": "More sensitive; faster signals; for ST trading; Caution: more frequent false signals",
-        "how_to_read": "Confirming trend strength and direction in trending markets.",
-    },    
+        "definition": "ROC(9) measures % return over 9 sessions.",
+        "how_to_read": (
+            "▲/▼: Positive/Negative crossover<br>"
+            "Blue (Red): Bullish (Bearish) Price/ROC divergence"
+        ),
+    },
     "ROC_12": {
         "display_name": "ROC (12)",
-        "definition": "Measures the momentum of price changes. ROC measures %Δ versus N periods ago.",
-        "how_to_read": "Positive = up vs N periods ago; negative = down vs N periods ago.",
+        "definition": "Measures the momentum of price changes. Measures %Δ vs. 12 periods ago.",
+        "how_to_read": (
+            "▲/▼: Positive/Negative crossover<br>"
+            "Blue (Red): Bullish (Bearish) Price/ROC divergence"
+        ),
     },
     "ROC_14": {
         "display_name": "ROC(14)",
-        "definition": "Measures the momentum of price changes. ROC measures %Δ versus 14 periods ago.",
-        "how_to_read": "+ROC: rising prices and potentially strong buying pressure (uptrend); -ROC: falling prices and potentially strong selling pressure (downtrend); 0: suggests balanced momentum",
+        "definition": "Measures the momentum of price changes. Measures %Δ vs. 14 periods ago.",
+        "how_to_read": (
+            "▲/▼: Positive/Negative crossover<br>"
+            "Blue (Red): Bullish (Bearish) Price/ROC divergence"
+        ),
     },
     "ROC_20": {
         "display_name": "ROC (20)",
-        "definition": "14-36 days offers a balance of sensitivity & reliability for swing trading.",
-        "how_to_read": "Smoother momentum read than ROC(12).",
+        "definition": "ROC(20) measures % return over 20 sessions.",
+        "how_to_read": (
+            "▲/▼: Positive/Negative crossover<br>"
+            "Blue (Red): Bullish (Bearish) Price/ROC divergence"
+        ),
     },
     "ROC_50": {
         "display_name": "ROC(50)",
-        "definition": "Use longer periods, such as 36 or 200 days, for a smoother indicator that identifies long-term trend.",
-        "how_to_read": "Strength: Highly responsive to price changes, giving traders quick insights into market dynamics.",
+        "definition": "ROC(50) measures % return over 50 sessions.",
+        "how_to_read": (
+            "▲/▼: Positive/Negative crossover<br>"
+            "Blue (Red): Bullish (Bearish) Price/ROC divergence"
+        ),
     },    
     # Detrended Price Oscillator
     "DPO_11": {
@@ -1427,6 +1444,18 @@ def _abbr(n: float) -> str:
     if a >= 1_000:
         return f"{n/1_000:.2f}K"
     return f"{n:.2f}"
+
+
+def _roc_compact_volume(value: float, reference: float, *, signed: bool = False) -> str:
+    """Keep daily volume and its delta on the same, readable unit scale."""
+    reference = abs(reference)
+    scale, unit = (
+        (1_000_000_000.0, "B") if reference >= 1_000_000_000 else
+        (1_000_000.0, "M") if reference >= 1_000_000 else
+        (1_000.0, "K") if reference >= 1_000 else (1.0, "")
+    )
+    sign = ("+" if value > 0 else "−" if value < 0 else "") if signed else ""
+    return f"{sign}{abs(value) / scale:.2f}{unit}"
 
 
 def format_cell_value(indicator_key: str, v: Any) -> str:
@@ -2209,7 +2238,7 @@ def build_plotly_heatmap_inputs(
 
     if (
         raw_dates
-        and any(str(k).startswith(("MACD_", "ADX_")) for k in indicator_keys)
+        and any(str(k).startswith(("MACD_", "ADX_", "ROC_")) for k in indicator_keys)
         and ohlcv_df is not None
     ):
         try:
@@ -3331,6 +3360,11 @@ def build_plotly_heatmap_inputs(
                         "delta_line": f"Δ vs prior day: {delta_abs_fmt}{delta_pct_suffix}<br>",
                         "trend_line": trend_line,
                         "alignment_line": "",
+                        "roc_rvol_block": "",
+                        "roc_event_block": "",
+                        "roc_standing_block": "",
+                        "roc_interpretation_block": "",
+                        "roc_value_line": "",
                         "signal_line": signal_line,
                         "rule_block": rule_block,
                         "notes_block": notes_block,
@@ -3392,6 +3426,13 @@ def build_plotly_heatmap_inputs(
                             prev_v = float(true_prior)
                     except (TypeError, ValueError, OverflowError):
                         pass
+
+            # ROC's predecessor comes from full history, including when the
+            # preceding session is outside the visible heatmap window.
+            if key.startswith("ROC_") and isinstance(extra_map, dict):
+                true_prior = _to_float_or_none(extra_map.get("roc_prior_value"))
+                if true_prior is not None:
+                    prev_v = true_prior
 
             # Bollinger %B delta/trend must use the real chronological
             # predecessor, including on the first visible heatmap date.
@@ -4508,67 +4549,38 @@ def build_plotly_heatmap_inputs(
                             + _wrap_hover_text(bottom_text, width=72) + "<br>"
                         )
 
-            # ROC: Compare the day-over-day price direction with the
-            # day-over-day ROC direction. This is a one-bar alignment
-            # interpretation, not formal swing-point divergence detection.
-            if key.startswith("ROC_"):
-                current_price = price_by_date.get(d_raw)
-                prev_date = raw_dates[idx - 1] if idx > 0 else None
-                previous_price = (
-                    price_by_date.get(prev_date)
-                    if prev_date is not None
-                    else None
-                )
-
-                price_trend = infer_trend(
-                    current_price,
-                    previous_price,
-                )
+            # ROC: one-session alignment, distinct from confirmed divergence.
+            # Price comes from ROC's adjusted-price-consistent source.
+            if key.startswith("ROC_") and isinstance(extra_map, dict):
+                current_price = _to_float_or_none(extra_map.get("roc_price_current"))
+                previous_price = _to_float_or_none(extra_map.get("roc_price_prior"))
+                price_trend = infer_trend(current_price, previous_price)
                 roc_trend = trend
-
-                direction_symbol = {
-                    "Rising": "+",
-                    "Falling": "-",
-                    "Flat": "0",
-                }
-
-                alignment_text = {
-                    ("Rising", "Rising"):
-                        "confirming upside momentum",
-                    ("Falling", "Falling"):
-                        "confirming downside momentum",
-                    ("Rising", "Falling"):
-                        "upside momentum weakening",
-                    ("Falling", "Rising"):
-                        "downside momentum easing",
-                    ("Flat", "Rising"):
-                        "momentum improving while price is flat",
-                    ("Flat", "Falling"):
-                        "momentum weakening while price is flat",
-                    ("Rising", "Flat"):
-                        "price rising with stable momentum",
-                    ("Falling", "Flat"):
-                        "price falling with stable momentum",
-                    ("Flat", "Flat"):
-                        "price and momentum unchanged",
-                }.get(
-                    (price_trend, roc_trend)
-                )
-
-                price_symbol = direction_symbol.get(price_trend)
-                roc_symbol = direction_symbol.get(roc_trend)
-
-                if (
-                    alignment_text
-                    and price_symbol is not None
-                    and roc_symbol is not None
-                ):
-                    alignment_line = (
-                        "Alignment: "
-                        f"P({price_symbol}), "
-                        f"ROC({roc_symbol}) = "
-                        f"{alignment_text}<br>"
+                roc_now = _to_float_or_none(v)
+                symbol = {"Rising": "+", "Falling": "-", "Flat": "0"}
+                if roc_now is not None:
+                    alignment_words = {
+                        ("Rising", "Rising", 1): "Confirming upside momentum",
+                        ("Falling", "Falling", -1): "Confirming downside momentum",
+                        ("Rising", "Falling", 1): "Upside momentum weakening",
+                        ("Falling", "Rising", -1): "Downside momentum easing",
+                        ("Rising", "Rising", -1): "Downside momentum easing",
+                        ("Falling", "Falling", 1): "Upside momentum weakening",
+                        ("Rising", "Falling", -1): "Downside momentum intensifying despite rising price",
+                        ("Falling", "Rising", 1): "Upside momentum strengthening despite falling price",
+                    }.get(
+                        (price_trend, roc_trend, 1 if roc_now > 0 else -1 if roc_now < 0 else 0)
                     )
+                    if not alignment_words and price_trend in symbol and roc_trend in symbol:
+                        alignment_words = (
+                            "ROC at zero" if roc_now == 0 else
+                            "Price and ROC have a flat component"
+                        )
+                    if alignment_words and price_trend in symbol and roc_trend in symbol:
+                        alignment_line = (
+                            f"<b>Alignment:</b> P({symbol[price_trend]}) | "
+                            f"ROC({symbol[roc_trend]}) | {alignment_words}<br>"
+                        )
 
             # CMF: only historical confirmation belongs before the Rule.
             # Pressure and static Strong threshold are now explained by the
@@ -5771,7 +5783,7 @@ def build_plotly_heatmap_inputs(
 
                 if (
                     idx == 0
-                    and key.startswith("MACD_")
+                    and key.startswith(("MACD_", "ROC_"))
                     and first_visible_prior_ohlcv
                 ):
                     prev_volume_row = first_visible_prior_ohlcv
@@ -5809,6 +5821,206 @@ def build_plotly_heatmap_inputs(
                             / prev_volume_value
                             * 100.0
                         )
+
+            # ROC IVE hover uses the already-calculated full-history evidence.
+            # This is display-only; no divergence or crossover is detected here.
+            roc_event_block = ""
+            # Verified per-cell event flags for sparse Plotly overlays.
+            # Only the already-validated ROC hover path may set these.
+            roc_visual_crossover = None
+            roc_visual_divergence = None
+            roc_rvol_block = ""
+            roc_standing_block = ""
+            roc_interpretation_block = ""
+            roc_value_line = ""
+            if key.startswith("ROC_") and isinstance(extra_map, dict) and not _is_missing(v):
+                try:
+                    roc_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    roc_period = -1
+                roc_state = score_to_rule_key(s)
+                approved_rule = get_roc_rule_explanation(
+                    roc_period, roc_state, s, all_state_rules, v
+                )
+                if approved_rule is not None:
+                    rule_text = approved_rule
+                    rule_block = _compact_hover_rule(
+                        _format_hover_block("Rule", rule_text, width=80)
+                    ).removeprefix("<br>")
+                    signal_line = str(signal_line).removeprefix("<br>")
+
+                    roc_price = _to_float_or_none(extra_map.get("roc_price_current"))
+                    prior_price = _to_float_or_none(extra_map.get("roc_price_prior"))
+                    prior_roc = _to_float_or_none(extra_map.get("roc_prior_value"))
+                    rvol = _to_float_or_none(extra_map.get("roc_relative_volume_20"))
+                    current_val = _to_float_or_none(v)
+
+                    def _roc_signed(raw: float, decimals: int = 2) -> str:
+                        return f"{raw:+.{decimals}f}".replace("-", "−")
+
+                    def _roc_display_date(raw: Any, with_year: bool = True) -> str:
+                        ts = pd.Timestamp(raw)
+                        return f"{ts.month}/{ts.day}/{str(ts.year)[-2:]}" if with_year else f"{ts.month}/{ts.day}"
+
+                    # Event fields are dated upstream. Confirm all supplied
+                    # geometry against the underlying numeric comparisons.
+                    crossover = extra_map.get("roc_zero_line_crossover")
+                    if crossover not in ("Positive", "Negative") or (
+                        current_val is not None and (
+                            (crossover == "Positive" and current_val <= 0)
+                            or (crossover == "Negative" and current_val >= 0)
+                        )
+                    ):
+                        crossover = None
+                    if crossover:
+                        roc_visual_crossover = crossover
+                        side = "above" if crossover == "Positive" else "below"
+                        roc_event_block += (
+                            f"<b>Zero-line Crossover:</b> {crossover} confirmed today "
+                            f"(3rd consecutive session {side} 0)<br>"
+                        )
+
+                    divergence = extra_map.get("roc_divergence")
+                    price_move = roc_move = None
+                    if divergence in ("Bullish", "Bearish"):
+                        try:
+                            date_old = pd.Timestamp(extra_map["roc_divergence_prior_pivot_date"])
+                            date_new = pd.Timestamp(extra_map["roc_divergence_current_pivot_date"])
+                            date_confirm = pd.Timestamp(extra_map["roc_divergence_confirmation_date"])
+                            p0 = float(extra_map["roc_divergence_prior_price"])
+                            p1 = float(extra_map["roc_divergence_current_price"])
+                            r0 = float(extra_map["roc_divergence_prior_roc_fraction"])
+                            r1 = float(extra_map["roc_divergence_current_roc_fraction"])
+                            price_move = float(extra_map["roc_divergence_price_delta_pct"])
+                            roc_move = float(extra_map["roc_divergence_roc_delta_pps"])
+                            same_date = date_confirm.strftime("%Y-%m-%d") == str(d_raw)[:10]
+                            valid = (
+                                same_date and date_old < date_new < date_confirm
+                                and all(np.isfinite(x) for x in (p0, p1, r0, r1, price_move, roc_move))
+                                and p0 > 0 and p1 > 0
+                                and abs(100 * (p1 / p0 - 1) - price_move) < 1e-6
+                                and abs(100 * (r1 - r0) - roc_move) < 1e-6
+                                and ((price_move >= 0.5 and roc_move <= -0.5)
+                                     if divergence == "Bearish" else
+                                     (price_move <= -0.5 and roc_move >= 0.5))
+                            )
+                            if not valid:
+                                divergence = None
+                        except (KeyError, ValueError, TypeError, OverflowError):
+                            divergence = None
+                    else:
+                        divergence = None
+                    if divergence:
+                        roc_visual_divergence = divergence
+                        same_year = date_old.year == date_new.year == date_confirm.year
+                        label = "highs" if divergence == "Bearish" else "lows"
+                        roc_event_block += (
+                            f"<b>Divergence:</b> {divergence} "
+                            f"({_roc_display_date(date_new, not same_year)} pivot, "
+                            f"confirmed {_roc_display_date(date_confirm, not same_year)})<br>"
+                            f"<b>Pivot {label}:</b> {_roc_display_date(date_old, not same_year)} "
+                            f"(${p0:.2f}) → {_roc_display_date(date_new, not same_year)} "
+                            f"(${p1:.2f}), {_roc_signed(price_move, 1)}%<br>"
+                            f"<b>ROC at those {label}:</b> {_roc_signed(r0 * 100)}% "
+                            f"→ {_roc_signed(r1 * 100)}%, {_roc_signed(roc_move)} pps<br>"
+                        )
+
+                    if rvol is not None and rvol >= 0:
+                        change = (rvol - 1) * 100
+                        relation = "below" if change < 0 else "above" if change > 0 else "at"
+                        roc_rvol_block = (
+                            "<b>Relative Volume (20 prior sessions):</b> "
+                            f"{rvol:.2f}× ("
+                            + (f"{abs(change):.0f}% {relation} average" if change else "at average")
+                            + ")<br>"
+                        )
+
+                    stand = _to_float_or_none(extra_map.get("roc_historical_percentile"))
+                    higher = _to_float_or_none(extra_map.get("roc_historical_higher_count"))
+                    if stand is not None and higher is not None and 0 <= stand <= 100 and 0 <= higher <= 120:
+                        rank = int(round(stand))
+                        suffix = ("th" if rank % 100 in (11, 12, 13) else
+                                  {1: "st", 2: "nd", 3: "rd"}.get(rank % 10, "th"))
+                        roc_standing_block = (
+                            f"<b>Historical ROC Standing:</b> {rank}{suffix} percentile "
+                            f"(~{int(higher)}/120 observations were higher)<br>"
+                        )
+
+                    interpreted = get_roc_hover_interpretation(
+                        roc_period, roc_state, s, all_state_rules, v,
+                        prior_roc=prior_roc, price_today=roc_price,
+                        price_yesterday=prior_price, rvol20=rvol,
+                        crossover=crossover, divergence=divergence,
+                        price_pivot_delta_pct=price_move if divergence else None,
+                        roc_pivot_delta_pps=roc_move if divergence else None,
+                    )
+                    if interpreted is not None:
+                        context_text, bottom_text = interpreted
+                        roc_interpretation_block = (
+                            "<b>Context Interpretation:</b> "
+                            + _wrap_hover_text(context_text, width=88) + "<br>"
+                            "<b>Bottom-line:</b> "
+                            + _wrap_hover_text(bottom_text, width=88) + "<br>"
+                        )
+                    if current_val is not None:
+                        roc_value_line = f"<b>Value:</b> {_roc_signed(current_val * 100)}%"
+                        if roc_price is not None:
+                            roc_value_line += f" | <b>Price:</b> ${roc_price:.2f}"
+                        if volume_value is not None:
+                            roc_value_line += f" | <b>Vol:</b> {_roc_compact_volume(volume_value, volume_value)}"
+                        roc_value_line += "<br>"
+                    # Override generic opening with canonical price and
+                    # full-history ROC predecessor; all fields use bold labels.
+                    if prior_roc is not None and current_val is not None:
+                        delta_pps = 100 * (current_val - prior_roc)
+                        relative_roc = (
+                            f" ({_roc_signed(100 * (current_val - prior_roc) / abs(prior_roc), 1)}%)"
+                            if prior_roc != 0 and prior_roc * current_val > 0 else ""
+                        )
+                        delta_line = (
+                            "<b>Δ vs prior day:</b> "
+                            f"{_roc_signed(delta_pps)} pps{relative_roc}"
+                        )
+                        if roc_price is not None and prior_price is not None and prior_price > 0:
+                            delta_line += (
+                                f" | <b>Price:</b> {_roc_signed(roc_price - prior_price).replace('+', '+$', 1).replace('−', '−$', 1)} "
+                                f"({_roc_signed(100 * (roc_price / prior_price - 1), 1)}%)"
+                            )
+                        if volume_delta is not None:
+                            volpct = (
+                                f" ({_roc_signed(volume_delta_pct, 1)}%)"
+                                if volume_delta_pct is not None else ""
+                            )
+                            delta_line += (
+                                f" | <b>Vol:</b> {_roc_compact_volume(volume_delta, volume_value, signed=True)}{volpct}"
+                            )
+                        delta_line += "<br>"
+                    else:
+                        delta_line = ""
+                    roc_trend = infer_trend(v, prior_roc)
+                    price_trend = infer_trend(roc_price, prior_price)
+                    volume_trend = infer_trend(volume_value, volume_value - volume_delta) if (
+                        volume_value is not None and volume_delta is not None
+                    ) else None
+                    trend_line = f"<b>Trend:</b> {roc_trend}" if roc_trend else ""
+                    if trend_line and price_trend:
+                        trend_line += f" | <b>Price:</b> {price_trend}"
+                    if trend_line and volume_trend:
+                        trend_line += f" | <b>Vol:</b> {volume_trend}"
+                    if trend_line:
+                        trend_line += "<br>"
+                    # ROC Notes are rulebook-owned; adjust only their inline layout.
+                    notes_block = notes_block.replace(
+                        "<br><b>Notes:</b><br>", "<b>Notes:</b> ", 1
+                    )
+                    # ROC shares the authoritative INDICATOR_DEFS text; only
+                    # the approved inline footer presentation differs.
+                    definition_block = definition_block.replace(
+                        "<br><b>Definition:</b><br>", "<b>Definition:</b> ", 1
+                    )
+                    how_to_read_block = how_to_read_block.replace(
+                        "<br><b>How to Read:</b><br>", "<b>How to Read:</b> ", 1
+                    )
 
             # Preserve the existing VWMA-specific aliases for compatibility
             # with the already-verified VWMA hover implementation.
@@ -6468,6 +6680,13 @@ def build_plotly_heatmap_inputs(
                         and s in (-2, -1, 0, 1, 2)
                     ),
                     "alignment_line": alignment_line,
+                    "roc_rvol_block": roc_rvol_block,
+                    "roc_event_block": roc_event_block,
+                    "roc_visual_crossover": roc_visual_crossover,
+                    "roc_visual_divergence": roc_visual_divergence,
+                    "roc_standing_block": roc_standing_block,
+                    "roc_interpretation_block": roc_interpretation_block,
+                    "roc_value_line": roc_value_line,
                     "signal_line": signal_line,
                     "rule_block": rule_block,
                     "notes_block": notes_block,
@@ -6902,6 +7121,105 @@ def apply_bbp_divergence_text_overlay(
                 showlegend=False,
             )
         )
+
+
+def apply_roc_divergence_text_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Color the ROC numeric reading only at a validated divergence event.
+
+    Operates on the Heatmap's current text (after other overlays). Scores,
+    background fills, hover/customdata, and crossover symbols are unchanged.
+    """
+    if not fig.data:
+        return
+
+    base_text = [list(row) for row in fig.data[0].text]
+    bullish_x: List[Any] = []
+    bullish_y: List[Any] = []
+    bullish_text: List[str] = []
+    bearish_x: List[Any] = []
+    bearish_y: List[Any] = []
+    bearish_text: List[str] = []
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(base_text) or row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(base_text[row_idx]) or col_idx >= len(x):
+                continue
+            if not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("ROC_"):
+                continue
+            direction = cell.get("roc_visual_divergence")
+            if direction not in ("Bullish", "Bearish"):
+                continue
+            value_text = base_text[row_idx][col_idx]
+            if value_text in (None, ""):
+                continue
+
+            # A sparse Scatter trace replaces the Heatmap numeric text.
+            # No duplicate numeric label and no change to the score color.
+            base_text[row_idx][col_idx] = ""
+            if direction == "Bullish":
+                bullish_x.append(x[col_idx])
+                bullish_y.append(y[row_idx])
+                bullish_text.append(str(value_text))
+            else:
+                bearish_x.append(x[col_idx])
+                bearish_y.append(y[row_idx])
+                bearish_text.append(str(value_text))
+
+    fig.data[0].text = base_text
+    for xs, ys, labels, color in (
+        (bullish_x, bullish_y, bullish_text, "blue"),
+        (bearish_x, bearish_y, bearish_text, "red"),
+    ):
+        if labels:
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys, mode="text", text=labels,
+                textfont=dict(size=12, color=color),
+                hoverinfo="skip", showlegend=False,
+            ))
+
+
+def apply_roc_zero_line_arrow_overlay(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """Show a black ▲/▼ only on confirmed ROC zero-line crossover dates.
+
+    The glyph is independent of the divergence-colored numeric reading.
+    """
+    if not fig.data:
+        return
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(x) or not isinstance(cell, dict):
+                continue
+            if not str(cell.get("indicator_key", "")).startswith("ROC_"):
+                continue
+            event = cell.get("roc_visual_crossover")
+            symbol = "▲" if event == "Positive" else "▼" if event == "Negative" else None
+            if symbol is None:
+                continue
+            fig.add_annotation(
+                x=x[col_idx], y=y[row_idx], xref="x", yref="y",
+                text=symbol, showarrow=False, xshift=29, yshift=0,
+                xanchor="center", yanchor="middle",
+                font=dict(size=12, color="black"), captureevents=False,
+            )
 
 
 def apply_cci_divergence_text_overlay(
@@ -7908,6 +8226,7 @@ def make_rolling_heatmap_figure(
             if isinstance(cell, dict):
                 cell.setdefault(
                     "rolling_value_line",
+                    cell.get("roc_value_line") or
                     f"Value: {cell.get('formatted_value', '')}<br>",
                 )
                 if str(cell.get("indicator_key", "")).startswith(("CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
@@ -7930,10 +8249,12 @@ def make_rolling_heatmap_figure(
         "%{customdata.trend_line}"
         "%{customdata.bb_bw_context_block}"
         "%{customdata.alignment_line}"
+        "%{customdata.roc_rvol_block}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.roc_event_block}"
         "%{customdata.adx_crossover_block}"
         "%{customdata.adx_visual_divergence_block}"
         "%{customdata.adx_visual_spread_block}"
@@ -7945,6 +8266,8 @@ def make_rolling_heatmap_figure(
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.roc_standing_block}"
+        "%{customdata.roc_interpretation_block}"
         "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
@@ -8004,6 +8327,13 @@ def make_rolling_heatmap_figure(
     )
 
     apply_cci_zero_line_arrow_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+
+    apply_roc_divergence_text_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+    apply_roc_zero_line_arrow_overlay(
         fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 

@@ -66,6 +66,8 @@ from ui.rolling_heatmap_adapter import (
     apply_bbp_exhaustion_turn_overlay,
     apply_cci_divergence_text_overlay,
     apply_cci_zero_line_arrow_overlay,
+    apply_roc_divergence_text_overlay,
+    apply_roc_zero_line_arrow_overlay,
     apply_uo_divergence_symbol_overlay,
     apply_macd_signal_crossover_overlay,
     apply_adx_di_crossover_overlay,
@@ -4938,6 +4940,11 @@ def _build_scd_hover_customdata(
         "bb_bw_context_block",
         "bb_pct_b_post_rule_block",
         "alignment_line",
+        "roc_rvol_block",
+        "roc_event_block",
+        "roc_standing_block",
+        "roc_interpretation_block",
+        "roc_value_line",
         "adx_context_block",
         "adx_crossover_block",
         "adx_visual_divergence_block",
@@ -4983,6 +4990,9 @@ def _build_scd_hover_customdata(
             f"{custom.get('value_label', 'Value')}: "
             f"{custom.get('formatted_value', '')}<br>"
         )
+
+    if row_key.startswith("ROC_") and custom.get("roc_value_line"):
+        custom["scd_value_line"] = custom["roc_value_line"]
 
     if row_key.startswith(("CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
         # Keep SCD's original value and diagnostic suffix; bold label only.
@@ -5034,6 +5044,7 @@ def _build_scd_hover_customdata(
         )
         or row_key.startswith("CCI_")
         or row_key.startswith("STOCH_")
+        or row_key.startswith("ROC_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5191,10 +5202,12 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.trend_line}"
         "%{customdata.bb_bw_context_block}"
         "%{customdata.alignment_line}"
+        "%{customdata.roc_rvol_block}"
         "%{customdata.ma_context_block}"
         "%{customdata.adx_context_block}"
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
+        "%{customdata.roc_event_block}"
         "%{customdata.adx_crossover_block}"
         "%{customdata.adx_visual_divergence_block}"
         "%{customdata.adx_visual_spread_block}"
@@ -5206,6 +5219,8 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.dpo_context_block}"
         "%{customdata.bullbear_context_block}"
         "%{customdata.rule_block}"
+        "%{customdata.roc_standing_block}"
+        "%{customdata.roc_interpretation_block}"
         "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
@@ -5265,6 +5280,13 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
     )
 
     apply_cci_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
+    )
+
+    apply_roc_divergence_text_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
+    )
+    apply_roc_zero_line_arrow_overlay(
         fig, customdata=customdata, x=tickers, y=y_labels,
     )
 
@@ -5737,6 +5759,13 @@ def _build_scd_single_indicator_hover_customdata(
             custom.get("single_combined_trend_line"), "Trend"
         )
 
+    # ROC's full-history canonical price, volume, delta and Trend come from
+    # the shared adapter; do not reconstruct them from SCD's Close price row.
+    if row_key.startswith("ROC_") and custom.get("roc_value_line"):
+        custom["scd_single_value_line"] = custom["roc_value_line"]
+        custom["single_combined_delta_line"] = custom.get("delta_line", "")
+        custom["single_combined_trend_line"] = custom.get("trend_line", "")
+
     if row_key.startswith("ADX_"):
         for field in (
             "scd_single_value_line",
@@ -5869,6 +5898,28 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "%{customdata.vwma_post_signal_block}"
             "%{customdata.rule_block}"
             "%{customdata.vwma_context_interpretation_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
+    elif row_key.startswith("ROC_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.alignment_line}"
+            "%{customdata.roc_rvol_block}"
+            "%{customdata.signal_line}"
+            "%{customdata.roc_event_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.roc_standing_block}"
+            "%{customdata.roc_interpretation_block}"
             "%{customdata.notes_block}"
             "%{customdata.definition_block}"
             "%{customdata.how_to_read_block}"
@@ -6014,6 +6065,13 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
     )
 
     apply_cci_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
+    )
+
+    apply_roc_divergence_text_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
+    )
+    apply_roc_zero_line_arrow_overlay(
         fig, customdata=customdata, x=tickers, y=date_labels,
     )
 
@@ -6279,6 +6337,12 @@ def _build_scd_single_indicator_chart_series(
     warnings: list[str] = []
 
     if value_mode in {"Indicator value", "Score"}:
+        if row_key.startswith("ROC_") and value_mode == "Indicator value":
+            # ROC is fractional internally; display percentage on the chart.
+            return {
+                ticker: [v * 100.0 if v is not None else None for v in values]
+                for ticker, values in raw_series.items()
+            }, warnings
         return raw_series, warnings
 
     transformed: dict[str, list[Optional[float]]] = {}
@@ -6292,8 +6356,9 @@ def _build_scd_single_indicator_chart_series(
             continue
 
         if value_mode == "Change from first date":
+            multiplier = 100.0 if row_key.startswith("ROC_") else 1.0
             transformed[ticker] = [
-                (v - first_valid) if v is not None else None
+                (v - first_valid) * multiplier if v is not None else None
                 for v in values
             ]
             continue
@@ -6537,6 +6602,25 @@ def _get_scd_single_chart_hover_fields(
             indicator_cd.get("alignment_line", "")
         )
 
+    # ROC trend chart reuses the same adapter-owned hover evidence.
+    roc_chart_hover_block = ""
+    if row_key.startswith("ROC_") and isinstance(indicator_cd, dict):
+        roc_chart_hover_block = "".join(
+            str(indicator_cd.get(field) or "") for field in (
+                "roc_value_line", "delta_line", "trend_line", "alignment_line",
+                "roc_rvol_block", "signal_line", "roc_event_block", "rule_block",
+                "roc_standing_block", "roc_interpretation_block", "notes_block",
+                "definition_block", "how_to_read_block",
+            )
+        )
+    elif row_key.startswith("ROC_"):
+        # Legacy cells without adapter evidence show factual fields only.
+        visible = str(cell.get("display_text") or "Unavailable")
+        signal = str(cell.get("signal") or "Unavailable")
+        roc_chart_hover_block = (
+            f"<b>Value:</b> {visible}<br><b>Signal:</b> {signal}<br>"
+        )
+
     return [
         str(date_key),
         _format_scd_heatmap_text(row_key, cell),
@@ -6549,6 +6633,7 @@ def _get_scd_single_chart_hover_fields(
         price_delta,
         indicator_delta_line,
         alignment_line,
+        roc_chart_hover_block,
     ]
 
 def _add_scd_single_chart_reference_lines(
@@ -6637,6 +6722,16 @@ def _build_scd_single_indicator_chart_figure(
                 name=ticker,
                 customdata=customdata,
                 hovertemplate=(
+                    (
+                        "<b>%{fullData.name}</b><br>"
+                        "Date: %{customdata[0]}<br><br>"
+                        "%{customdata[8]}"
+                        + (
+                            f"<b>Chart value ({resolved_mode}){' (pps)' if resolved_mode == 'Change from first date' else ''}:</b> %{{customdata[3]:.2f}}<br>"
+                            if resolved_mode != "Indicator value" else ""
+                        )
+                        + "<extra></extra>"
+                    ) if row_key.startswith("ROC_") else (
                     "<b>%{fullData.name}</b><br>"
                     "Date: %{customdata[0]}<br>"
                     f"{row_label}: %{{customdata[1]}}<br>"
@@ -6647,6 +6742,7 @@ def _build_scd_single_indicator_chart_figure(
                     "Price: %{customdata[4]}<br>"
                     "Price Δ vs prior day: %{customdata[5]}"
                     "<extra></extra>"
+                    )
                 ),
             )
         )
@@ -6658,6 +6754,11 @@ def _build_scd_single_indicator_chart_figure(
     )
 
     y_axis_title = _get_scd_chart_yaxis_title(resolved_mode, row_label)
+    if row_key.startswith("ROC_"):
+        if resolved_mode == "Indicator value":
+            y_axis_title = "ROC (%)"
+        elif resolved_mode == "Change from first date":
+            y_axis_title = "ROC change (pps)"
     dynamic_height = max(420, 35 * max(len(visible_tickers), 1) + 260)
 
     fig.update_layout(

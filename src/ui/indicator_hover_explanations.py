@@ -2524,3 +2524,233 @@ def get_adx_development_interpretation(
     if price_agrees is False:
         closing += " The one-session price contrast does not confirm a reversal."
     return context, opening + closing
+
+
+# ROC IVE: guarded, display-only five-state interpretation.
+# Events are detected and dated in technical.py, not re-detected here.
+_ROC_STATES = ("strong_buy", "buy", "neutral", "sell", "strong_sell")
+_ROC_SCORES = {"strong_buy": 2, "buy": 1, "neutral": 0, "sell": -1, "strong_sell": -2}
+
+
+@lru_cache(maxsize=5)
+def _approved_roc_rules(period: int) -> dict[str, str]:
+    if period not in (9, 12, 14, 20, 50):
+        return {}
+    neutral, strong = (0.02, 0.05) if period == 9 else (
+        (0.05, 0.10) if period == 50 else (0.03, 0.07)
+    )
+    r = f"ROC_{period}"
+    # Preserve the exact rulebook expression structure and boundary semantics.
+    return {
+        "strong_buy": f"{r} > {strong:.2f}",
+        "buy": f"{r} > {neutral:.2f} and {r} <= {strong:.2f}",
+        "neutral": f"-{neutral:.2f} <= {r} <= {neutral:.2f}",
+        "sell": f"{r} >= -{strong:.2f} and {r} < -{neutral:.2f}",
+        "strong_sell": f"{r} < -{strong:.2f}",
+    }
+
+
+def _roc_finite(raw: object) -> Optional[float]:
+    if isinstance(raw, bool):
+        return None
+    try:
+        v = float(raw)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _roc_percent(value: float, *boundaries: float) -> str:
+    """One decimal normally; preserve precision near strict rule thresholds."""
+    pct = abs(value) * 100.0
+    if any(abs(round(pct, 1) - boundary) < 1e-9 and abs(pct - boundary) > 1e-12 for boundary in boundaries):
+        return format(pct, ".14g")
+    return f"{pct:.1f}"
+
+
+def _roc_verified_state(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str], roc_fraction: object,
+) -> Optional[tuple[float, float, float]]:
+    if period not in (9, 12, 14, 20, 50) or state not in _ROC_STATES:
+        return None
+    if isinstance(score, bool) or score != _ROC_SCORES[state]:
+        return None
+    if not isinstance(active_rules, Mapping):
+        return None
+    expected = _approved_roc_rules(period)
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or "")) != _fingerprint(expected[key])
+        for key in _ROC_STATES
+    ):
+        return None
+    value = _roc_finite(roc_fraction)
+    if value is None:
+        return None
+    neutral, strong = (0.02, 0.05) if period == 9 else (
+        (0.05, 0.10) if period == 50 else (0.03, 0.07)
+    )
+    computed = (
+        "strong_buy" if value > strong else
+        "buy" if value > neutral else
+        "strong_sell" if value < -strong else
+        "sell" if value < -neutral else "neutral"
+    )
+    return (value, neutral, strong) if computed == state else None
+
+
+def get_roc_rule_explanation(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str], roc_fraction: object,
+) -> Optional[str]:
+    """Ground every Rule in all five active executable expressions and score."""
+    verified = _roc_verified_state(period, state, score, active_rules, roc_fraction)
+    if verified is None:
+        return None
+    roc, neutral, strong = verified
+    pct = _roc_percent(roc, neutral * 100, strong * 100)
+    movement = "gained" if roc >= 0 else "fallen"
+    opening = f"Price has {movement} {pct}% over past {period} sessions"
+    if state == "strong_buy":
+        return (f"{opening}, exceeding +{strong * 100:g}% Strong Buy threshold. "
+                f"{period}-session advance remains strong.")
+    if state == "buy":
+        return (f"{opening}, above +{neutral * 100:g}% Buy threshold "
+                f"but not beyond +{strong * 100:g}% Strong Buy threshold.")
+    if state == "neutral":
+        return f"{opening}, remaining within ±{neutral * 100:g}% Neutral range."
+    if state == "sell":
+        return (f"{opening}, beyond −{neutral * 100:g}% Sell threshold "
+                f"but not beyond −{strong * 100:g}% Strong Sell threshold.")
+    return (f"{opening}, exceeding −{strong * 100:g}% Strong Sell threshold "
+            "in downside magnitude. Decline remains substantial.")
+
+
+def get_roc_hover_interpretation(
+    period: int, state: str, score: object,
+    active_rules: Mapping[str, str], roc_fraction: object,
+    prior_roc: object = None,
+    price_today: object = None,
+    price_yesterday: object = None,
+    rvol20: object = None,
+    crossover: object = None,
+    divergence: object = None,
+    price_pivot_delta_pct: object = None,
+    roc_pivot_delta_pps: object = None,
+) -> Optional[tuple[str, str]]:
+    """Concise causal context and Bottom-line, never a score override.
+
+    The caller must validate divergence pivot evidence and event dates before
+    supplying a direction or pivot deltas. No inferred divergence is permitted.
+    """
+    checked = _roc_verified_state(period, state, score, active_rules, roc_fraction)
+    if checked is None:
+        return None
+    current = checked[0]
+    prior, today, yesterday = map(_roc_finite, (prior_roc, price_today, price_yesterday))
+    rv = _roc_finite(rvol20)
+    pdelta = _roc_finite(price_pivot_delta_pct)
+    rdelta = _roc_finite(roc_pivot_delta_pps)
+    parts: list[str] = []
+    current_direction = (
+        "positive" if current > 0 else "negative" if current < 0 else "flat"
+    )
+    if today is not None and yesterday is not None and prior is not None:
+        if today > yesterday and current < prior:
+            parts.append(
+                f"Price rose today, but its {period}-session ROC declined. "
+                + ("Upside momentum is weakening." if current > 0 else
+                   "Downside momentum intensified despite rising price.")
+            )
+        elif today < yesterday and current > prior:
+            parts.append(
+                f"Price fell today, but its {period}-session ROC rose. "
+                + ("Upside momentum strengthened despite falling price." if current > 0 else
+                   "Downside momentum is easing.")
+            )
+        elif current != prior:
+            parts.append(
+                f"{period}-session ROC {'rose' if current > prior else 'fell'} "
+                f"as price {'rose' if today > yesterday else 'fell' if today < yesterday else 'held steady'}."
+            )
+    elif prior is not None and current != prior:
+        parts.append(
+            f"{period}-session ROC {'rose' if current > prior else 'fell'} "
+            "since prior session."
+        )
+
+    if crossover in ("Positive", "Negative"):
+        positive = crossover == "Positive"
+        parts.append(
+            f"{period}-session price return has turned "
+            f"{'positive' if positive else 'negative'} and remained "
+            f"{'above' if positive else 'below'} zero for 3 sessions. "
+            "This confirms a momentum-direction transition, not a stronger Signal."
+        )
+
+    if divergence in ("Bullish", "Bearish") and pdelta is not None and rdelta is not None:
+        bearish = divergence == "Bearish"
+        parts.append(
+            f"Latest confirmed price {'high exceeded previous high' if bearish else 'low fell below previous low'} "
+            f"by {abs(pdelta):.1f}%, while ROC at new "
+            f"{'peak was' if bearish else 'low was'} "
+            f"{abs(rdelta):.1f} pps {'lower' if bearish else 'higher'}. "
+            f"Current {state.replace('_', ' ').title()} classification remains valid, "
+            f"but new price {'high' if bearish else 'low'} lacks momentum confirmation."
+        )
+
+    if rv is not None and rv >= 0:
+        if rv < 1:
+            parts.append("Today's volume was below its prior-20-session average.")
+        elif rv > 1:
+            parts.append("Today's volume was above its prior-20-session average.")
+
+    if not parts:
+        parts.append(
+            f"ROC remains {current_direction} over {period} sessions; "
+            "no additional confirmed event is identified for this date."
+        )
+
+    if crossover in ("Positive", "Negative") and divergence in ("Bullish", "Bearish"):
+        matches = ((crossover == "Positive") == (divergence == "Bullish"))
+        bottom = (
+            "Confirmed zero-line transition and price/ROC divergence point "
+            "in the same direction. Neither changes the current Signal."
+            if matches else
+            "Confirmed zero-line transition and price/ROC divergence provide "
+            "mixed evidence. Neither overrides the current Signal."
+        )
+    elif divergence == "Bearish":
+        bottom = (
+            "Positive lookback momentum persists, but latest higher price peak "
+            "was achieved with weaker ROC. Caution about momentum strength, "
+            "not proof of imminent reversal."
+            if current > 0 else
+            "Higher price peak lacks ROC confirmation. This is a caution about "
+            "momentum, not proof of imminent reversal."
+        )
+    elif divergence == "Bullish":
+        bottom = (
+            "Lower price low was accompanied by improving ROC. Downside "
+            "momentum may be easing, but no reversal is established."
+        )
+    elif crossover in ("Positive", "Negative"):
+        bottom = (
+            f"{'Improving' if crossover == 'Positive' else 'Weakening'} momentum "
+            f"transition confirmed; {period}-session return remains "
+            f"within {state.replace('_', ' ').title()} classification. "
+            "Crossover is an early development, not a stronger Signal."
+        )
+    elif current > 0:
+        bottom = (
+            f"{period}-session return remains positive. Recent ROC change "
+            "adds context but doesn't alter the Signal."
+        )
+    elif current < 0:
+        bottom = (
+            f"{period}-session return remains negative. Recent ROC change "
+            "adds context but doesn't establish a reversal."
+        )
+    else:
+        bottom = "Lookback return is flat; no directional ROC Signal is implied."
+    return " ".join(parts), bottom

@@ -76,6 +76,12 @@ These patterns are ranked by **information value for interpretation**, **not** b
 
 For the three-step reading workflow, see [Setup → Transition → Development](#setup-transition-and-development). For threshold definitions, see [Measurement comparison](#the-bollinger-measurements-at-a-glance).
 
+Other metric interpretation tables:
+- ['BW State' & 'BW Change' Combinations](#reading-bandwidth-state--bandwidth-change-1d-together)
+- [Additional '%B' & 'Bandwidth' Combinations](#additional-b-and-bandwidth-combinations)
+- [Bollinger Pattern Reference — Complete Interpretations](#bollinger-pattern-reference--complete-interpretations)
+
+
 ---
 
 ## How to read the Bollinger heatmap
@@ -1065,6 +1071,8 @@ Contracting
 The bands can be contracting while still being extremely wide.
 
 ### Additional State + Change combinations
+(:small[[Parent](#reading-bandwidth-state--bandwidth-change-1d-together) | Related: [Additional '%B' & 'Bandwidth' Combinations](#additional-b-and-bandwidth-combinations)])
+
 
 | State | Direction | Beginner interpretation |
 | --- | --- | --- |
@@ -1205,6 +1213,23 @@ Here, **bullish/bearish describes observed price extension**, not the project's 
 A **re-entry is observable**. A market-wide or price-structure **fakeout** is a broader trading conclusion requiring subsequent behavior and often price/volume confirmation. A Bollinger breach also does not, by itself, prove that institutional buyers or sellers are participating.
 
 ---
+### Additional %B and Bandwidth Combinations
+(:small[[Parent](#reading-b-and-bandwidth-together) | Related: [Additional 'BW State' & 'BW Change' Combinations](#additional-state--change-combinations)])
+
+| [%B](#b--where-is-price-relative-to-the-bands) condition | Bandwidth context           | Combined interpretation                                                                     |
+| -------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| Low %B                                                   | Very Compressed + Stable    | Price is near the lower edge during an exceptionally quiet volatility regime.               |
+| Low %B                                                   | Compressed + Expanding      | Price is near the lower edge while previously quiet volatility begins to increase.          |
+| Low %B                                                   | Very Expanded + Expanding   | Price is deeply stretched low during an already extreme and worsening volatility expansion. |
+| High %B                                                  | Normal + Stable             | Price is near the upper edge in an otherwise ordinary volatility environment.               |
+| High %B                                                  | Expanded + Expanding        | Price is stretched high while volatility is elevated and increasing.                        |
+| High %B                                                  | Very Expanded + Contracting | Price remains highly stretched while unusually high volatility begins to cool.              |
+| Neutral %B                                               | Very Compressed + Stable    | Price is not near either edge, but the volatility envelope is exceptionally quiet.          |
+| Neutral %B                                               | Expanded + Contracting      | Price location is ordinary while elevated volatility begins to subside.                     |
+
+
+
+---
 
 ## Bollinger Pattern Reference — Complete Interpretations
 (:small[[Back to top](#summary-bollinger-b-signals)] | :small[[Top patterns](#the-bollinger-patterns-you-should-not-overlook)] | :small[[Rule windows](#historical-reference-window-by-horizon)])
@@ -1212,6 +1237,7 @@ A **re-entry is observable**. A market-wide or price-structure **fakeout** is a 
 Use this lookup when a particular combination appears in a cell. **Priority** identifies how informative the combination is for *describing the observed condition*; it is not a statistically calibrated trading-success ranking. For the five-state Signal thresholds, see [Project %B rules — consolidated reference](#project-b-rules-consolidated-reference).
 
 ### Compression and setup patterns
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 | Priority | Evidence / pattern | Interpretation | What to monitor |
 | --- | --- | --- | --- |
@@ -1224,6 +1250,7 @@ Use this lookup when a particular combination appears in a cell. **Priority** id
 **Example:** GOOGL on September 15 widened about :gray-background[+40.9%] across five sessions but remained historically :gray-background[Narrow] and had a Stable 1D change. That is **still compression**, not an established release simply because the net percentage is large.
 
 ### Bullish price-action patterns
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 These are **upper-band price-pressure** patterns; the rule-engine may classify their high :blue-background[%B] values as :gray-background[Sell/Strong Sell].
 
@@ -1239,6 +1266,7 @@ These are **upper-band price-pressure** patterns; the rule-engine may classify t
 **GOOGL September 21:** Upper-band :gray-background[Fresh Breach], :gray-background[Narrow] State, about :gray-background[+22.3%] over five sessions and three Expanding sessions indicate an emerging upside attempt **while still compressed**, not a completed Compression Exit.
 
 ### Bearish price-action patterns
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 These are **lower-band price-pressure** patterns; the rule-engine may classify low :blue-background[%B] values as :gray-background[Buy/Strong Buy].
 
@@ -1251,9 +1279,10 @@ These are **lower-band price-pressure** patterns; the rule-engine may classify l
 | **5** | :gray-background[Very Wide + ≥ +20% over five sessions + Stable + No Active Breach], lower-side :blue-background[%B] | Exceptionally elevated volatility after strong recent widening; price sits near the lower band even though daily widening pauses | Renewed band breach or movement toward the midpoint |
 | **6** | :gray-background[Buy/Strong Buy] Signal alone | Price is near/below the lower band under the contrarian exhaustion model | Check whether a lower-band extension is fresh, continuing or interrupted |
 
-**GOOGL October 22 and 30:** October 22 records an actual Compression Exit with a continuing lower-band breach. By October 30, :gray-background[Very Wide] Bandwidth, a five-session :gray-background[+153.0%] increase and a continuing lower breach describe **persistent downside pressure**, despite the contrarian :gray-background[Strong Buy] label.
+**GOOGL October 22 and 30:** October 22 records an actual Compression Exit with a continuing lower-band breach. By October 30, :gray-background[Very Wide] Bandwidth, a five-session :gray-background[+153.0%] increase and a continuing lower breach describe **persistent downside pressure**, despite the contrarian :gray-background[Strong Buy] label. (See [Verified Bollinger examples](#verified-bollinger-examples) for details).
 
 ### Volatility development patterns
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 These can matter in either price direction; use current :blue-background[%B] and :blue-background[Breach Status] to determine which side, if any, is under pressure.
 
@@ -1267,6 +1296,7 @@ These can matter in either price direction; use current :blue-background[%B] and
 | **6** | :gray-background[Very Wide + Stable] without recent development | Historically elevated band width remains high, but today's movement alone is inconclusive | Price position and any subsequent contraction; a Bottom-line is not automatic |
 
 ### Ordinary and lower-priority combinations
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 | Priority | Evidence / pattern | Meaning | Why it is lower priority |
 | --- | --- | --- | --- |
@@ -1276,6 +1306,7 @@ These can matter in either price direction; use current :blue-background[%B] and
 | **4** | :gray-background[Continuing Breach] without qualifying development | Price is repeatedly outside a band, but the volatility-development evidence is incomplete or mixed | Breach Status itself is still informative; a Bottom-line is selective rather than guaranteed |
 
 ### Verified Bollinger examples
+(:small[[Parent]((#bollinger-pattern-reference--complete-interpretations))])
 
 These readings come from the bounded GOOGL diagnostic and the cross-stock peer verification used for Stage 6. The interpretations are descriptive of the **stated date**, not outcomes observed afterward.
 
@@ -1673,6 +1704,7 @@ _**Crucial Rule:**_ Remember that ${\textcolor{Red}{\textsf{Bandwidth always tur
   - [Reading the numbers together: three verified examples](#reading-the-numbers-together-three-verified-examples)
 - [Reading %B and Bandwidth together](#reading-b-and-bandwidth-together)
   - [Bullish, bearish and potential failed-release comparison](#bullish-bearish-and-potential-failed-release-comparison)
+  - [Additional '%B' & 'Bandwidth' Combinations](#additional-b-and-bandwidth-combinations)
 - [Bollinger Pattern Reference — Complete Interpretations](#bollinger-pattern-reference-complete-interpretations)
   - [Compression and setup patterns](#compression-and-setup-patterns)
   - [Bullish price-action patterns](#bullish-price-action-patterns)
