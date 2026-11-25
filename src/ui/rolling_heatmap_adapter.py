@@ -30,6 +30,8 @@ from src.ui.indicator_hover_explanations import (
     get_adx_di_crossover,
     get_roc_rule_explanation,
     get_roc_hover_interpretation,
+    get_mfi_rule_explanation,
+    get_mfi_hover_interpretation,
 )
 
 import numpy as np
@@ -142,6 +144,287 @@ def _compact_hover_rule(value: Any) -> str:
         "<br><b>Rule (%B):</b><br>", "<b>Rule (%B):</b> ", 1
     )
 
+
+def build_mfi_hover_presentation(
+    *, indicator_key: str, date: Any, value: Any, score: Any,
+    active_rules: Dict[str, str], extras: Dict[str, Any],
+) -> Dict[str, str]:
+    """Format validated, date-owned MFI facts; never infer an event or score."""
+    if indicator_key not in ("MFI_10", "MFI_14", "MFI_30") or not isinstance(extras, dict):
+        return {}
+    period = int(indicator_key.split("_")[1])
+    state = score_to_rule_key(score)
+    if get_mfi_rule_explanation(period, state, score, active_rules, value) is None:
+        return {}
+
+    def number(raw: Any) -> Optional[float]:
+        if isinstance(raw, bool):
+            return None
+        try:
+            v = float(raw)
+            return v if np.isfinite(v) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def day(raw: Any) -> Optional[pd.Timestamp]:
+        try:
+            d = pd.Timestamp(raw)
+            return d.normalize() if not pd.isna(d) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def md(d: pd.Timestamp) -> str:
+        return f"{d.month}/{d.day}"
+
+    def signed(x: float, decimals: int = 2) -> str:
+        return f"{x:+.{decimals}f}".replace("-", "−")
+
+    current = number(value)
+    date_now = day(date)
+    if current is None or date_now is None:
+        return {}
+    previous = number(extras.get("mfi_prior_value"))
+    price = number(extras.get("mfi_price_current"))
+    old_price = number(extras.get("mfi_price_prior"))
+    volume = number(extras.get("mfi_volume_current"))
+    old_volume = number(extras.get("mfi_volume_prior"))
+    if previous is not None and not 0 <= previous <= 100:
+        previous = None
+    if price is not None and price <= 0:
+        price = None
+    if old_price is not None and old_price <= 0:
+        old_price = None
+    if volume is not None and volume < 0:
+        volume = None
+    if old_volume is not None and old_volume < 0:
+        old_volume = None
+
+    opening = f"<b>Value:</b> {current:.2f}"
+    if price is not None and price > 0:
+        opening += f" | <b>Price:</b> ${price:.2f}"
+    if volume is not None and volume >= 0:
+        opening += f" | <b>Vol:</b> {_roc_compact_volume(volume, volume)}"
+    opening += "<br>"
+
+    if previous is None:
+        mfi_change = "Unavailable"
+    else:
+        delta_mfi = current - previous
+        relative_mfi = (
+            f" ({signed(100.0 * delta_mfi / previous, 1)}%)"
+            if previous > 0.0 else ""
+        )
+        mfi_change = f"{signed(delta_mfi, 1)}{relative_mfi}"
+
+    changes = [f"<b>Δ vs prior day:</b> {mfi_change}"]
+    trends = [f"<b>Trend:</b> {infer_trend(current, previous) if previous is not None else 'Unavailable'}"]
+    if price is not None and old_price is not None and old_price > 0:
+        changes.append(f"<b>Price:</b> {signed(price - old_price).replace('+', '+$', 1).replace('−', '−$', 1)} ({signed(100 * (price / old_price - 1), 1)}%)")
+        trends.append(f"<b>Price:</b> {infer_trend(price, old_price)}")
+    if volume is not None and old_volume is not None and old_volume >= 0:
+        delta_vol = volume - old_volume
+        percent = f" ({signed(100 * delta_vol / old_volume, 1)}%)" if old_volume > 0 else ""
+        changes.append(f"<b>Vol:</b> {_roc_compact_volume(delta_vol, volume, signed=True)}{percent}")
+        trends.append(f"<b>Vol:</b> {infer_trend(volume, old_volume)}")
+
+    event_lines: List[str] = []
+    div_directions: List[str] = []
+    swing_directions: List[str] = []
+    div_status = extras.get("mfi_divergence_evaluations")
+    raw_divergences = extras.get("mfi_divergence_events")
+    if not isinstance(raw_divergences, list):
+        raw_divergences = []
+    for event in raw_divergences:
+        if not isinstance(event, dict):
+            continue
+        direction = event.get("direction")
+        if direction not in ("Bullish", "Bearish") or not isinstance(div_status, dict) or div_status.get(direction) != direction:
+            continue
+        p0, p1 = number(event.get("prior_price")), number(event.get("current_price"))
+        m0, m1 = number(event.get("prior_mfi_extreme")), number(event.get("current_mfi_extreme"))
+        dp, dm = number(event.get("price_delta_pct")), number(event.get("mfi_delta_points"))
+        old, new, confirmed = (day(event.get(k)) for k in (
+            "prior_pivot_date", "current_pivot_date", "confirmation_date"))
+        m_old, m_new = (day(event.get(k)) for k in (
+            "prior_mfi_extreme_date", "current_mfi_extreme_date"))
+        if None in (p0, p1, m0, m1, dp, dm, old, new, confirmed, m_old, m_new):
+            continue
+        if not (p0 > 0 and p1 > 0 and 0 <= m0 <= 100 and 0 <= m1 <= 100
+                and old < new < confirmed == date_now
+                and abs(100 * (p1 / p0 - 1) - dp) < 1e-6
+                and abs((m1 - m0) - dm) < 1e-6):
+            continue
+        if not ((p1 < p0 and m1 > m0) if direction == "Bullish" else
+                (p1 > p0 and m1 < m0)):
+            continue
+        label = "lows" if direction == "Bullish" else "highs"
+        relative_mfi = (
+            f"{signed(100.0 * dm / m0, 1)}%"
+            if m0 > 0.0 else "N/A (prior MFI = 0)"
+        )
+        event_lines.extend((
+            f"<b>Price–MFI Divergence:</b> {direction}; confirmed {md(confirmed)}",
+            f"<b>Price {label}:</b> {md(old)} (${p0:.2f}) → {md(new)} (${p1:.2f}), {signed(dp, 1)}%",
+            f"<b>Nearby MFI {label}:</b> {md(m_old)} ({m0:.2f}) → {md(m_new)} ({m1:.2f}), {signed(dm)} / {relative_mfi}",
+        ))
+        div_directions.append(direction)
+
+    swing_status = extras.get("mfi_failure_swing_evaluation")
+    raw_swings = extras.get("mfi_failure_swing_events")
+    if not isinstance(raw_swings, list):
+        raw_swings = []
+    for event in raw_swings:
+        if not isinstance(event, dict):
+            continue
+        direction = event.get("direction")
+        if (direction not in ("Bullish", "Bearish")
+                or not isinstance(swing_status, dict)
+                or swing_status.get("status") != "Confirmed"
+                or swing_status.get("direction") != direction):
+            continue
+        a, b, c, d = (number(event.get(k)) for k in (
+            "extreme_mfi", "recovery_mfi", "retest_mfi", "completion_mfi"))
+        ta, tb, tc, tt, td = (day(event.get(k)) for k in (
+            "extreme_date", "recovery_date", "retest_date",
+            "retest_turn_date", "confirmation_date"))
+        if None in (a, b, c, d, ta, tb, tc, tt, td):
+            continue
+        if not (ta < tb < tc <= tt <= td == date_now
+                and abs(d - current) < 1e-8
+                and all(0 <= n <= 100 for n in (a, b, c, d))):
+            continue
+        if not ((a <= 20 < c < b < d) if direction == "Bullish" else
+                (a >= 80 > c > b > d)):
+            continue
+        # B is the earlier recovery/rebound level; the date must accompany
+        # its value so a reader can reconstruct the completed A/B/C/D pattern.
+        breakout_delta = d - b
+        breakout_unit = "pt" if abs(breakout_delta) <= 1.0 else "pts"
+        if direction == "Bullish":
+            breakout_text = (
+                f"{signed(breakout_delta)} {breakout_unit} above prior "
+                f"MFI rebound high ({b:.2f}, {md(tb)})"
+            )
+        else:
+            breakout_text = (
+                f"{abs(breakout_delta):.2f} {breakout_unit} below prior "
+                f"MFI recovery trough ({b:.2f}, {md(tb)})"
+            )
+        # A small crossing still confirms the pattern; this wording is
+        # presentation-only and does not modify the detector threshold.
+        if abs(breakout_delta) < 0.05:
+            breakout_text += "; marginal"
+        event_lines.extend((
+            f"<b>Failure Swing:</b> {direction}; confirmed {md(td)} (20/80 model)",
+            f"<b>A/B/C/D:</b> {a:.2f} ({md(ta)}) → {b:.2f} ({md(tb)}) → {c:.2f} ({md(tc)}) → {d:.2f} ({md(td)})",
+            f"<b>Breakout:</b> {breakout_text}.",
+        ))
+        swing_directions.append(direction)
+
+    standing_block = "<b>Historical MFI Standing:</b> Unavailable (252 valid sessions required)<br>"
+    percentile = number(extras.get("mfi_historical_percentile"))
+    higher = number(extras.get("mfi_historical_higher_count"))
+    if (percentile is not None and higher is not None and 0 <= percentile <= 100
+            and 0 <= higher <= 251 and higher.is_integer()):
+        standing_block = (
+            f"<b>Historical MFI Standing:</b> {percentile:.1f}th percentile "
+            f"({int(higher)}/252 observations were higher)<br>"
+        )
+
+    # Separate volume participation from the MFI oscillator's 252D standing.
+    # 120-session rank uses the already-verified VWMA convention.
+    volume_activity_block = "<b>Volume Activity:</b> Unavailable<br>"
+    volume_ratio = number(extras.get("mfi_volume_ratio"))
+    volume_rank = number(extras.get("mfi_volume_percentile_120"))
+    if volume_ratio is not None and volume_ratio < 0:
+        volume_ratio = None
+    if volume_rank is not None and not 0 <= volume_rank <= 100:
+        volume_rank = None
+    if volume_ratio is not None or volume_rank is not None:
+        activity = []
+        if volume_ratio is not None:
+            activity.append(f"{volume_ratio:.2f}× {period}D avg")
+        if volume_rank is not None:
+            rank_num = round(volume_rank)
+            suffix = (
+                "th" if rank_num % 100 in (11, 12, 13) else
+                {1: "st", 2: "nd", 3: "rd"}.get(rank_num % 10, "th")
+            )
+            activity.append(f"{rank_num}{suffix} pct (120 sessions)")
+        else:
+            activity.append("120-session rank unavailable")
+        volume_activity_block = (
+            "<b>Volume Activity:</b> " + " | ".join(activity) + "<br>"
+        )
+
+    zone_transition = extras.get("mfi_zone_transition", "")
+    if not isinstance(zone_transition, str):
+        zone_transition = ""
+    # Check supplied transition against the actual, full-history two-day values.
+    known = []
+    if previous is not None:
+        if previous <= 25 < current:
+            known.append("Exited Oversold")
+        if previous >= 75 > current:
+            known.append("Exited Overbought")
+        if previous > 25 >= current:
+            known.append("Entered Oversold")
+        if previous < 75 <= current:
+            known.append("Entered Overbought")
+    if zone_transition != "; ".join(known):
+        zone_transition = ""
+    age = number(extras.get("mfi_extreme_duration"))
+    if age is not None and (age < 1 or not age.is_integer() or not (current <= 25 or current >= 75)):
+        age = None
+
+    interpretation = get_mfi_hover_interpretation(
+        period, state, score, active_rules, current,
+        prior_mfi=previous, price_current=price, price_prior=old_price,
+        volume_current=volume, volume_prior=old_volume,
+        historical_percentile=percentile if higher is not None else None,
+        volume_ratio=volume_ratio, volume_percentile_120=volume_rank,
+        flow_direction=(
+            extras.get("mfi_flow_direction")
+            if extras.get("mfi_flow_direction") in ("Positive", "Negative", "None")
+            else ""
+        ),
+        typical_price_current=number(extras.get("mfi_typical_price_current")),
+        typical_price_prior=number(extras.get("mfi_typical_price_prior")),
+        extreme_duration=age,
+        extreme_duration_at_least=(extras.get("mfi_extreme_duration_at_least") is True),
+        zone_transition=zone_transition,
+        divergence_directions=tuple(div_directions),
+        failure_swing_directions=tuple(swing_directions),
+    )
+    interpretation_block = ""
+    if interpretation is not None:
+        context, bottom = interpretation
+        interpretation_block = (
+            "<b>Context Interpretation:</b> " + _wrap_hover_text(context, width=88) + "<br>"
+            "<b>Bottom-line:</b> " + _wrap_hover_text(bottom, width=88) + "<br>"
+        )
+    # Visual event flags come ONLY from the dated, numerically validated
+    # records accepted above. Never re-detect or backpaint an event in Plotly.
+    # If contradictory same-type events coexist, preserve the hover evidence
+    # but omit an ambiguous single-color/single-arrow visual.
+    visual_divergence = (
+        div_directions[0] if len(set(div_directions)) == 1 else ""
+    ) if div_directions else ""
+    visual_failure_swing = (
+        swing_directions[0] if len(set(swing_directions)) == 1 else ""
+    ) if swing_directions else ""
+
+    return {
+        "mfi_visual_divergence": visual_divergence,
+        "mfi_visual_failure_swing": visual_failure_swing,
+        "mfi_value_line": opening,
+        "delta_line": " | ".join(changes) + "<br>",
+        "trend_line": " | ".join(trends) + "<br>",
+        "mfi_event_block": "<br>".join(event_lines) + ("<br>" if event_lines else ""),
+        "mfi_standing_block": standing_block,
+        "mfi_volume_activity_block": volume_activity_block,
+        "mfi_interpretation_block": interpretation_block,
+    }
 
 def format_stoch_hover_presentation(customdata: Dict[str, Any]) -> Dict[str, Any]:
     """Present STOCH openings consistently in RH, SCD Single and Multiple."""
@@ -1310,8 +1593,7 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "MFI_10": {
         "display_name": "MFI(10)",
         "definition": (
-            "MFI combines typical price and volume into a 0–100 "
-            "oscillator. MFI(10) is the fastest configured variant."
+            "MFI combines typical price and volume into a 0–100 oscillator."
         ),
         "how_to_read": (
             "Low readings indicate oversold opportunity bias; high readings "
@@ -1324,8 +1606,7 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "MFI_14": {
         "display_name": "MFI(14)",
         "definition": (
-            "MFI combines typical price and volume into a 0–100 "
-            "oscillator. MFI(14) is the standard reference variant."
+            "MFI combines typical price and volume into a 0–100 oscillator."
         ),
         "how_to_read": (
             "Low readings indicate oversold opportunity bias; high readings "
@@ -1338,8 +1619,7 @@ INDICATOR_DEFS: Dict[str, Dict[str, str]] = {
     "MFI_30": {
         "display_name": "MFI(30)",
         "definition": (
-            "MFI combines typical price and volume into a 0–100 "
-            "oscillator. MFI(30) is the slowest configured variant."
+            "MFI combines typical price and volume into a 0–100 oscillator."
         ),
         "how_to_read": (
             "Low readings indicate oversold opportunity bias; high readings "
@@ -3365,6 +3645,11 @@ def build_plotly_heatmap_inputs(
                         "roc_standing_block": "",
                         "roc_interpretation_block": "",
                         "roc_value_line": "",
+                        "mfi_value_line": "",
+                        "mfi_event_block": "",
+                        "mfi_standing_block": "",
+                        "mfi_volume_activity_block": "",
+                        "mfi_interpretation_block": "",
                         "signal_line": signal_line,
                         "rule_block": rule_block,
                         "notes_block": notes_block,
@@ -3569,6 +3854,18 @@ def build_plotly_heatmap_inputs(
                     if hma_curated:
                         rule_text = hma_curated
                         hma_curated_rule_valid = True
+
+            # MFI: explain only when the value, score, and full active five-state
+            # rule set agree. Never substitute a stale explanation on mismatch.
+            if key.startswith("MFI_"):
+                try:
+                    mfi_period = int(key.split("_", 1)[1])
+                except (ValueError, IndexError):
+                    mfi_period = -1
+                mfi_rule = get_mfi_rule_explanation(
+                    mfi_period, score_to_rule_key(s), s, all_state_rules, v
+                )
+                rule_text = mfi_rule or ""
 
             # BB_BW keeps canonical Neutral / 0. The companion %B rule is
             # independently verified before it can be displayed as context.
@@ -6022,6 +6319,37 @@ def build_plotly_heatmap_inputs(
                         "<br><b>How to Read:</b><br>", "<b>How to Read:</b> ", 1
                     )
 
+            # MFI: use the same validated full-history evidence for every view.
+            # All numeric and structural facts remain owned by technical.py.
+            mfi_hover = {}
+            if key.startswith("MFI_") and isinstance(extra_map, dict):
+                mfi_hover = build_mfi_hover_presentation(
+                    indicator_key=key, date=d_raw, value=v, score=s,
+                    active_rules=all_state_rules, extras=extra_map,
+                )
+                if mfi_hover:
+                    delta_line = mfi_hover["delta_line"]
+                    trend_line = mfi_hover["trend_line"]
+                    signal_line = signal_line.removeprefix("<br>")
+                    rule_block = _compact_hover_rule(rule_block).removeprefix("<br>")
+                    notes_block = notes_block.replace(
+                        "<br><b>Notes:</b><br>", "<b>Notes:</b> ", 1
+                    )
+                    definition_block = definition_block.replace(
+                        "<br><b>Definition:</b><br>", "<b>Definition:</b> ", 1
+                    )
+                    # Keep rulebook metadata authoritative. Condense only the
+                    # MFI hover footer; detailed explanations belong in MFI.md.
+                    notes_block = (
+                        "<b>Notes:</b> Cross-check: SMA(200), OBV, RSI, "
+                        "Bollinger Bands.<br>"
+                    )
+                    how_to_read_block = (
+                        "<b>How to Read:</b> Blue/red value: bullish/bearish "
+                        "divergence; black ▲/▼: bullish/bearish failure swing. "
+                        "See 'Indicator Definitions'.<br>"
+                    )
+
             # Preserve the existing VWMA-specific aliases for compatibility
             # with the already-verified VWMA hover implementation.
             vwma_volume_value = (
@@ -6687,6 +7015,13 @@ def build_plotly_heatmap_inputs(
                     "roc_standing_block": roc_standing_block,
                     "roc_interpretation_block": roc_interpretation_block,
                     "roc_value_line": roc_value_line,
+                    "mfi_value_line": mfi_hover.get("mfi_value_line", ""),
+                    "mfi_event_block": mfi_hover.get("mfi_event_block", ""),
+                    "mfi_standing_block": mfi_hover.get("mfi_standing_block", ""),
+                    "mfi_volume_activity_block": mfi_hover.get("mfi_volume_activity_block", ""),
+                    "mfi_interpretation_block": mfi_hover.get("mfi_interpretation_block", ""),
+                    "mfi_visual_divergence": mfi_hover.get("mfi_visual_divergence", ""),
+                    "mfi_visual_failure_swing": mfi_hover.get("mfi_visual_failure_swing", ""),
                     "signal_line": signal_line,
                     "rule_block": rule_block,
                     "notes_block": notes_block,
@@ -7120,6 +7455,79 @@ def apply_bbp_divergence_text_overlay(
                 hoverinfo="skip",
                 showlegend=False,
             )
+        )
+
+
+def apply_mfi_value_event_overlays(
+    fig: go.Figure,
+    *,
+    customdata: List[List[dict]],
+    x: List[Any],
+    y: List[Any],
+) -> None:
+    """MFI event-only value styling; never change the Signal or heatmap fill.
+
+    Blue/red numeric value = confirmed bullish/bearish divergence.
+    Black ▲/▼ to the value's right = completed bullish/bearish failure swing.
+    Both visual channels remain independent on concurrent event dates.
+    Flags are emitted only by the guarded, event-date-validated MFI formatter.
+    """
+    if not fig.data:
+        return
+
+    original = [list(row) for row in fig.data[0].text]
+    shown = [list(row) for row in original]
+    colored: Dict[str, Tuple[List[Any], List[Any], List[str]]] = {
+        "Bullish": ([], [], []),
+        "Bearish": ([], [], []),
+    }
+    arrows: List[Tuple[Any, Any, str]] = []
+
+    for row_idx, row in enumerate(customdata):
+        if row_idx >= len(original) or row_idx >= len(y):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx >= len(original[row_idx]) or col_idx >= len(x):
+                continue
+            if not isinstance(cell, dict) or cell.get("indicator_key") not in (
+                "MFI_10", "MFI_14", "MFI_30"
+            ):
+                continue
+            value_text = original[row_idx][col_idx]
+            if value_text is None or str(value_text).strip() == "":
+                continue
+
+            divergence = cell.get("mfi_visual_divergence")
+            failure_swing = cell.get("mfi_visual_failure_swing")
+            if divergence in colored:
+                # Replace ONLY the numeric text, keeping z and customdata.
+                shown[row_idx][col_idx] = ""
+                xs, ys, labels = colored[divergence]
+                xs.append(x[col_idx])
+                ys.append(y[row_idx])
+                labels.append(str(value_text))
+            if failure_swing in ("Bullish", "Bearish"):
+                arrows.append((
+                    x[col_idx], y[row_idx],
+                    "▲" if failure_swing == "Bullish" else "▼"
+                ))
+
+    fig.data[0].text = shown
+    for direction, color in (("Bullish", "blue"), ("Bearish", "red")):
+        xs, ys, labels = colored[direction]
+        if labels:
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys, mode="text", text=labels,
+                textfont=dict(size=12, color=color),
+                hoverinfo="skip", showlegend=False,
+            ))
+
+    for arrow_x, arrow_y, symbol in arrows:
+        fig.add_annotation(
+            x=arrow_x, y=arrow_y, xref="x", yref="y",
+            text=symbol, showarrow=False, xshift=29, yshift=0,
+            xanchor="center", yanchor="middle",
+            font=dict(size=12, color="black"), captureevents=False,
         )
 
 
@@ -8226,6 +8634,7 @@ def make_rolling_heatmap_figure(
             if isinstance(cell, dict):
                 cell.setdefault(
                     "rolling_value_line",
+                    cell.get("mfi_value_line") or
                     cell.get("roc_value_line") or
                     f"Value: {cell.get('formatted_value', '')}<br>",
                 )
@@ -8255,6 +8664,7 @@ def make_rolling_heatmap_figure(
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.roc_event_block}"
+        "%{customdata.mfi_event_block}"
         "%{customdata.adx_crossover_block}"
         "%{customdata.adx_visual_divergence_block}"
         "%{customdata.adx_visual_spread_block}"
@@ -8268,6 +8678,9 @@ def make_rolling_heatmap_figure(
         "%{customdata.rule_block}"
         "%{customdata.roc_standing_block}"
         "%{customdata.roc_interpretation_block}"
+        "%{customdata.mfi_standing_block}"
+        "%{customdata.mfi_volume_activity_block}"
+        "%{customdata.mfi_interpretation_block}"
         "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
@@ -8334,6 +8747,10 @@ def make_rolling_heatmap_figure(
         fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
     apply_roc_zero_line_arrow_overlay(
+        fig, customdata=hm.customdata, x=hm.x, y=hm.y,
+    )
+
+    apply_mfi_value_event_overlays(
         fig, customdata=hm.customdata, x=hm.x, y=hm.y,
     )
 

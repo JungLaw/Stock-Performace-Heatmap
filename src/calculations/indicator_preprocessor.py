@@ -99,9 +99,17 @@ def _mfi_local(
     rmf = tp * v
     delta = tp.diff()
 
-    # Positive / negative money flow (float64, no NA extension types)
-    pos_mf = rmf.where(delta > 0.0, 0.0)
-    neg_mf = rmf.where(delta < 0.0, 0.0).abs()
+    # Require two consecutive finite typical prices and finite
+    # current-session volume. Missing inputs are not zero money flow.
+    valid_flow = (
+        np.isfinite(tp)
+        & np.isfinite(tp.shift(1))
+        & np.isfinite(v)
+    )
+
+    # Preserve genuine zero flows while excluding invalid comparisons.
+    pos_mf = rmf.where(delta > 0.0, 0.0).where(valid_flow, np.nan)
+    neg_mf = rmf.where(delta < 0.0, 0.0).abs().where(valid_flow, np.nan)
 
     pos_sum = pos_mf.rolling(length, min_periods=length).sum()
     neg_sum = neg_mf.rolling(length, min_periods=length).sum()

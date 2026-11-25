@@ -26,6 +26,387 @@ def _fingerprint(expression: str) -> Optional[str]:
         return None
 
 
+def get_mfi_rule_explanation(
+    period: int,
+    state: str,
+    score: object,
+    active_rules: Mapping[str, str],
+    mfi_value: object,
+) -> Optional[str]:
+    """Explain current MFI classification only under the approved rulebook."""
+    scores = {
+        "strong_buy": 2, "buy": 1, "neutral": 0,
+        "sell": -1, "strong_sell": -2,
+    }
+    if period not in (10, 14, 30) or state not in scores:
+        return None
+    if isinstance(score, bool) or score != scores[state]:
+        return None
+    if not isinstance(active_rules, Mapping) or isinstance(mfi_value, bool):
+        return None
+    try:
+        value = float(mfi_value)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if not math.isfinite(value) or not 0.0 <= value <= 100.0:
+        return None
+
+    col = f"MFI_{period}"
+    expected = {
+        "strong_buy": f"{col} <= 15",
+        "buy": f"{col} > 15 and {col} <= 25",
+        "neutral": f"{col} > 25 and {col} < 75",
+        "sell": f"{col} >= 75 and {col} < 85",
+        "strong_sell": f"{col} >= 85",
+    }
+    if any(
+        _fingerprint(str(active_rules.get(key, "") or ""))
+        != _fingerprint(expression)
+        for key, expression in expected.items()
+    ):
+        return None
+
+    qualifies = {
+        "strong_buy": value <= 15,
+        "buy": 15 < value <= 25,
+        "neutral": 25 < value < 75,
+        "sell": 75 <= value < 85,
+        "strong_sell": value >= 85,
+    }
+    if not qualifies[state]:
+        return None
+
+    explanation = {
+        "strong_buy": "at or below 15, qualifying Strong Buy (+2); severe oversold money-flow pressure",
+        "buy": "above 15 and at or below 25, qualifying Buy (+1); oversold money-flow pressure",
+        "neutral": "above 25 and below 75, qualifying Neutral (0)",
+        "sell": "at or above 75 and below 85, qualifying Sell (-1); overbought money-flow pressure",
+        "strong_sell": "at or above 85, qualifying Strong Sell (-2); severe overbought money-flow pressure",
+    }
+    return f"MFI({period}) = {value:.2f} is {explanation[state]}."
+
+
+def get_mfi_hover_interpretation(
+    period: int,
+    state: str,
+    score: object,
+    active_rules: Mapping[str, str],
+    mfi_value: object,
+    *,
+    prior_mfi: object = None,
+    price_current: object = None,
+    price_prior: object = None,
+    volume_current: object = None,
+    volume_prior: object = None,
+    historical_percentile: object = None,
+    volume_ratio: object = None,
+    volume_percentile_120: object = None,
+    flow_direction: str = "",
+    typical_price_current: object = None,
+    typical_price_prior: object = None,
+    extreme_duration: object = None,
+    extreme_duration_at_least: bool = False,
+    zone_transition: str = "",
+    divergence_directions: tuple[str, ...] = (),
+    failure_swing_directions: tuple[str, ...] = (),
+) -> Optional[tuple[str, str]]:
+    """Display-only MFI context; events must be validated by the caller.
+
+    The five-state Rule remains authoritative. Missing history never implies
+    flat movement, and a structural event never changes the Signal.
+    """
+    if get_mfi_rule_explanation(
+        period, state, score, active_rules, mfi_value
+    ) is None:
+        return None
+
+    def finite(value: object) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return result if math.isfinite(result) else None
+
+    current = finite(mfi_value)
+    previous = finite(prior_mfi)
+    price = finite(price_current)
+    old_price = finite(price_prior)
+    volume = finite(volume_current)
+    old_volume = finite(volume_prior)
+    percentile = finite(historical_percentile)
+    volume_rel = finite(volume_ratio)
+    volume_rank = finite(volume_percentile_120)
+    typical = finite(typical_price_current)
+    prior_typical = finite(typical_price_prior)
+    age = finite(extreme_duration)
+    allowed = {"Bullish", "Bearish"}
+
+    if (
+        not isinstance(divergence_directions, tuple)
+        or not isinstance(failure_swing_directions, tuple)
+        or any(
+            direction not in allowed
+            for direction in divergence_directions + failure_swing_directions
+        )
+        or not isinstance(zone_transition, str)
+        or not isinstance(extreme_duration_at_least, bool)
+        or flow_direction not in ("", "Positive", "Negative", "None")
+    ):
+        return None
+
+    if percentile is not None and not 0.0 <= percentile <= 100.0:
+        return None
+    if age is not None and (age < 1 or not age.is_integer()):
+        return None
+    if volume_rel is not None and volume_rel < 0:
+        return None
+    if volume_rank is not None and not 0 <= volume_rank <= 100:
+        return None
+    # Directional interpretation must match the *typical-price* definition
+    # used by the production MFI preprocessor, not today's closing-price move.
+    if flow_direction:
+        if (typical is None or prior_typical is None or volume is None
+                or typical <= 0 or prior_typical <= 0):
+            return None
+        expected_flow = (
+            "None" if volume == 0 or typical == prior_typical else
+            "Positive" if typical > prior_typical else "Negative"
+        )
+        if expected_flow != flow_direction:
+            return None
+
+    def one_decimal(value: float) -> str:
+        # Preserve small non-zero changes that would disappear as 0.0.
+        return f"{value:.2f}" if 0 < abs(value) < 0.05 else f"{value:.1f}"
+
+    divergence = set(divergence_directions)
+    swings = set(failure_swing_directions)
+    directions = divergence | swings
+    score_direction = (
+        "Bullish" if state in ("strong_buy", "buy") else
+        "Bearish" if state in ("sell", "strong_sell") else None
+    )
+    change = current - previous if previous is not None else None
+    price_change = (
+        (price - old_price) if price is not None and old_price is not None
+        else None
+    )
+    mismatch = (
+        change is not None and price_change is not None
+        and change * price_change < 0
+    )
+    rare_low = percentile is not None and percentile <= 2.5
+    rare_high = percentile is not None and percentile >= 97.5
+    elevated_volume = (
+        (volume_rel is not None and volume_rel >= 1.25)
+        or (volume_rank is not None and volume_rank >= 90)
+    )
+    light_volume = (
+        (volume_rel is not None and volume_rel <= 0.75)
+        or (volume_rank is not None and volume_rank <= 10)
+    )
+    # Use the *unrounded* 120-session rank for inclusive 2.5% tail gates.
+    # Rounded ordinals are presentation only; don't alter event qualification.
+    exceptional_volume = ""
+    if volume_rank is not None and (volume_rank <= 2.5 or volume_rank >= 97.5):
+        rank_display = round(volume_rank)
+        suffix = (
+            "th" if rank_display % 100 in (11, 12, 13) else
+            {1: "st", 2: "nd", 3: "rd"}.get(rank_display % 10, "th")
+        )
+        participation = "light" if volume_rank <= 2.5 else "heavy"
+        exceptional_volume = (
+            f"Exceptionally {participation} volume "
+            f"({rank_display}{suffix} pct)"
+        )
+
+    # The separate Rule and evidence fields already state thresholds, values,
+    # percentages and dated A/B/C/D facts. Avoid restating that table here.
+    context_parts: list[str] = []
+    if directions:
+        if zone_transition:
+            context_parts.append(zone_transition + " today.")
+        if "Bullish" in divergence:
+            context_parts.append(
+                "Price lower low, nearby MFI higher low: selling pressure eased at new low."
+            )
+        if "Bearish" in divergence:
+            context_parts.append(
+                "Price higher high, nearby MFI lower high: buying pressure faded at new high."
+            )
+        if "Bullish" in swings:
+            context_parts.append(
+                "Bullish failure swing: MFI recovered, held a higher low & broke prior rebound high."
+            )
+        if "Bearish" in swings:
+            context_parts.append(
+                "Bearish failure swing: rebound failed; MFI broke its prior recovery trough."
+            )
+        if exceptional_volume:
+            context_parts.append(exceptional_volume + " on event day.")
+    else:
+        if current < 50:
+            context_parts.append(
+                f"Negative flow ~{100-current:.0f}% of {period}D balance."
+            )
+        elif current > 50:
+            context_parts.append(
+                f"Positive flow ~{current:.0f}% of {period}D balance."
+            )
+        else:
+            context_parts.append(f"Positive/negative flow ~50/50 over {period}D.")
+
+        flow_words = ""
+        if flow_direction in ("Positive", "Negative"):
+            flow_word = flow_direction.lower()
+            flow_words = (
+                f"{exceptional_volume} added {flow_word} flow"
+                if exceptional_volume else
+                f"Heavy volume added {flow_word} flow" if elevated_volume else
+                f"Light volume added {flow_word} flow" if light_volume else
+                f"Today added {flow_word} flow"
+            )
+        elif flow_direction == "None":
+            flow_words = (
+                exceptional_volume + "; no directional raw flow today"
+                if exceptional_volume else "No directional raw flow today"
+            )
+
+        change_words = ""
+        if change is not None:
+            if change == 0:
+                change_words = "MFI unchanged"
+            else:
+                verb = (
+                    "edged up" if 0 < change < 0.5 else
+                    "edged down" if -0.5 < change < 0 else
+                    "rose" if change > 0 else "fell"
+                )
+                suffix = "pt" if abs(change) <= 1 else "pts"
+                change_words = (
+                    f"MFI {verb} {one_decimal(abs(change))} {suffix}"
+                )
+
+        opposite = (
+            change is not None and
+            ((flow_direction == "Positive" and change < 0) or
+             (flow_direction == "Negative" and change > 0))
+        )
+        if flow_words and change_words:
+            if opposite:
+                # A signed raw-flow session and the rolling MFI *can* move
+                # oppositely as old sessions leave the calculation window.
+                context_parts.append(flow_words + ", yet rolling " + change_words + ".")
+            else:
+                context_parts.append(flow_words + ". " + change_words + ".")
+        elif flow_words:
+            context_parts.append(flow_words + ".")
+        elif change_words:
+            context_parts.append(change_words + ".")
+
+        # A material zone transition has explanatory priority over repetition of
+        # ordinary price, volume, and oscillator change statistics.
+        if zone_transition:
+            context_parts.append(zone_transition + " today.")
+        elif age is not None and age >= 3 and (current <= 25 or current >= 75):
+            bound = "≥" if extreme_duration_at_least else ""
+            context_parts.append(
+                f"{'Oversold' if current <= 25 else 'Overbought'} "
+                f"{bound}{int(age)} sessions."
+            )
+        elif mismatch and not flow_words:
+            context_parts.append("Price/MFI moved in opposite directions today.")
+        if exceptional_volume and not flow_words:
+            context_parts.append(exceptional_volume + " today.")
+
+    context = " ".join(context_parts)
+
+    if len(directions) > 1:
+        bottom = (
+            "Bullish & bearish structural events conflict; "
+            "neither changes MFI Signal."
+        )
+    elif directions:
+        event_side = next(iter(directions))
+        event_name = (
+            "divergence" if event_side in divergence else "failure swing"
+        )
+        implication = (
+            "easing downside pressure" if event_side == "Bullish" and event_name == "divergence" else
+            "fading upside pressure" if event_side == "Bearish" and event_name == "divergence" else
+            "improving MFI structure" if event_side == "Bullish" else
+            "worsening MFI structure"
+        )
+        if score_direction is None:
+            bottom = (
+                f"{event_side} {event_name} suggests {implication} despite "
+                "Neutral Signal."
+            )
+        elif score_direction == event_side:
+            bottom = (
+                f"{state.replace('_', ' ').title()} + {event_side.lower()} "
+                f"{event_name} suggest {implication}."
+            )
+        else:
+            bottom = (
+                f"{state.replace('_', ' ').title()} reflects "
+                f"{'oversold' if score_direction == 'Bullish' else 'overbought'} "
+                f"flow, but {event_side.lower()} {event_name} indicates "
+                f"{implication}; evidence mixed."
+            )
+    elif rare_low and state == "neutral":
+        bottom = (
+            "Neutral by threshold, but flow near 252-session low; "
+            "downside pressure elevated."
+        )
+    elif rare_high and state == "neutral":
+        bottom = (
+            "Neutral by threshold, but flow near 252-session high; "
+            "upside pressure elevated."
+        )
+    elif state in ("strong_buy", "buy"):
+        strength = "Severe oversold" if state == "strong_buy" else "Oversold"
+        if change is not None and change < 0:
+            bottom = (
+                f"{strength} flow, but selling pressure is still deepening."
+            )
+        elif change is not None and change > 0:
+            bottom = (
+                f"{strength} flow; rising MFI suggests pressure may be easing."
+            )
+        else:
+            bottom = f"{strength} contrarian money-flow condition."
+    elif state in ("strong_sell", "sell"):
+        strength = "Severe overbought" if state == "strong_sell" else "Overbought"
+        if change is not None and change > 0:
+            bottom = (
+                f"{strength} flow; buying pressure still intensifying."
+            )
+        elif change is not None and change < 0:
+            bottom = (
+                f"{strength} flow; MFI easing from elevated levels."
+            )
+        else:
+            bottom = f"{strength} contrarian money-flow condition."
+    elif mismatch:
+        bottom = (
+            "One-session price/MFI mismatch shows mixed pressure, "
+            "not confirmed divergence."
+        )
+    elif previous is None and not flow_direction:
+        bottom = "Neutral Signal; recent money-flow change unavailable."
+    elif current < 50:
+        bottom = "Neutral by threshold, with a negative money-flow tilt."
+    elif current > 50:
+        bottom = "Neutral by threshold, with a positive money-flow tilt."
+    else:
+        bottom = "Neutral range; positive/negative money flow near balance."
+
+    return context, bottom
+
+
 @lru_cache(maxsize=None)
 def _approved_hma_expressions(period: int) -> dict[str, str]:
     """Independent reviewed rule specification; source data remains authoritative."""

@@ -68,6 +68,7 @@ from ui.rolling_heatmap_adapter import (
     apply_cci_zero_line_arrow_overlay,
     apply_roc_divergence_text_overlay,
     apply_roc_zero_line_arrow_overlay,
+    apply_mfi_value_event_overlays,
     apply_uo_divergence_symbol_overlay,
     apply_macd_signal_crossover_overlay,
     apply_adx_di_crossover_overlay,
@@ -4945,6 +4946,11 @@ def _build_scd_hover_customdata(
         "roc_standing_block",
         "roc_interpretation_block",
         "roc_value_line",
+        "mfi_value_line",
+        "mfi_event_block",
+        "mfi_standing_block",
+        "mfi_volume_activity_block",
+        "mfi_interpretation_block",
         "adx_context_block",
         "adx_crossover_block",
         "adx_visual_divergence_block",
@@ -4993,6 +4999,8 @@ def _build_scd_hover_customdata(
 
     if row_key.startswith("ROC_") and custom.get("roc_value_line"):
         custom["scd_value_line"] = custom["roc_value_line"]
+    if row_key.startswith("MFI_") and custom.get("mfi_value_line"):
+        custom["scd_value_line"] = custom["mfi_value_line"]
 
     if row_key.startswith(("CMF_", "BB_PCT_B", "BB_BW", "ADX_")):
         # Keep SCD's original value and diagnostic suffix; bold label only.
@@ -5045,6 +5053,7 @@ def _build_scd_hover_customdata(
         or row_key.startswith("CCI_")
         or row_key.startswith("STOCH_")
         or row_key.startswith("ROC_")
+        or row_key.startswith("MFI_")
     ):
         custom["scd_payload_hover_block"] = ""
     else:
@@ -5208,6 +5217,7 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.uo_context_block}"
         "%{customdata.signal_line}"
         "%{customdata.roc_event_block}"
+        "%{customdata.mfi_event_block}"
         "%{customdata.adx_crossover_block}"
         "%{customdata.adx_visual_divergence_block}"
         "%{customdata.adx_visual_spread_block}"
@@ -5221,6 +5231,9 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         "%{customdata.rule_block}"
         "%{customdata.roc_standing_block}"
         "%{customdata.roc_interpretation_block}"
+        "%{customdata.mfi_standing_block}"
+        "%{customdata.mfi_volume_activity_block}"
+        "%{customdata.mfi_interpretation_block}"
         "%{customdata.adx_interpretation_block}"
         "%{customdata.bb_pct_b_post_rule_block}"
         "%{customdata.cmf_interpretation_block}"
@@ -5287,6 +5300,10 @@ def _build_scd_heatmap_figure(matrix: Dict[str, Any]) -> go.Figure:
         fig, customdata=customdata, x=tickers, y=y_labels,
     )
     apply_roc_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=y_labels,
+    )
+
+    apply_mfi_value_event_overlays(
         fig, customdata=customdata, x=tickers, y=y_labels,
     )
 
@@ -5765,6 +5782,10 @@ def _build_scd_single_indicator_hover_customdata(
         custom["scd_single_value_line"] = custom["roc_value_line"]
         custom["single_combined_delta_line"] = custom.get("delta_line", "")
         custom["single_combined_trend_line"] = custom.get("trend_line", "")
+    if row_key.startswith("MFI_") and custom.get("mfi_value_line"):
+        custom["scd_single_value_line"] = custom["mfi_value_line"]
+        custom["single_combined_delta_line"] = custom.get("delta_line", "")
+        custom["single_combined_trend_line"] = custom.get("trend_line", "")
 
     if row_key.startswith("ADX_"):
         for field in (
@@ -5926,6 +5947,27 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
             "<extra></extra>"
         )
 
+    elif row_key.startswith("MFI_"):
+        hovertemplate = (
+            "<b>%{customdata.display_name}</b><br>"
+            "Ticker: %{customdata.ticker}<br>"
+            "Date: %{customdata.date}<br>"
+            "<br>"
+            "%{customdata.scd_single_value_line}"
+            "%{customdata.single_combined_delta_line}"
+            "%{customdata.single_combined_trend_line}"
+            "%{customdata.signal_line}"
+            "%{customdata.mfi_event_block}"
+            "%{customdata.rule_block}"
+            "%{customdata.mfi_standing_block}"
+            "%{customdata.mfi_volume_activity_block}"
+            "%{customdata.mfi_interpretation_block}"
+            "%{customdata.notes_block}"
+            "%{customdata.definition_block}"
+            "%{customdata.how_to_read_block}"
+            "<extra></extra>"
+        )
+
     elif row_key.startswith("HMA_"):
         hovertemplate = (
             "<b>%{customdata.display_name}</b><br>"
@@ -6072,6 +6114,10 @@ def _build_scd_single_indicator_heatmap_figure(matrix: Dict[str, Any]) -> go.Fig
         fig, customdata=customdata, x=tickers, y=date_labels,
     )
     apply_roc_zero_line_arrow_overlay(
+        fig, customdata=customdata, x=tickers, y=date_labels,
+    )
+
+    apply_mfi_value_event_overlays(
         fig, customdata=customdata, x=tickers, y=date_labels,
     )
 
@@ -6621,6 +6667,27 @@ def _get_scd_single_chart_hover_fields(
             f"<b>Value:</b> {visible}<br><b>Signal:</b> {signal}<br>"
         )
 
+    # MFI trend chart reuses the verified, full-history adapter presentation.
+    # Unlike ROC, omit Notes / Definition / How to Read by design; the chart
+    # must not reconstruct its own event dates, Rule, or context narrative.
+    mfi_chart_hover_block = ""
+    if (row_key.startswith("MFI_") and isinstance(indicator_cd, dict)
+            and indicator_cd.get("mfi_value_line")):
+        mfi_chart_hover_block = "".join(
+            str(indicator_cd.get(field) or "") for field in (
+                "mfi_value_line", "delta_line", "trend_line", "signal_line",
+                "mfi_event_block", "rule_block", "mfi_standing_block",
+                "mfi_volume_activity_block", "mfi_interpretation_block",
+            )
+        )
+    elif row_key.startswith("MFI_"):
+        # Missing adapter evidence must not fabricate an MFI interpretation.
+        visible = str(cell.get("display_text") or "Unavailable")
+        signal = str(cell.get("signal") or "Unavailable")
+        mfi_chart_hover_block = (
+            f"<b>Value:</b> {visible}<br><b>Signal:</b> {signal}<br>"
+        )
+
     return [
         str(date_key),
         _format_scd_heatmap_text(row_key, cell),
@@ -6634,6 +6701,7 @@ def _get_scd_single_chart_hover_fields(
         indicator_delta_line,
         alignment_line,
         roc_chart_hover_block,
+        mfi_chart_hover_block,
     ]
 
 def _add_scd_single_chart_reference_lines(
@@ -6732,6 +6800,16 @@ def _build_scd_single_indicator_chart_figure(
                         )
                         + "<extra></extra>"
                     ) if row_key.startswith("ROC_") else (
+                    (
+                        "<b>%{fullData.name}</b><br>"
+                        "Date: %{customdata[0]}<br><br>"
+                        "%{customdata[9]}"
+                        + (
+                            f"<b>Chart value ({resolved_mode}):</b> %{{customdata[3]:.2f}}<br>"
+                            if resolved_mode != "Indicator value" else ""
+                        )
+                        + "<extra></extra>"
+                    ) if row_key.startswith("MFI_") else (
                     "<b>%{fullData.name}</b><br>"
                     "Date: %{customdata[0]}<br>"
                     f"{row_label}: %{{customdata[1]}}<br>"
@@ -6742,6 +6820,7 @@ def _build_scd_single_indicator_chart_figure(
                     "Price: %{customdata[4]}<br>"
                     "Price Δ vs prior day: %{customdata[5]}"
                     "<extra></extra>"
+                    )
                     )
                 ),
             )

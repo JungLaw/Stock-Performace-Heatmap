@@ -1062,6 +1062,431 @@ class DatabaseIntegratedTechnicalCalculator:
             & (s > s.shift(-2))
         )
 
+
+    @classmethod
+    def _build_mfi_divergence_context(
+        cls, df_ind: pd.DataFrame
+    ) -> Dict[str, Dict[str, Any]]:
+        """Confirmed price-pivot/local-MFI nonconfirmation (A-prime).
+
+        Event truth is dated at the second price pivot's confirmation bar.
+        This never changes the primary MFI Signal or score.
+        """
+        output: Dict[str, Dict[str, Any]] = {}
+        if not {"Low", "High"}.issubset(df_ind.columns):
+            return output
+        if df_ind.index.has_duplicates:
+            raise ValueError("MFI divergence requires unique history dates")
+
+        df = df_ind.sort_index()
+        prices = {
+            "Bullish": pd.to_numeric(df["Low"], errors="coerce").astype("float64"),
+            "Bearish": pd.to_numeric(df["High"], errors="coerce").astype("float64"),
+        }
+        for side, series in prices.items():
+            prices[side] = series.where(np.isfinite(series) & (series > 0.0))
+
+        pivots = {
+            "Bullish": np.flatnonzero(
+                cls._confirmed_swing_low_5bar(prices["Bullish"]).to_numpy()
+            ),
+            "Bearish": np.flatnonzero(
+                cls._confirmed_swing_high_5bar(prices["Bearish"]).to_numpy()
+            ),
+        }
+
+        for period in (10, 14, 30):
+            key = f"MFI_{period}"
+            if key not in df.columns:
+                continue
+            mfi = pd.to_numeric(df[key], errors="coerce").to_numpy(dtype="float64")
+            events: Dict[Any, List[Dict[str, Any]]] = {}
+            evaluations: Dict[Any, Dict[str, str]] = {}
+
+            for side in ("Bullish", "Bearish"):
+                price_array = prices[side].to_numpy(dtype="float64")
+                for previous, current in zip(pivots[side][:-1], pivots[side][1:]):
+                    event_pos = current + 2
+                    event_date = df.index[event_pos]
+                    status = evaluations.setdefault(event_date, {})
+                    p0, p1 = float(price_array[previous]), float(price_array[current])
+                    price_extends = p1 < p0 if side == "Bullish" else p1 > p0
+                    if not price_extends:
+                        status[side] = "None"
+                        continue
+
+                    w0 = mfi[previous - 2:previous + 3]
+                    w1 = mfi[current - 2:current + 3]
+                    if (len(w0) != 5 or len(w1) != 5
+                            or not np.isfinite(w0).all()
+                            or not np.isfinite(w1).all()):
+                        status[side] = "Unavailable"
+                        continue
+
+                    extreme = np.min if side == "Bullish" else np.max
+                    m0, m1 = float(extreme(w0)), float(extreme(w1))
+                    qualifies = m1 > m0 if side == "Bullish" else m1 < m0
+                    status[side] = side if qualifies else "None"
+                    if not qualifies:
+                        continue
+
+                    def extreme_pos(pivot: int, window: np.ndarray, value: float) -> int:
+                        candidates = np.flatnonzero(window == value) + pivot - 2
+                        return int(min(candidates, key=lambda j: (abs(j - pivot), j)))
+
+                    m0_pos = extreme_pos(previous, w0, m0)
+                    m1_pos = extreme_pos(current, w1, m1)
+                    events.setdefault(event_date, []).append({
+                        "direction": side,
+                        "prior_pivot_date": pd.Timestamp(df.index[previous]).date().isoformat(),
+                        "current_pivot_date": pd.Timestamp(df.index[current]).date().isoformat(),
+                        "confirmation_date": pd.Timestamp(event_date).date().isoformat(),
+                        "prior_price": p0,
+                        "current_price": p1,
+                        "prior_mfi_extreme_date": pd.Timestamp(df.index[m0_pos]).date().isoformat(),
+                        "current_mfi_extreme_date": pd.Timestamp(df.index[m1_pos]).date().isoformat(),
+                        "prior_mfi_extreme": m0,
+                        "current_mfi_extreme": m1,
+                        "price_delta_pct": 100.0 * (p1 / p0 - 1.0),
+                        "mfi_delta_points": m1 - m0,
+                        "price_basis": "Low" if side == "Bullish" else "High",
+                    })
+            output[key] = {"events": events, "evaluations": evaluations}
+        return output
+
+
+
+    @staticmethod
+    def _build_mfi_failure_swing_context(
+        df_ind: pd.DataFrame
+    ) -> Dict[str, Dict[str, Any]]:
+        """Causal MFI 20/80 failure swings; no change to Signal or score."""
+        if df_ind.index.has_duplicates:
+            raise ValueError("MFI failure swings require unique history dates")
+        df = df_ind.sort_index()
+        output: Dict[str, Dict[str, Any]] = {}
+
+        for period in (10, 14, 30):
+            key = f"MFI_{period}"
+            if key not in df.columns:
+                continue
+            values = pd.to_numeric(
+                df[key], errors="coerce"
+            ).to_numpy(dtype="float64")
+            events: Dict[Any, List[Dict[str, Any]]] = {}
+            evaluations: Dict[Any, Dict[str, str]] = {}
+            active = None
+
+            def oriented(value: float, direction: str) -> float:
+                return value if direction == "Bullish" else 100.0 - value
+
+            def arm(direction: str, i: int) -> Dict[str, Any]:
+                return {"direction": direction, "stage": "Extreme", "a": i}
+
+            for i, value in enumerate(values):
+                when = df.index[i]
+                if not np.isfinite(value) or not 0.0 <= value <= 100.0:
+                    active = None
+                    evaluations[when] = {"status": "Unavailable"}
+                    continue
+
+                if active is None:
+                    if value <= 20.0:
+                        active = arm("Bullish", i)
+                    elif value >= 80.0:
+                        active = arm("Bearish", i)
+                else:
+                    direction = active["direction"]
+                    x = oriented(value, direction)
+                    stage = active["stage"]
+                    confirmed = False
+
+                    if stage == "Extreme":
+                        if x <= 20.0:
+                            if x < oriented(values[active["a"]], direction):
+                                active["a"] = i
+                        else:
+                            active.update(stage="Recovery", b=i)
+
+                    elif stage == "Recovery":
+                        if x <= 20.0:
+                            active = arm(direction, i)
+                        elif x > oriented(values[active["b"]], direction):
+                            active["b"] = i
+                        elif x < oriented(values[active["b"]], direction):
+                            active.update(stage="Retest", c=i)
+
+                    elif stage == "Retest":
+                        if x <= 20.0:
+                            active = arm(direction, i)
+                        elif x < oriented(values[active["c"]], direction):
+                            active["c"] = i
+                        elif x > oriented(values[active["c"]], direction):
+                            active.update(stage="Turned", turn=i)
+                            confirmed = x > oriented(
+                                values[active["b"]], direction
+                            )
+
+                    elif stage == "Turned":
+                        if x <= 20.0:
+                            active = arm(direction, i)
+                        elif x < oriented(values[active["c"]], direction):
+                            active.update(stage="Retest", c=i)
+                            active.pop("turn", None)
+                        else:
+                            confirmed = x > oriented(
+                                values[active["b"]], direction
+                            )
+
+                    if confirmed:
+                        a, b, c, turn = (
+                            active[k] for k in ("a", "b", "c", "turn")
+                        )
+                        dates = df.index
+
+                        def date_at(pos: int) -> str:
+                            return pd.Timestamp(
+                                dates[pos]
+                            ).date().isoformat()
+
+                        events.setdefault(when, []).append({
+                            "direction": direction,
+                            "extreme_date": date_at(a),
+                            "extreme_mfi": float(values[a]),
+                            "recovery_date": date_at(b),
+                            "recovery_mfi": float(values[b]),
+                            "retest_date": date_at(c),
+                            "retest_mfi": float(values[c]),
+                            "retest_turn_date": date_at(turn),
+                            "confirmation_date": date_at(i),
+                            "completion_mfi": float(value),
+                            "breakout_level": float(values[b]),
+                            "breakout_delta_points": float(
+                                value - values[b]
+                            ),
+                            "extreme_boundary": (
+                                20.0 if direction == "Bullish" else 80.0
+                            ),
+                        })
+                        active = None
+
+                    # Opposite extreme supersedes an unfinished setup.
+                    # A new episode can start on a completion session.
+                    if value <= 20.0 and (
+                        active is None
+                        or active["direction"] == "Bearish"
+                    ):
+                        active = arm("Bullish", i)
+                    elif value >= 80.0 and (
+                        active is None
+                        or active["direction"] == "Bullish"
+                    ):
+                        active = arm("Bearish", i)
+
+                if when in events:
+                    evaluations[when] = {
+                        "status": "Confirmed",
+                        "direction": events[when][0]["direction"],
+                    }
+                elif active is None:
+                    evaluations[when] = {"status": "None"}
+                else:
+                    evaluations[when] = {
+                        "status": "Developing",
+                        "direction": active["direction"],
+                        "stage": active["stage"],
+                    }
+
+            output[key] = {
+                "events": events,
+                "evaluations": evaluations,
+            }
+        return output
+
+
+    @staticmethod
+    def _build_mfi_standing_context(
+        df_ind: pd.DataFrame
+    ) -> Dict[str, Dict[str, pd.Series]]:
+        """Causal 252-session midrank standing for each available MFI period."""
+        df = df_ind.sort_index()
+        if df.index.has_duplicates:
+            raise ValueError("MFI standing requires unique history dates")
+        window = 252
+        count = len(df)
+        output: Dict[str, Dict[str, pd.Series]] = {}
+
+        for period in (10, 14, 30):
+            key = f"MFI_{period}"
+            if key not in df.columns:
+                continue
+            values = pd.to_numeric(df[key], errors="coerce").to_numpy(dtype="float64")
+            percentile = np.full(count, np.nan, dtype="float64")
+            higher_count = np.full(count, np.nan, dtype="float64")
+            if count >= window:
+                windows = np.lib.stride_tricks.sliding_window_view(values, window)
+                eligible = np.isfinite(windows).all(axis=1)
+                current = windows[:, -1, None]
+                lower = (windows < current).sum(axis=1)
+                equal = (windows == current).sum(axis=1)
+                higher = window - lower - equal
+                percentile[window - 1:] = np.where(
+                    eligible, 100.0 * (lower + 0.5 * equal) / window, np.nan
+                )
+                higher_count[window - 1:] = np.where(
+                    eligible, higher, np.nan
+                )
+            output[key] = {
+                "historical_percentile": pd.Series(percentile, index=df.index),
+                "historical_higher_count": pd.Series(higher_count, index=df.index),
+            }
+        return output
+
+
+    @staticmethod
+    def _build_mfi_session_context(
+        df_ind: pd.DataFrame,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Full-history MFI predecessor, price/volume and extreme-zone facts."""
+        if df_ind.index.has_duplicates:
+            raise ValueError("MFI session context requires unique history dates")
+
+        df = df_ind.sort_index()
+        price_basis = "Adj Close" if "Adj Close" in df.columns else "Close"
+        volume_basis = "Volume" if "Volume" in df.columns else "volume"
+
+        def numeric_column(name: str, *, positive: bool) -> pd.Series:
+            source = (
+                df[name] if name in df.columns
+                else pd.Series(np.nan, index=df.index)
+            )
+            values = pd.to_numeric(
+                source, errors="coerce"
+            ).astype("float64")
+            allowed = np.isfinite(values) & (
+                values > 0 if positive else values >= 0
+            )
+            return values.where(allowed)
+
+        price = numeric_column(price_basis, positive=True)
+        volume = numeric_column(volume_basis, positive=False)
+
+        # MFI itself classifies raw money flow using H/L/Close typical price,
+        # not the adjusted/closing-price display series.
+        typical = (
+            numeric_column("High", positive=True)
+            + numeric_column("Low", positive=True)
+            + numeric_column("Close", positive=True)
+        ) / 3.0
+        prior_typical = typical.shift(1)
+        valid_flow = typical.notna() & prior_typical.notna() & volume.notna()
+        flow_direction = pd.Series("Unavailable", index=df.index, dtype="object")
+        flow_direction.loc[valid_flow & (volume > 0) & (typical > prior_typical)] = "Positive"
+        flow_direction.loc[valid_flow & (volume > 0) & (typical < prior_typical)] = "Negative"
+        flow_direction.loc[valid_flow & ((volume == 0) | (typical == prior_typical))] = "None"
+
+        # Match VWMA's trailing-120 percentile convention; calculate only
+        # once for all MFI periods, using complete valid volume windows.
+        volume_percentile_120 = (
+            volume.rolling(window=120, min_periods=120).rank(pct=True) * 100.0
+        )
+        output: Dict[str, Dict[str, Any]] = {}
+
+        for period in (10, 14, 30):
+            key = f"MFI_{period}"
+            if key not in df.columns:
+                continue
+
+            raw = pd.to_numeric(
+                df[key], errors="coerce"
+            ).astype("float64")
+            mfi = raw.where(np.isfinite(raw) & raw.between(0, 100))
+            prior = mfi.shift(1)
+
+            average_volume = volume.rolling(
+                window=period, min_periods=period
+            ).mean().replace(0.0, np.nan)
+            volume_ratio = (volume / average_volume).replace(
+                [np.inf, -np.inf], np.nan
+            )
+
+            durations = pd.Series(
+                np.nan, index=df.index, dtype="float64"
+            )
+            lower_bounds = pd.Series(
+                False, index=df.index, dtype="bool"
+            )
+            transitions = pd.Series(
+                "", index=df.index, dtype="object"
+            )
+
+            prior_zone = None
+            consecutive = 0
+            truncated_start = False
+
+            for pos, (date, number) in enumerate(mfi.items()):
+                if pd.isna(number):
+                    prior_zone, consecutive, truncated_start = (
+                        None, 0, False
+                    )
+                    continue
+
+                zone = (
+                    "Oversold" if number <= 25 else
+                    "Overbought" if number >= 75 else None
+                )
+                previous = prior.iloc[pos]
+
+                if zone is None:
+                    prior_zone, consecutive, truncated_start = (
+                        None, 0, False
+                    )
+                elif zone == prior_zone:
+                    consecutive += 1
+                    durations.at[date] = consecutive
+                    lower_bounds.at[date] = truncated_start
+                else:
+                    consecutive = 1
+                    truncated_start = pd.isna(previous)
+                    durations.at[date] = consecutive
+                    lower_bounds.at[date] = truncated_start
+                    prior_zone = zone
+
+                if pd.notna(previous):
+                    changes = []
+
+                    if previous <= 25 and number > 25:
+                        changes.append("Exited Oversold")
+                    if previous >= 75 and number < 75:
+                        changes.append("Exited Overbought")
+                    if previous > 25 and number <= 25:
+                        changes.append("Entered Oversold")
+                    if previous < 75 and number >= 75:
+                        changes.append("Entered Overbought")
+
+                    if changes:
+                        transitions.at[date] = "; ".join(changes)
+
+            output[key] = {
+                "prior_value": prior,
+                "extreme_duration": durations,
+                "extreme_duration_at_least": lower_bounds,
+                "zone_transition": transitions,
+                "price_current": price,
+                "price_prior": price.shift(1),
+                "volume_current": volume,
+                "volume_prior": volume.shift(1),
+                "volume_ratio": volume_ratio,
+                "volume_percentile_120": volume_percentile_120,
+                "typical_price_current": typical,
+                "typical_price_prior": prior_typical,
+                "flow_direction": flow_direction,
+                "price_basis": price_basis,
+            }
+
+        return output
+
+
     @staticmethod
     def _build_roc_event_context(df_ind: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
         """Full-history ROC evidence; never changes classifier scores.
@@ -3714,9 +4139,31 @@ class DatabaseIntegratedTechnicalCalculator:
         #   because BB_BW semantic context requires full chronological history.
         optionc_meta = self._get_optionc_meta()
 
+
         # ROC context is calculated once from full chronological history.
         # Consumers receive dated facts only; classification remains unchanged.
         roc_context_by_display_key = self._build_roc_event_context(df_ind)
+
+        # MFI structural events are derived once on the full chronological
+        # history; visible-window subsetting and scoring remain unchanged.
+        mfi_divergence_by_display_key: Dict[str, Dict[str, Any]] = {}
+        mfi_failure_swing_by_display_key: Dict[str, Dict[str, Any]] = {}
+        mfi_standing_by_display_key: Dict[str, Dict[str, pd.Series]] = {}
+        mfi_session_by_display_key: Dict[str, Dict[str, Any]] = {}
+
+        if any(f"MFI_{period}" in df_ind.columns for period in (10, 14, 30)):
+            mfi_divergence_by_display_key = (
+                self._build_mfi_divergence_context(df_ind)
+            )
+            mfi_failure_swing_by_display_key = (
+                self._build_mfi_failure_swing_context(df_ind)
+            )
+            mfi_standing_by_display_key = (
+                self._build_mfi_standing_context(df_ind)
+            )
+            mfi_session_by_display_key = (
+                self._build_mfi_session_context(df_ind)
+            )
 
         # BB_BW semantic context must be derived on the complete chronological
         # indicator history before any visible-date/window reduction.
@@ -5058,10 +5505,122 @@ class DatabaseIntegratedTechnicalCalculator:
                     else:
                         continue
 
+
                 # Optional typed context for richer hover / downstream UI.
                 # Existing numeric extras remain numeric; BB_BW also carries
                 # upstream semantic state/direction strings.
                 extras: Dict[str, Any] = {}
+
+                # MFI: transport full-history, date-qualified evidence only.
+                # Do not infer an absence of divergence when no price-pivot
+                # comparison was evaluated on this date.
+                if eng_name == "MFI":
+                    divergence_ctx = mfi_divergence_by_display_key.get(
+                        display_key, {}
+                    )
+
+                    swing_ctx = mfi_failure_swing_by_display_key.get(
+                        display_key, {}
+                    )
+                    standing_ctx = mfi_standing_by_display_key.get(
+                        display_key, {}
+                    )
+                    for source_name, extra_name in (
+                        ("historical_percentile", "mfi_historical_percentile"),
+                        ("historical_higher_count", "mfi_historical_higher_count"),
+                    ):
+                        source_series = standing_ctx.get(source_name)
+                        if isinstance(source_series, pd.Series):
+                            observed = source_series.get(dt)
+                            if observed is not None and pd.notna(observed):
+                                if np.isfinite(float(observed)):
+                                    extras[extra_name] = float(observed)
+
+                    session_ctx = mfi_session_by_display_key.get(
+                        display_key, {}
+                    )
+
+                    for source_name, extra_name in (
+                        ("prior_value", "mfi_prior_value"),
+                        ("extreme_duration", "mfi_extreme_duration"),
+                        ("price_current", "mfi_price_current"),
+                        ("price_prior", "mfi_price_prior"),
+                        ("volume_current", "mfi_volume_current"),
+                        ("volume_prior", "mfi_volume_prior"),
+                        ("volume_ratio", "mfi_volume_ratio"),
+                        ("volume_percentile_120", "mfi_volume_percentile_120"),
+                        ("typical_price_current", "mfi_typical_price_current"),
+                        ("typical_price_prior", "mfi_typical_price_prior"),
+                    ):
+                        series = session_ctx.get(source_name)
+                        if isinstance(series, pd.Series):
+                            observed = series.get(dt)
+                            if observed is not None and pd.notna(observed):
+                                numeric = float(observed)
+                                if np.isfinite(numeric):
+                                    extras[extra_name] = numeric
+
+                    if "mfi_extreme_duration" in extras:
+                        lower_bounds = session_ctx.get(
+                            "extreme_duration_at_least"
+                        )
+                        if isinstance(lower_bounds, pd.Series):
+                            extras["mfi_extreme_duration_at_least"] = bool(
+                                lower_bounds.get(dt, False)
+                            )
+
+                    transitions = session_ctx.get("zone_transition")
+                    if isinstance(transitions, pd.Series):
+                        transition = transitions.get(dt)
+                        if isinstance(transition, str) and transition:
+                            extras["mfi_zone_transition"] = transition
+
+                    if "mfi_price_current" in extras:
+                        extras["mfi_price_basis"] = session_ctx.get(
+                            "price_basis"
+                        )
+
+                    direction_series = session_ctx.get("flow_direction")
+                    if isinstance(direction_series, pd.Series):
+                        direction = direction_series.get(dt)
+                        if direction in ("Positive", "Negative", "None"):
+                            extras["mfi_flow_direction"] = direction
+
+                    divergence_events = divergence_ctx.get(
+                        "events", {}
+                    ).get(dt, [])
+
+                    if divergence_events:
+                        extras["mfi_divergence_events"] = [
+                            dict(record) for record in divergence_events
+                        ]
+
+                    divergence_evaluation = divergence_ctx.get(
+                        "evaluations", {}
+                    ).get(dt)
+
+                    if isinstance(divergence_evaluation, dict):
+                        extras["mfi_divergence_evaluations"] = dict(
+                            divergence_evaluation
+                        )
+
+                    swing_events = swing_ctx.get(
+                        "events", {}
+                    ).get(dt, [])
+
+                    if swing_events:
+                        extras["mfi_failure_swing_events"] = [
+                            dict(record) for record in swing_events
+                        ]
+
+                    swing_evaluation = swing_ctx.get(
+                        "evaluations", {}
+                    ).get(dt)
+
+                    if isinstance(swing_evaluation, dict):
+                        extras["mfi_failure_swing_evaluation"] = dict(
+                            swing_evaluation
+                        )
 
                 if eng_name == "ROC":
                     roc_context = roc_context_by_display_key.get(display_key)
@@ -5914,9 +6473,9 @@ class DatabaseIntegratedTechnicalCalculator:
                     extras_parts = []
 
                     for k, v in extras.items():
-                        # CMF history is internal interpretation evidence, not
-                        # an extra line in SCD's already-long raw hover summary.
-                        if k.startswith(("cmf_", "adx_visual_")):
+                        # Keep typed internal evidence out of the legacy raw
+                        # hover until its approved interpretation is assembled.
+                        if k.startswith(("cmf_", "adx_visual_", "mfi_")):
                             continue
                         if isinstance(v, (int, float, np.number)):
                             extras_parts.append(
